@@ -1,0 +1,13 @@
+# .NET reader build output and extraction results
+bin/
+obj/
+out/
+run*.log
+tools/rmx/files.txt
+*.dll
+
+# never commit extracted game assets
+*.uasset
+*.uexp
+*.ubulk
+*.usmap
