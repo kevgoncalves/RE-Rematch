@@ -14,3 +14,4 @@ tools/rmx/files.txt
 
 # Rust build output
 target/
+game/keybinds.ron

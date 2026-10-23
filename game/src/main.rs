@@ -1,13 +1,16 @@
 //! RE Rematch prototype: one player, the ball and a 73 x 49 arena, tuned with Rematch's own values.
 
 mod ball;
+mod input;
+mod menu;
 mod player;
 mod tuning;
 
 use bevy::prelude::*;
 
 use ball::{Ball, GoalScored};
-use player::{CameraRig, Player};
+use input::{Action, Actions, Axes, Bindings, InputBlocked, chord_name};
+use player::{CameraRig, Kick, Player};
 use tuning::*;
 
 #[derive(Resource, Default)]
@@ -24,11 +27,22 @@ fn main() {
         }))
         .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)))
         .init_resource::<Score>()
+        .insert_resource(Bindings::load())
+        .init_resource::<Actions>()
+        .init_resource::<Axes>()
+        .init_resource::<InputBlocked>()
+        .init_resource::<menu::Menu>()
         .add_event::<GoalScored>()
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, menu::spawn_menu))
         .add_systems(
             Update,
             (
+                menu::toggle_menu,
+                input::read_input,
+                // Capture before clicks, so the click that opens a capture isn't bound.
+                menu::capture_binding,
+                menu::menu_clicks,
+                menu::refresh_labels,
                 player::grab_cursor,
                 player::camera_look,
                 player::player_move,
@@ -166,22 +180,48 @@ fn on_goal(
     }
 }
 
-fn update_hud(mut hud: Single<&mut Text, With<Hud>>, player: Single<&Player>, ball: Single<&Ball>, score: Res<Score>) {
+fn update_hud(
+    mut hud: Single<&mut Text, With<Hud>>,
+    player: Single<&Player>,
+    ball: Single<&Ball>,
+    score: Res<Score>,
+    axes: Res<Axes>,
+    bindings: Res<Bindings>,
+) {
     let p = *player;
-    let charge = match p.charge {
-        Some((_, held)) => format!("{:>3.0}%", (held / FULL_CHARGE_TIME).min(1.0) * 100.0),
-        None => "  -".into(),
+    let charge = match p.kick {
+        Some(k) if !k.released => {
+            let force = match k.kind {
+                Kick::Shot => curve(&SHOT_FORCE, k.held.max(SHOT_BUILDUP)),
+                Kick::Pass => curve(&PASS_FORCE, k.held.max(PASS_BUILDUP)),
+                Kick::Lob => curve(&LOB_FORCE, k.held.max(LOB_BUILDUP)),
+                _ => 0.0,
+            };
+            let curve_info = if k.kind == Kick::Shot { format!("  curve ({:+.2}, {:+.2})", axes.curve.x, axes.curve.y) } else { String::new() };
+            format!("{:?} {:.2}s -> {:.1} m/s{}", k.kind, k.held, force, curve_info)
+        }
+        _ => "-".into(),
     };
+    let key = |a: Action| chord_name(bindings.keyboard.get(&a));
     hud.0 = format!(
-        "Score  {} - {}\nStamina {:4.1}/10{}\nSpeed {:4.1} m/s{}\nCharge {}  Ball {:4.1} m/s\n\n\
-         Click to capture mouse, Esc to release\nWASD move, Shift sprint\nLMB hold = shot, RMB hold = pass\nCamera pitch sets shot height, A/D at release = curve",
+        "Score  {} - {}\nStamina {:4.1}/10{}   Extra effort {:3.0}%{}\nSpeed {:4.1} m/s{}\nCharge {}\nBall {:4.1} m/s\n\n\
+         F1 controls (rebind)   Click to capture mouse, Esc to release\n\
+         Shot {}  Pass {}  Lob {}  Push ball {}  Sprint {}\n\
+         Shot direction locks when you start charging; move the mouse while charging to curve it.",
         score.0[0],
         score.0[1],
         p.stamina,
-        if p.exhausted { "  EXHAUSTED" } else { "" },
+        if p.exhausted { " EXHAUSTED" } else { "" },
+        p.extra_effort * 100.0,
+        if p.extra_active { " ACTIVE" } else { "" },
         p.vel.length(),
         if p.sprinting { "  sprint" } else { "" },
         charge,
         ball.vel.length(),
+        key(Action::Shoot),
+        key(Action::Pass),
+        key(Action::Lob),
+        key(Action::PushBall),
+        key(Action::Sprint),
     );
 }

@@ -1,0 +1,343 @@
+//! Rebindable actions. Defaults are Rematch's own (QWERTY keyboard and gamepad presets,
+//! read from Data/Inputs/Mappings in the game files). Bindings are chords: every input held.
+
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+use bevy::input::mouse::AccumulatedMouseMotion;
+use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
+
+use crate::tuning::{MAGNUS_ACCUMULATOR_SENSITIVITY, MOUSE_AXIS_SCALE, MOUSE_SENSITIVITY};
+
+const SAVE_PATH: &str = "keybinds.ron";
+const DOUBLE_TAP_WINDOW: f32 = 0.3; // TUNE: Rematch's "quick press and hold" window is not in the files
+const STICK_LOOK_SPEED: Vec2 = Vec2::new(160.0, 80.0); // degrees/s, aim camera speed (match-camera-network.md)
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum Input {
+    Key(KeyCode),
+    Mouse(MouseButton),
+    Pad(GamepadButton),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Debug)]
+pub enum Action {
+    MoveForward,
+    MoveBack,
+    MoveLeft,
+    MoveRight,
+    Sprint,
+    ExtraEffort,
+    Shoot,
+    FakeShot,
+    Pass,
+    LowPowerPass,
+    Lob,
+    LowPowerLob,
+    PushBall,
+    LobbedPushBall,
+    LookAtBall,
+    StandingTackle,
+    SlidingTackle,
+    Lock,
+    Dash,
+    Dive,
+    Ping,
+}
+
+impl Action {
+    pub const ALL: [Action; 21] = [
+        Action::MoveForward,
+        Action::MoveBack,
+        Action::MoveLeft,
+        Action::MoveRight,
+        Action::Sprint,
+        Action::ExtraEffort,
+        Action::Shoot,
+        Action::FakeShot,
+        Action::Pass,
+        Action::LowPowerPass,
+        Action::Lob,
+        Action::LowPowerLob,
+        Action::PushBall,
+        Action::LobbedPushBall,
+        Action::LookAtBall,
+        Action::StandingTackle,
+        Action::SlidingTackle,
+        Action::Lock,
+        Action::Dash,
+        Action::Dive,
+        Action::Ping,
+    ];
+
+    /// Bound and saved already, but the gameplay behind it isn't in the prototype yet.
+    pub fn implemented(self) -> bool {
+        !matches!(self, Action::StandingTackle | Action::SlidingTackle | Action::Lock | Action::Dash | Action::Dive | Action::Ping | Action::LobbedPushBall)
+    }
+
+    /// Only fires when tapped twice quickly and held (Rematch's QuickPressAndHold).
+    fn double_tap(self) -> bool {
+        self == Action::ExtraEffort
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Device {
+    Keyboard,
+    Gamepad,
+}
+
+#[derive(Resource, Serialize, Deserialize, Clone, PartialEq)]
+pub struct Bindings {
+    pub keyboard: BTreeMap<Action, Vec<Input>>,
+    pub gamepad: BTreeMap<Action, Vec<Input>>,
+}
+
+impl Default for Bindings {
+    fn default() -> Self {
+        use Action::*;
+        use GamepadButton as P;
+        use Input::{Key as K, Mouse as M, Pad};
+        let keyboard = [
+            (MoveForward, vec![K(KeyCode::KeyW)]),
+            (MoveBack, vec![K(KeyCode::KeyS)]),
+            (MoveLeft, vec![K(KeyCode::KeyA)]),
+            (MoveRight, vec![K(KeyCode::KeyD)]),
+            (Sprint, vec![K(KeyCode::ShiftLeft)]),
+            (ExtraEffort, vec![K(KeyCode::ShiftLeft)]),
+            (Shoot, vec![M(MouseButton::Left)]),
+            (FakeShot, vec![M(MouseButton::Right)]),
+            (Pass, vec![M(MouseButton::Right)]),
+            (LowPowerPass, vec![M(MouseButton::Right), K(KeyCode::Space)]),
+            (Lob, vec![K(KeyCode::KeyF)]),
+            (LowPowerLob, vec![K(KeyCode::KeyX)]),
+            (PushBall, vec![K(KeyCode::Space)]),
+            (LobbedPushBall, vec![K(KeyCode::KeyC)]),
+            (LookAtBall, vec![K(KeyCode::KeyR)]),
+            (StandingTackle, vec![K(KeyCode::KeyE)]),
+            (SlidingTackle, vec![K(KeyCode::ShiftLeft), K(KeyCode::KeyE)]),
+            (Lock, vec![K(KeyCode::ControlLeft)]),
+            (Dash, vec![K(KeyCode::ControlLeft), K(KeyCode::KeyC)]),
+            (Dive, vec![K(KeyCode::KeyQ)]),
+            (Ping, vec![M(MouseButton::Middle)]),
+        ];
+        // Movement and camera stay on the sticks; the rest follows Rematch's gamepad preset.
+        let gamepad = [
+            (Sprint, vec![Pad(P::LeftTrigger)]),
+            (ExtraEffort, vec![Pad(P::LeftTrigger)]),
+            (Shoot, vec![Pad(P::RightTrigger2)]),
+            (FakeShot, vec![Pad(P::East)]),
+            (Pass, vec![Pad(P::West)]),
+            (LowPowerPass, vec![Pad(P::West), Pad(P::South)]),
+            (Lob, vec![Pad(P::RightTrigger), Pad(P::West)]),
+            (LowPowerLob, vec![Pad(P::West), Pad(P::South), Pad(P::RightTrigger)]),
+            (PushBall, vec![Pad(P::South)]),
+            (LobbedPushBall, vec![Pad(P::RightTrigger), Pad(P::South)]),
+            (StandingTackle, vec![Pad(P::East)]),
+            (SlidingTackle, vec![Pad(P::LeftTrigger), Pad(P::East)]),
+            (Lock, vec![Pad(P::LeftTrigger2)]),
+            (Dash, vec![Pad(P::LeftTrigger2), Pad(P::South)]),
+            (Dive, vec![Pad(P::North)]),
+            (Ping, vec![Pad(P::RightThumb)]),
+        ];
+        Self { keyboard: keyboard.into_iter().collect(), gamepad: gamepad.into_iter().collect() }
+    }
+}
+
+impl Bindings {
+    pub fn load() -> Self {
+        std::fs::read_to_string(SAVE_PATH).ok().and_then(|s| ron::from_str(&s).ok()).unwrap_or_default()
+    }
+
+    pub fn save(&self) {
+        if let Ok(s) = ron::ser::to_string_pretty(self, default()) {
+            let _ = std::fs::write(SAVE_PATH, s);
+        }
+    }
+
+    pub fn get_mut(&mut self, device: Device) -> &mut BTreeMap<Action, Vec<Input>> {
+        match device {
+            Device::Keyboard => &mut self.keyboard,
+            Device::Gamepad => &mut self.gamepad,
+        }
+    }
+}
+
+/// This frame's action state, after chord resolution.
+#[derive(Resource, Default)]
+pub struct Actions {
+    now: HashSet<Action>,
+    prev: HashSet<Action>,
+    /// A shorter chord loses to a longer one that contains it (RMB vs RMB + Space).
+    raw_prev: HashSet<Action>,
+    released_at: HashMap<Action, f32>,
+    doubled: HashSet<Action>,
+}
+
+impl Actions {
+    pub fn pressed(&self, a: Action) -> bool {
+        self.now.contains(&a)
+    }
+    pub fn just_pressed(&self, a: Action) -> bool {
+        self.now.contains(&a) && !self.prev.contains(&a)
+    }
+}
+
+/// Analog inputs for this frame.
+#[derive(Resource, Default)]
+pub struct Axes {
+    pub movement: Vec2,
+    /// Camera change in degrees: x = yaw (right +), y = pitch (up +). Mouse and sticks are kept
+    /// apart because the mouse drives the curve instead of the camera while a shot charges.
+    pub look_mouse: Vec2,
+    pub look_pad: Vec2,
+    /// Curve input for shots, -1..1 on each axis (mouse accumulator or left stick).
+    pub curve: Vec2,
+    curve_mouse: Vec2,
+}
+
+impl Axes {
+    pub fn reset_curve(&mut self) {
+        self.curve_mouse = Vec2::ZERO;
+    }
+}
+
+/// Set while the controls menu is open or a binding is being captured: gameplay ignores input.
+#[derive(Resource, Default)]
+pub struct InputBlocked(pub bool);
+
+fn held(input: &Input, keys: &ButtonInput<KeyCode>, mouse: &ButtonInput<MouseButton>, pads: &Query<&Gamepad>) -> bool {
+    match input {
+        Input::Key(k) => keys.pressed(*k),
+        Input::Mouse(m) => mouse.pressed(*m),
+        Input::Pad(b) => pads.iter().any(|g| g.pressed(*b)),
+    }
+}
+
+pub fn read_input(
+    bindings: Res<Bindings>,
+    blocked: Res<InputBlocked>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    pads: Query<&Gamepad>,
+    motion: Res<AccumulatedMouseMotion>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    time: Res<Time>,
+    mut actions: ResMut<Actions>,
+    mut axes: ResMut<Axes>,
+) {
+    let t = time.elapsed_secs();
+    let mut raw: Vec<(Action, &Vec<Input>)> = Vec::new();
+    if !blocked.0 {
+        for chords in [&bindings.keyboard, &bindings.gamepad] {
+            for (action, chord) in chords {
+                if !chord.is_empty() && chord.iter().all(|i| held(i, &keys, &mouse, &pads)) {
+                    raw.push((*action, chord));
+                }
+            }
+        }
+    }
+    let mut now: HashSet<Action> = raw
+        .iter()
+        .filter(|(_, chord)| !raw.iter().any(|(_, other)| other.len() > chord.len() && chord.iter().all(|i| other.contains(i))))
+        .map(|(a, _)| *a)
+        .collect();
+
+    // Double-tap-and-hold actions.
+    let raw_now: HashSet<Action> = raw.iter().map(|(a, _)| *a).collect();
+    for a in Action::ALL.into_iter().filter(|a| a.double_tap()) {
+        let started = raw_now.contains(&a) && !actions.raw_prev.contains(&a);
+        if started && actions.released_at.get(&a).is_some_and(|r| t - r < DOUBLE_TAP_WINDOW) {
+            actions.doubled.insert(a);
+        }
+        if !raw_now.contains(&a) {
+            if actions.raw_prev.contains(&a) {
+                actions.released_at.insert(a, t);
+            }
+            actions.doubled.remove(&a);
+        }
+        if !actions.doubled.contains(&a) {
+            now.remove(&a);
+        }
+    }
+    actions.raw_prev = raw_now;
+    actions.prev = std::mem::replace(&mut actions.now, now);
+
+    // Analog: keyboard directions plus the left stick; mouse plus the right stick for the camera.
+    let key_axis = |pos: Action, neg: Action| actions.pressed(pos) as i32 as f32 - actions.pressed(neg) as i32 as f32;
+    let mut movement = Vec2::new(key_axis(Action::MoveRight, Action::MoveLeft), key_axis(Action::MoveForward, Action::MoveBack));
+    let (mut look_pad, mut look_mouse, mut stick_curve) = (Vec2::ZERO, Vec2::ZERO, Vec2::ZERO);
+    if !blocked.0 {
+        for pad in &pads {
+            movement += pad.left_stick();
+            stick_curve += pad.left_stick();
+            look_pad += pad.right_stick() * STICK_LOOK_SPEED * time.delta_secs();
+        }
+        if window.cursor_options.grab_mode != bevy::window::CursorGrabMode::None {
+            let delta = Vec2::new(motion.delta.x, -motion.delta.y);
+            look_mouse = delta * MOUSE_SENSITIVITY;
+            axes.curve_mouse += delta * MOUSE_AXIS_SCALE * MAGNUS_ACCUMULATOR_SENSITIVITY;
+            axes.curve_mouse = axes.curve_mouse.clamp(Vec2::NEG_ONE, Vec2::ONE);
+        }
+    }
+    axes.movement = movement.clamp_length_max(1.0);
+    axes.look_mouse = look_mouse;
+    axes.look_pad = look_pad;
+    axes.curve = (axes.curve_mouse + stick_curve).clamp(Vec2::NEG_ONE, Vec2::ONE);
+}
+
+pub fn input_name(input: &Input) -> String {
+    match input {
+        Input::Key(k) => {
+            let s = format!("{k:?}");
+            match s.as_str() {
+                "ShiftLeft" => "LShift".into(),
+                "ShiftRight" => "RShift".into(),
+                "ControlLeft" => "LCtrl".into(),
+                "ControlRight" => "RCtrl".into(),
+                "AltLeft" => "LAlt".into(),
+                _ => s.trim_start_matches("Key").trim_start_matches("Digit").to_string(),
+            }
+        }
+        Input::Mouse(m) => match m {
+            MouseButton::Left => "LMB".into(),
+            MouseButton::Right => "RMB".into(),
+            MouseButton::Middle => "MMB".into(),
+            MouseButton::Back => "Mouse4".into(),
+            MouseButton::Forward => "Mouse5".into(),
+            MouseButton::Other(n) => format!("Mouse{n}"),
+        },
+        Input::Pad(b) => match b {
+            GamepadButton::South => "A".into(),
+            GamepadButton::East => "B".into(),
+            GamepadButton::West => "X".into(),
+            GamepadButton::North => "Y".into(),
+            GamepadButton::LeftTrigger => "LB".into(),
+            GamepadButton::RightTrigger => "RB".into(),
+            GamepadButton::LeftTrigger2 => "LT".into(),
+            GamepadButton::RightTrigger2 => "RT".into(),
+            GamepadButton::LeftThumb => "L3".into(),
+            GamepadButton::RightThumb => "R3".into(),
+            other => format!("{other:?}"),
+        },
+    }
+}
+
+pub fn chord_name(chord: Option<&Vec<Input>>) -> String {
+    match chord {
+        Some(c) if !c.is_empty() => c.iter().map(input_name).collect::<Vec<_>>().join(" + "),
+        _ => "-".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bindings_survive_save_format() {
+        let b = Bindings::default();
+        let text = ron::ser::to_string_pretty(&b, default()).unwrap();
+        assert!(ron::from_str::<Bindings>(&text).unwrap() == b);
+    }
+}

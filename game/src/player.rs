@@ -1,10 +1,10 @@
-//! The local player: movement, stamina, ball control, kicking and the third-person camera.
+//! The local player: movement, stamina, extra effort, ball control, kicks and the camera.
 
-use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 
 use crate::ball::Ball;
+use crate::input::{Action, Actions, Axes, InputBlocked};
 use crate::tuning::*;
 
 #[derive(Component)]
@@ -15,9 +15,21 @@ pub struct Player {
     pub exhausted: bool,
     pub regen_wait: f32,
     pub sprinting: bool,
+    pub extra_effort: f32, // gauge 0..1
+    pub extra_active: bool,
     pub has_ball: bool,
-    pub charge: Option<(Kick, f32)>, // held time
-    pub windup: Option<(Kick, f32, f32)>, // charge, seconds left
+    pub kick: Option<KickState>,
+}
+
+/// A kick from button press to ball contact. The build-up runs while the button is held.
+#[derive(Clone, Copy)]
+pub struct KickState {
+    pub kind: Kick,
+    pub elapsed: f32, // since the press
+    pub held: f32,    // how long the button stayed down
+    pub released: bool,
+    /// Shot aim (yaw, pitch in degrees), locked at the press so the mouse can curve the ball.
+    pub aim: Vec2,
 }
 
 impl Default for Player {
@@ -29,17 +41,51 @@ impl Default for Player {
             exhausted: false,
             regen_wait: 0.0,
             sprinting: false,
+            extra_effort: MAX_EXTRA_EFFORT,
+            extra_active: false,
             has_ball: false,
-            charge: None,
-            windup: None,
+            kick: None,
         }
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Kick {
     Shot,
     Pass,
+    ShortPass,
+    Lob,
+    ShortLob,
+    PushBall,
+}
+
+impl Kick {
+    /// The held action for kicks you charge; instant kicks have none.
+    fn charge_action(self) -> Option<Action> {
+        match self {
+            Kick::Shot => Some(Action::Shoot),
+            Kick::Pass => Some(Action::Pass),
+            Kick::Lob => Some(Action::Lob),
+            _ => None,
+        }
+    }
+
+    fn buildup(self) -> f32 {
+        match self {
+            Kick::Shot => SHOT_BUILDUP,
+            Kick::Pass => PASS_BUILDUP,
+            Kick::Lob => LOB_BUILDUP,
+            Kick::ShortPass | Kick::ShortLob => SHORT_WINDUP,
+            Kick::PushBall => PUSH_BALL_WINDUP,
+        }
+    }
+}
+
+impl Player {
+    /// Charging a shot: the mouse curves the ball instead of turning the camera.
+    pub fn charging_shot(&self) -> bool {
+        self.kick.is_some_and(|k| k.kind == Kick::Shot && !k.released)
+    }
 }
 
 /// Camera orbit angles, in degrees. Pitch + is up.
@@ -53,35 +99,57 @@ fn forward(yaw_rad: f32) -> Vec3 {
     Vec3::new(-yaw_rad.sin(), 0.0, -yaw_rad.cos())
 }
 
-pub fn grab_cursor(mut window: Single<&mut Window, With<PrimaryWindow>>, keys: Res<ButtonInput<KeyCode>>, mouse: Res<ButtonInput<MouseButton>>) {
+fn camera_relative(movement: Vec2, cam_yaw_deg: f32) -> Vec3 {
+    let yaw = cam_yaw_deg.to_radians();
+    forward(yaw) * movement.y + forward(yaw - std::f32::consts::FRAC_PI_2) * movement.x
+}
+
+pub fn grab_cursor(
+    mut window: Single<&mut Window, With<PrimaryWindow>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    blocked: Res<InputBlocked>,
+) {
     if keys.just_pressed(KeyCode::Escape) {
         window.cursor_options.grab_mode = CursorGrabMode::None;
         window.cursor_options.visible = true;
-    } else if mouse.just_pressed(MouseButton::Left) {
+    } else if mouse.just_pressed(MouseButton::Left) && !blocked.0 {
         window.cursor_options.grab_mode = CursorGrabMode::Locked;
         window.cursor_options.visible = false;
     }
 }
 
-pub fn camera_look(mut rig: Single<&mut CameraRig>, motion: Res<AccumulatedMouseMotion>, window: Single<&Window, With<PrimaryWindow>>) {
-    if window.cursor_options.grab_mode == CursorGrabMode::None {
-        return;
+pub fn camera_look(
+    mut rig: Single<&mut CameraRig>,
+    axes: Res<Axes>,
+    actions: Res<Actions>,
+    player: Single<(&Transform, &Player)>,
+    ball: Single<&Transform, With<Ball>>,
+) {
+    let (ptf, p) = *player;
+    if actions.just_pressed(Action::LookAtBall) {
+        let to_ball = ball.translation - ptf.translation;
+        rig.yaw = (-to_ball.x).atan2(-to_ball.z).to_degrees();
     }
-    rig.yaw -= motion.delta.x * MOUSE_SENSITIVITY;
-    rig.pitch = (rig.pitch - motion.delta.y * MOUSE_SENSITIVITY).clamp(-PITCH_DOWN_LIMIT, PITCH_UP_LIMIT);
+    let look = if p.charging_shot() { axes.look_pad } else { axes.look_pad + axes.look_mouse };
+    rig.yaw -= look.x;
+    rig.pitch = (rig.pitch + look.y).clamp(-PITCH_DOWN_LIMIT, PITCH_UP_LIMIT);
 }
 
-pub fn player_move(mut player: Single<(&mut Transform, &mut Player)>, rig: Single<&CameraRig>, keys: Res<ButtonInput<KeyCode>>, time: Res<Time>) {
+pub fn player_move(
+    mut player: Single<(&mut Transform, &mut Player)>,
+    rig: Single<&CameraRig>,
+    actions: Res<Actions>,
+    axes: Res<Axes>,
+    time: Res<Time>,
+) {
     let dt = time.delta_secs().min(0.05);
     let (tf, p) = &mut *player;
-
-    let axis = |pos: KeyCode, neg: KeyCode| keys.pressed(pos) as i32 as f32 - keys.pressed(neg) as i32 as f32;
-    let input = Vec2::new(axis(KeyCode::KeyD, KeyCode::KeyA), axis(KeyCode::KeyW, KeyCode::KeyS)).clamp_length_max(1.0);
-    let cam_yaw = rig.yaw.to_radians();
-    let wish = forward(cam_yaw) * input.y + forward(cam_yaw - std::f32::consts::FRAC_PI_2) * input.x;
+    let input = axes.movement;
+    let wish = camera_relative(input, rig.yaw);
 
     // Stamina (mechanics.md §1)
-    let want_sprint = keys.pressed(KeyCode::ShiftLeft) && input != Vec2::ZERO;
+    let want_sprint = actions.pressed(Action::Sprint) && input != Vec2::ZERO;
     if want_sprint && !p.sprinting && !p.exhausted {
         p.stamina -= SPRINT_START_COST;
     }
@@ -104,8 +172,22 @@ pub fn player_move(mut player: Single<(&mut Transform, &mut Player)>, rig: Singl
         p.exhausted = false;
     }
 
+    // Extra effort: its own gauge, instant acceleration (mechanics.md §10)
+    if actions.just_pressed(Action::ExtraEffort) && p.extra_effort > 0.05 {
+        p.extra_active = true;
+    }
+    if p.extra_active {
+        p.extra_effort -= EXTRA_EFFORT_DRAIN * dt;
+        if !actions.pressed(Action::ExtraEffort) || p.extra_effort <= 0.0 {
+            p.extra_active = false;
+        }
+    } else {
+        p.extra_effort = (p.extra_effort + EXTRA_EFFORT_REGEN * dt).min(MAX_EXTRA_EFFORT);
+    }
+    p.extra_effort = p.extra_effort.max(0.0);
+
     // Speed target and turning (mechanics.md §2)
-    let (mut top, accel, turn) = match (p.sprinting, p.has_ball) {
+    let (mut top, mut accel, turn) = match (p.sprinting, p.has_ball) {
         (true, false) => (if p.exhausted { EXHAUSTED_SPRINT } else { SPRINT_SPEED }, SPRINT_ACCEL, TURN_RATE_SPRINT),
         (true, true) => (if p.exhausted { EXHAUSTED_BALL_SPRINT } else { BALL_SPRINT_SPEED }, BALL_SPRINT_ACCEL, TURN_RATE_BALL_SPRINT),
         (false, false) => (RUN_SPEED, RUN_ACCEL, TURN_RATE_RUN),
@@ -113,7 +195,14 @@ pub fn player_move(mut player: Single<(&mut Transform, &mut Player)>, rig: Singl
     };
     let stamina_ratio = curve(&SPEED_BY_STAMINA, p.stamina);
     top *= if p.has_ball { stamina_ratio.min(1.0) } else { stamina_ratio };
-    if p.windup.is_some() {
+    let turn = if p.extra_active {
+        top = EXTRA_EFFORT_SPEED;
+        accel = EXTRA_EFFORT_ACCEL;
+        TURN_RATE_EXTRA_EFFORT
+    } else {
+        turn
+    };
+    if p.kick.is_some() {
         top *= WINDUP_SPEED_SCALE;
     }
 
@@ -136,10 +225,7 @@ pub fn player_move(mut player: Single<(&mut Transform, &mut Player)>, rig: Singl
     tf.rotation = Quat::from_rotation_y(p.facing);
 }
 
-pub fn ball_control(
-    mut player: Single<(&Transform, &mut Player), Without<Ball>>,
-    mut ball: Single<(&mut Transform, &mut Ball)>,
-) {
+pub fn ball_control(mut player: Single<(&Transform, &mut Player), Without<Ball>>, mut ball: Single<(&mut Transform, &mut Ball)>) {
     let (ptf, p) = &mut *player;
     let (btf, b) = &mut *ball;
     if p.has_ball {
@@ -163,62 +249,92 @@ pub fn kicking(
     mut player: Single<&mut Player>,
     mut ball: Single<&mut Ball>,
     rig: Single<&CameraRig>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    keys: Res<ButtonInput<KeyCode>>,
+    actions: Res<Actions>,
+    mut axes: ResMut<Axes>,
     time: Res<Time>,
 ) {
     let dt = time.delta_secs();
     let p = &mut **player;
 
-    if p.has_ball && p.windup.is_none() {
-        for (button, kick) in [(MouseButton::Left, Kick::Shot), (MouseButton::Right, Kick::Pass)] {
-            if mouse.just_pressed(button) && p.charge.is_none() {
-                p.charge = Some((kick, 0.0));
-            }
-            if let Some((k, held)) = p.charge
-                && k == kick
-            {
-                if mouse.pressed(button) {
-                    p.charge = Some((k, held + dt));
-                } else {
-                    let charge = (held / FULL_CHARGE_TIME).min(1.0);
-                    let windup = match kick {
-                        Kick::Pass => PASS_WINDUP,
-                        Kick::Shot if curve(&SHOT_FORCE, charge) > POWER_SHOT_SPEED => POWER_SHOT_WINDUP,
-                        Kick::Shot => LOW_SHOT_WINDUP,
-                    };
-                    p.windup = Some((kick, charge, windup));
-                    p.charge = None;
-                }
-            }
+    // A pass press while charging a shot is a fake shot (Rematch binds both to the same button).
+    if p.charging_shot() && actions.just_pressed(Action::FakeShot) {
+        p.kick = None;
+        p.stamina = (p.stamina - FAKE_SHOT_COST).max(0.0);
+        p.regen_wait = REGEN_DELAY;
+        return;
+    }
+
+    if p.has_ball && p.kick.is_none() {
+        let charged = [(Action::Shoot, Kick::Shot), (Action::Pass, Kick::Pass), (Action::Lob, Kick::Lob)];
+        let instant = [(Action::LowPowerPass, Kick::ShortPass), (Action::LowPowerLob, Kick::ShortLob), (Action::PushBall, Kick::PushBall)];
+        let pressed = instant.into_iter().chain(charged).find(|(a, _)| actions.just_pressed(*a));
+        if let Some((_, kind)) = pressed {
+            axes.reset_curve();
+            let released = kind.charge_action().is_none();
+            p.kick = Some(KickState { kind, elapsed: 0.0, held: 0.0, released, aim: Vec2::new(rig.yaw, rig.pitch) });
         }
     }
 
-    let Some((kick, charge, left)) = p.windup else { return };
-    if left > dt {
-        p.windup = Some((kick, charge, left - dt));
+    let Some(k) = &mut p.kick else { return };
+    k.elapsed += dt;
+    if !k.released {
+        if k.kind.charge_action().is_some_and(|a| actions.pressed(a)) {
+            k.held = k.elapsed.min(MAX_HOLD);
+        } else {
+            k.released = true;
+        }
+    }
+    if k.kind == Kick::Shot {
+        // The gamepad's right stick keeps aiming a charging shot; the mouse curves it instead.
+        k.aim.x -= axes.look_pad.x;
+        k.aim.y = (k.aim.y + axes.look_pad.y).clamp(-PITCH_DOWN_LIMIT, PITCH_UP_LIMIT);
+    }
+    // The build-up plays while you hold: the ball leaves on release, never before the build-up ends.
+    if !k.released || k.elapsed < k.kind.buildup() {
         return;
     }
-    p.windup = None;
+    let k = p.kick.take().expect("checked above");
     if !p.has_ball {
         return;
     }
 
-    let stick_x = keys.pressed(KeyCode::KeyD) as i32 as f32 - keys.pressed(KeyCode::KeyA) as i32 as f32;
-    let yaw = (rig.yaw - stick_x * AIM_NUDGE).to_radians();
-    let (speed, elevation, friction) = match kick {
-        Kick::Shot => (curve(&SHOT_FORCE, charge), curve(&ELEVATION_BY_PITCH, rig.pitch), SHOT_FRICTION),
-        Kick::Pass => (curve(&PASS_FORCE, charge), PASS_ELEVATION, PASS_FRICTION),
+    let t = k.held.max(k.kind.buildup()).min(MAX_HOLD); // force uses at least the build-up time
+    let ratio = t / MAX_HOLD;
+    let side = axes.curve.x;
+    let (speed, elevation, friction, no_control) = match k.kind {
+        Kick::Shot => (curve(&SHOT_FORCE, t), curve(&ELEVATION_BY_PITCH, k.aim.y), SHOT_FRICTION, NO_RECONTROL_TIME),
+        Kick::Pass => (curve(&PASS_FORCE, t), PASS_ELEVATION, PASS_FRICTION, NO_RECONTROL_TIME),
+        Kick::ShortPass => (SHORT_PASS_SPEED, PASS_ELEVATION, SHORT_PASS_FRICTION, NO_RECONTROL_TIME),
+        Kick::Lob => (curve(&LOB_FORCE, t), LOB_ELEVATION, SHOT_FRICTION, NO_RECONTROL_TIME),
+        Kick::ShortLob => (SHORT_LOB_SPEED, LOB_ELEVATION, SHOT_FRICTION, NO_RECONTROL_TIME),
+        Kick::PushBall if p.extra_active => (PUSH_BALL_SPEED, 0.0, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL_EXTRA_EFFORT),
+        Kick::PushBall => (PUSH_BALL_SPEED, 0.0, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
     };
-    let dir = (forward(yaw) * elevation.to_radians().cos() + Vec3::Y * elevation.to_radians().sin()).normalize();
-    let side_spin = curve(&SIDE_SPIN, stick_x) * curve(&SIDE_SPIN_BY_CHARGE, charge);
+    let yaw = match k.kind {
+        Kick::PushBall => p.facing, // goes where you're running
+        Kick::Shot => (k.aim.x - side * AIM_NUDGE).to_radians(), // locked at the press
+        _ => rig.yaw.to_radians(),
+    };
+    let flat = forward(yaw);
+    let dir = (flat * elevation.to_radians().cos() + Vec3::Y * elevation.to_radians().sin()).normalize();
+    let right = flat.cross(Vec3::Y);
 
     p.has_ball = false;
     ball.held = false;
     ball.vel = dir * speed;
-    ball.spin = Vec3::Y * side_spin;
+    ball.spin = if k.kind == Kick::Shot {
+        // Spin around -Y curves the ball to the right of travel; `right` spin lifts it.
+        let top = curve(&TOP_SPIN, axes.curve.y) * curve(&TOP_SPIN_BY_CHARGE, ratio) + SHOT_BASE_SPIN;
+        Vec3::NEG_Y * curve(&SIDE_SPIN, side) * curve(&SIDE_SPIN_BY_CHARGE, ratio) + right * top
+    } else {
+        Vec3::ZERO // ponytail: curve only on shots for now
+    };
     ball.friction = friction;
-    ball.no_control = NO_RECONTROL_TIME;
+    ball.no_control = no_control;
+    if k.kind == Kick::PushBall {
+        p.stamina = (p.stamina - PUSH_BALL_COST).max(0.0);
+        p.regen_wait = PUSH_BALL_REGEN_DELAY;
+    }
 }
 
 pub fn camera_follow(
@@ -234,7 +350,7 @@ pub fn camera_follow(
     ctf.translation = pivot + rot * Vec3::new(CAMERA_RIGHT, 0.0, CAMERA_DISTANCE);
     ctf.rotation = rot;
     if let Projection::Perspective(persp) = &mut **proj {
-        let target = if p.sprinting { SPRINT_FOV } else { FOV }.to_radians();
+        let target = if p.sprinting || p.extra_active { SPRINT_FOV } else { FOV }.to_radians();
         persp.fov += (target - persp.fov) * (time.delta_secs() * 5.0).min(1.0);
     }
 }
