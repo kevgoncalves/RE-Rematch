@@ -11,3 +11,6 @@ tools/rmx/files.txt
 *.uexp
 *.ubulk
 *.usmap
+
+# Rust build output
+target/
