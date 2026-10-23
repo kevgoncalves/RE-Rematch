@@ -10,6 +10,7 @@ A study of the gameplay mechanics of Rematch (Sloclap, Unreal Engine 5), for a c
 | File | Contents |
 |---|---|
 | [notes/mechanics.md](notes/mechanics.md) | stamina, movement speeds, cooldowns, shooting, volleys, dribbling, tackles, dash, dives, extra effort, ball physics |
+| [notes/controls.md](notes/controls.md) | Rematch's default keyboard and gamepad bindings |
 | [notes/frame-data.md](notes/frame-data.md) | cancel windows and when you can act again after every action |
 | [notes/frame-data.csv](notes/frame-data.csv) | the same, per animation (766 rows, 60 fps frames) |
 | [notes/hitboxes.md](notes/hitboxes.md) | reception zones, tackle and dive hitboxes, pitch sizes |

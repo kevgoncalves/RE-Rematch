@@ -187,30 +187,58 @@ A push ball during extra effort is the fastest way to move with the ball: 9.5 m/
 
 ## 4. Shooting and passing
 
-### Charge to ball speed
-| Charge | Shot | Pass | Lob |
-|---|---|---|---|
-| 0–30% | 24 m/s (86 km/h) | 16.5 m/s (59 km/h) | 20 m/s (72 km/h) |
-| 50% | 28 m/s (101 km/h) | 20.5 m/s (74 km/h) | 20 m/s |
-| 80% | 34 m/s (122 km/h) | 26.4 m/s (95 km/h) | 20 m/s |
-| 90% | 36 m/s (130 km/h) | 28.4 m/s (102 km/h) | **30 m/s (108 km/h)** |
-| 100% | **38 m/s (137 km/h)** | **30.4 m/s (109 km/h)** | 30 m/s |
+### How charging works
+The force curves are by **time held**, in seconds since you pressed the button.
 
-- **Shots and passes:** charging below 30% does nothing.
-- **Lobs:** only two power levels, with the jump between 80% and 90%.
-- Above 34.8 m/s (~84% charge) the game plays the power-shot animation (unconfirmed).
+The **build-up (wind-up) runs while you hold**, not after you release:
+- the ball leaves when you release;
+- but never before the build-up has finished;
+- the force uses at least the build-up time.
+
+| Kick | Build-up (earliest ball contact) |
+|---|---|
+| Shot | **0.53 s** |
+| Pass | 0.4 s |
+| Lob | 0.4 s |
+
+So a full-power shot takes 1 s from press to ball contact, not 1 s plus the wind-up.
+
+### Time held to ball speed
+| Held | Shot | Pass | Lob |
+|---|---|---|---|
+| 0–0.3 s | 24 m/s | 20 m/s | 16 m/s |
+| 0.4 s (fastest pass/lob) | 26 m/s | 24 m/s | 17.6 m/s |
+| 0.53 s (fastest shot) | **28.7 m/s (103 km/h)** | 29.3 m/s | 19.7 m/s |
+| **0.6 s** | 30 m/s | **32 m/s (115 km/h): the pass peak** | 20.7 m/s |
+| 0.61 s | 30.2 m/s | **25.7 m/s: drops** | 20.9 m/s |
+| 0.8 s | 34 m/s | 28.1 m/s | 23.9 m/s |
+| 1.0 s and longer | **38 m/s (137 km/h)** | 30.65 m/s | **27 m/s** |
+
+What this means in practice:
+- **The pass has a sweet spot at 0.6 s.** That is the strongest pass in the game. Holding a moment longer drops it to 25.6 m/s, and even a full 1 s hold only reaches 30.65 m/s.
+- **The quickest possible shot is already 28.7 m/s.** The flat 0–0.3 s part of the curve is never reached, because the 0.53 s build-up comes first.
+- The power-shot animation plays above 34.8 m/s, which is a hold of ~0.84 s (unconfirmed).
+
+### Fixed-force kicks
+These ignore how long you hold:
+
+| Kick | Ball speed |
+|---|---|
+| Low-power pass | **24.25 m/s** |
+| Standing tackle hitting the ball | 19 m/s |
+| Tackle hitting the ball | 17 m/s |
+| Contested tackle | 15 m/s |
+| Low-power lob | 13.2 m/s |
+| Extra effort auto tap / control tap | 13 / 12 m/s |
+| Push ball, lobbed push ball | **11.5 m/s** |
+| Volley push ball | 11.25 m/s |
+| Dribble push ball | 11 m/s |
+| Goalkeeper push ball | 8.75 m/s |
 
 ### Execution timing
-Order of events:
-1. you release the button;
-2. **wind-up**;
-3. the ball leaves, with a small freeze on impact (**hitstop**);
-4. **recovery** until you can act again.
-
-| Action | Wind-up | Hitstop | Can act (standing) | Can act (moving) |
+| Action | Build-up | Hitstop | Can act (standing) | Can act (moving) |
 |---|---|---|---|---|
-| Power shot | **0.53 s** | 0.083 s | 0.67 s | 0.75 s |
-| Low-power shot | **0.33 s** | 0.05 s | 0.58 s | 0.75 s |
+| Shot | **0.53 s** | 0.083 s | 0.67 s | 0.75 s |
 | Pass | 0.4 s | 0.05 s | 0.58 s | 0.65 s |
 | Lob | 0.4 s | 0.05 s | 0.58 s | 0.65 s (backwards: 0.7 s) |
 | Short pass / short lob | **0.27 s** | 0.03 s | 0.65 s | 0.65 s |
@@ -219,7 +247,7 @@ Order of events:
 | Lobbed push ball (forward) | 0.37 s | | 0.58 s | 0.58 s |
 | Lobbed push ball (sides/back) | 0.27 s | | 0.58 s | 0.58 s |
 
-The power shot leaves 0.2 s later than the low-power one. That is the defender's reaction window.
+All times are from the press. Charged kicks wait for your release if you hold past the build-up.
 
 ### Analog trigger (controller)
 | Trigger | Shot | Volley |
@@ -233,17 +261,22 @@ The power shot leaves 0.2 s later than the low-power one. That is the defender's
   - level camera: ~17°;
   - camera up: ~20°.
 - **Direction:** the stick only nudges the aim by **±3°**. The camera/crosshair does the rest.
+- **Keyboard and mouse:**
+  - **The shot direction locks the moment you start charging.**
+  - From then on, **moving the mouse curves the ball instead of turning the camera.** Mouse movement feeds a spin accumulator with a sensitivity of 0.2, adjustable in the options ("Magnus sensitivity").
+  - There are also options to invert the X and Y curve directions.
+- **Controller:** the direction does not lock, so the right stick keeps aiming while the left stick sets the curve.
 - **Side spin (stick left/right):**
   - dead zone up to 10%;
   - rises to 825 at full deflection;
   - symmetric.
 - **Top/back spin (stick forward/back):** one direction reaches 780, the other only 120 (unconfirmed which is which).
-- **Spin scales with charge**, as a share of the stick's spin:
+- **Spin scales with how long you held**, as a share of the stick's spin:
 
-| Charge | Side spin | Top/back spin |
+| Held | Side spin | Top/back spin |
 |---|---|---|
-| 10% | 50% | 35% |
-| 100% | 90% | 50% |
+| 0.1 s | 50% | 35% |
+| 1.0 s | 90% | 50% |
 
   A weak shot curves much less than a full-power one.
 - **Built-in spin:** every shot carries a fixed spin of 210 on one axis on top of what you add (the file calls it "forced Magnus"; unconfirmed whether it is dip or rise).
