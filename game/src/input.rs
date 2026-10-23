@@ -72,7 +72,7 @@ impl Action {
 
     /// Bound and saved already, but the gameplay behind it isn't in the prototype yet.
     pub fn implemented(self) -> bool {
-        !matches!(self, Action::StandingTackle | Action::SlidingTackle | Action::Lock | Action::Dash | Action::Dive | Action::Ping | Action::LobbedPushBall)
+        !matches!(self, Action::StandingTackle | Action::SlidingTackle | Action::Dive | Action::Ping | Action::LobbedPushBall)
     }
 
     /// Only fires when tapped twice quickly and held (Rematch's QuickPressAndHold).

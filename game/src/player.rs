@@ -19,6 +19,17 @@ pub struct Player {
     pub extra_active: bool,
     pub has_ball: bool,
     pub kick: Option<KickState>,
+    pub locked: bool,
+    pub dash: Option<DashState>,
+    pub dash_cooldown: f32,
+    pub second_dash_window: f32,
+}
+
+#[derive(Clone, Copy)]
+pub struct DashState {
+    pub t: f32,
+    pub second: bool,
+    pub dir: Vec3,
 }
 
 /// A kick from button press to ball contact. The build-up runs while the button is held.
@@ -45,6 +56,10 @@ impl Default for Player {
             extra_active: false,
             has_ball: false,
             kick: None,
+            locked: false,
+            dash: None,
+            dash_cooldown: 0.0,
+            second_dash_window: 0.0,
         }
     }
 }
@@ -148,8 +163,10 @@ pub fn player_move(
     let input = axes.movement;
     let wish = camera_relative(input, rig.yaw);
 
-    // Stamina (mechanics.md §1)
-    let want_sprint = actions.pressed(Action::Sprint) && input != Vec2::ZERO;
+    p.locked = actions.pressed(Action::Lock);
+
+    // Stamina (mechanics.md §1). Lock move and dashes can't sprint.
+    let want_sprint = actions.pressed(Action::Sprint) && input != Vec2::ZERO && !p.locked && p.dash.is_none();
     if want_sprint && !p.sprinting && !p.exhausted {
         p.stamina -= SPRINT_START_COST;
     }
@@ -206,8 +223,48 @@ pub fn player_move(
         top *= WINDUP_SPEED_SCALE;
     }
 
+    // Dash (mechanics.md §8): from lock move; a second dash right after is weaker, then a cooldown.
+    p.dash_cooldown -= dt;
+    p.second_dash_window -= dt;
+    if actions.just_pressed(Action::Dash) && p.dash.is_none() {
+        let second = p.second_dash_window > 0.0;
+        if second || p.dash_cooldown <= 0.0 {
+            let dir = if wish != Vec3::ZERO { wish.normalize() } else { -forward(p.facing) };
+            p.dash = Some(DashState { t: 0.0, second, dir });
+            p.second_dash_window = 0.0;
+            p.stamina = (p.stamina - DASH_COST).max(0.0);
+            p.regen_wait = REGEN_DELAY;
+        }
+    }
+
     let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
-    if wish != Vec3::ZERO {
+    if let Some(mut d) = p.dash {
+        d.t += dt;
+        let speeds: &[(f32, f32)] = if d.second { &SECOND_DASH_SPEED } else { &DASH_SPEED };
+        p.vel = d.dir * curve(speeds, d.t / DASH_DURATION);
+        p.dash = Some(d);
+        if d.t >= DASH_DURATION {
+            if !d.second {
+                p.second_dash_window = SECOND_DASH_WINDOW;
+            }
+            p.dash_cooldown = DASH_COOLDOWN;
+            p.dash = None;
+        }
+    } else if p.locked {
+        // Lock move (mechanics.md §2): face the camera, strafe, slower going backwards.
+        let diff = (rig.yaw.to_radians() - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        let max_turn = LOCK_TURN_RATE.to_radians() * dt;
+        p.facing += diff.clamp(-max_turn, max_turn);
+        let (top, accel, by_angle): (f32, f32, &[(f32, f32)]) =
+            if p.has_ball { (LOCK_BALL_SPEED, LOCK_BALL_ACCEL, &LOCK_BALL_SPEED_BY_ANGLE) } else { (LOCK_SPEED, LOCK_ACCEL, &LOCK_SPEED_BY_ANGLE) };
+        let target = if wish == Vec3::ZERO {
+            Vec3::ZERO
+        } else {
+            let angle = forward(p.facing).angle_between(wish).to_degrees();
+            wish.normalize() * top * input.length() * curve(by_angle, angle)
+        };
+        p.vel = p.vel.move_towards(target, if target == Vec3::ZERO { STOP_DECEL } else { accel } * dt);
+    } else if wish != Vec3::ZERO {
         let target = (-wish.x).atan2(-wish.z);
         let diff = (target - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
         // Standing still you turn freely; moving, the turn rate caps how fast you change direction.
@@ -264,7 +321,8 @@ pub fn kicking(
         return;
     }
 
-    if p.has_ball && p.kick.is_none() {
+    // Lock move can't shoot, pass or push the ball, and nor can a dash (frame-data.md).
+    if p.has_ball && p.kick.is_none() && !p.locked && p.dash.is_none() {
         let charged = [(Action::Shoot, Kick::Shot), (Action::Pass, Kick::Pass), (Action::Lob, Kick::Lob)];
         let instant = [(Action::LowPowerPass, Kick::ShortPass), (Action::LowPowerLob, Kick::ShortLob), (Action::PushBall, Kick::PushBall)];
         let pressed = instant.into_iter().chain(charged).find(|(a, _)| actions.just_pressed(*a));

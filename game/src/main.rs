@@ -215,7 +215,12 @@ fn update_hud(
         p.extra_effort * 100.0,
         if p.extra_active { " ACTIVE" } else { "" },
         p.vel.length(),
-        if p.sprinting { "  sprint" } else { "" },
+        match (p.dash.is_some(), p.locked, p.sprinting) {
+            (true, ..) => "  DASH",
+            (_, true, _) => "  lock move",
+            (_, _, true) => "  sprint",
+            _ => "",
+        },
         charge,
         ball.vel.length(),
         key(Action::Shoot),

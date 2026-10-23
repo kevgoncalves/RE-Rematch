@@ -53,6 +53,21 @@ pub const TURN_RATE_RUN: f32 = 400.0; // degrees per second
 pub const TURN_RATE_BALL_RUN: f32 = 360.0;
 pub const TURN_RATE_SPRINT: f32 = 180.0;
 pub const TURN_RATE_BALL_SPRINT: f32 = 90.0;
+pub const LOCK_SPEED: f32 = 4.0;
+pub const LOCK_BALL_SPEED: f32 = 3.5;
+pub const LOCK_ACCEL: f32 = 16.0;
+pub const LOCK_BALL_ACCEL: f32 = 13.0;
+pub const LOCK_TURN_RATE: f32 = 400.0;
+/// Angle between facing and movement (degrees) to speed multiplier.
+pub const LOCK_SPEED_BY_ANGLE: [(f32, f32); 3] = [(0.0, 1.0), (90.0, 1.0), (180.0, 0.9)];
+pub const LOCK_BALL_SPEED_BY_ANGLE: [(f32, f32); 4] = [(0.0, 1.0), (90.0, 0.95), (135.0, 0.88), (180.0, 0.88)];
+// Dash (mechanics.md §8): speed (m/s) over the dash's normalised time
+pub const DASH_DURATION: f32 = 50.0 / 60.0;
+pub const DASH_SPEED: [(f32, f32); 6] = [(0.0, 6.0), (0.1, 8.5), (0.233, 8.5), (0.331, 6.5), (0.5, 4.5), (1.0, 4.5)];
+pub const SECOND_DASH_SPEED: [(f32, f32); 5] = [(0.0, 6.0), (0.1, 7.2), (0.3, 7.2), (0.7, 2.0), (1.0, 2.0)];
+pub const DASH_COOLDOWN: f32 = 0.8;
+pub const DASH_COST: f32 = 0.75;
+pub const SECOND_DASH_WINDOW: f32 = 0.3; // TUNE: how long after a dash the weaker second dash is offered
 pub const EXHAUSTED_SPRINT: f32 = 6.0;
 pub const EXHAUSTED_BALL_SPRINT: f32 = 5.0;
 
