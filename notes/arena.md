@@ -24,20 +24,26 @@ From each pitch size's shared gameplay level (`00_StadiumCommon_LA_<size>`), whi
   - a ceiling closes the top.
 
   There is no "out", only rebounds. Bounce values per surface are in [mechanics.md](mechanics.md#11-the-ball).
+
+### Which size is 5v5
+Every size's level has kick-off spots for 1 to 5 players per team, so the files don't say which size each mode uses (matchmaking picks the level). The prototype uses 94 × 64 for 5v5: it is the largest, and the field blueprint's default markings are the 94 × 64 ones.
+
+### Surfaces (94 × 64)
+Each collision box carries its own physical material, so the ball bounces differently off each one:
+
+| Surface | Material | Kept head-on / glancing |
+|---|---|---|
+| Floor | grass | 0.475 / 0.95 |
+| Side walls | glass | 0.675 / 0.675 |
+| **End walls** (beside and above the goal) | **repulsive glass** | **0.425 / 0.625** |
+| **Ceiling** (26.75 m) | **absorbent glass** | **0.3 / 0.6** |
+
+A few extra boxes behind the end walls and outside the side walls only block the camera.
+
 ## Corners
-Above knee height, the walls meet at a **sharp 90° corner**. A thin vertical edge piece runs from 0.92 m up to the ceiling.
+On the 94 × 64 level the walls meet at a plain 90° corner: the collision has no corner pieces. Players confirm the low corner pieces belong to the 1v1 pitch. (An earlier reading listed 0.92 m pieces, 5.83 m along each wall, on every size; the 73 × 49 and 84 × 57 levels haven't been rechecked.)
 
-At the base of every corner there is a **corner piece 0.92 m tall**, covering:
-
-| Pitch | Corner piece footprint |
-|---|---|
-| 73 × 49 | 5.83 × 5.83 m |
-| 84 × 57 | 5.83 × 5.83 m |
-| 94 × 64 | 5.83 × 5.83 m |
-
-- The piece starts 5.83 m from the corner along each wall. It is the same size on every pitch.
-- These are collision-only meshes with their exact profile stored in compiled physics data, so the shape is not readable here. Unconfirmed whether it is a 45° ramp/chamfer or a curved quarter-pipe that pops the ball out of the corner.
-- The floor trims along the bottom of every wall are visual only (13 cm).
+The floor trims along the bottom of every wall are visual only (13 cm).
 
 ## The goal
 The same goal is used on every pitch size.
@@ -53,9 +59,10 @@ The same goal is used on every pitch size.
 
 For scale, a real football goal is 7.32 × 2.44 m. Rematch's goal is **12% wider and 14% taller**.
 
-The net is made of thin collision panels: back, two sides, and a slanted roof.
+The net is made of thin collision panels: back, two sides, and a roof.
 - The side nets are 2.8 m tall.
-- The roof slopes from crossbar height down to 1.1 m at the back.
+- The roof is flat at 2.8 m for about the first 2.2 m behind the line, then slopes about 45° down to the back net, which is roughly 1.2–1.6 m tall.
+- Support bars (12.5 cm thick) run along the bottom and top edges of the net.
 
 So a ball can hit the inside of the net and drop.
 
@@ -77,3 +84,10 @@ So a ball can hit the inside of the net and drop.
   - two half-spaces per end;
   - a 35 × 21 m zone in front of each goal.
 - **Inside each goal:** an "ability blocker" area that blocks some abilities (unconfirmed which).
+
+## Markings
+The lines are one texture per pitch size laid over the turf (512 × 512 for the whole pitch). The reader can't decode these textures yet, so the line layout isn't measured. The prototype draws:
+- the halfway line;
+- a centre circle (radius guessed at 9.15 m) and spot;
+- the goal lines;
+- the goalkeeper areas, at the gameplay area's size.
