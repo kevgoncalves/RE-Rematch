@@ -37,4 +37,31 @@ The game's own default bindings, from its input presets: the QWERTY keyboard pre
 - **A longer combination wins.** Holding right mouse + Space gives the low-power pass, not a pass plus a push ball.
 - **Shot aim on keyboard and mouse** locks when you start charging; the mouse then curves the ball. Details in [mechanics.md](mechanics.md#direction-height-and-curve).
 - **Input buffer:** passes, push balls and tackles fire if pressed up to **0.1 s** before they are allowed. Details in [frame-data.md](frame-data.md#input-buffer).
-- **Practice mode** reuses some keys: Tab spawns the cannon ball, middle mouse fires it, and 1 / 2 / 3 change its yaw, force and pitch.
+- **Practice mode** reuses some keys: Tab spawns the cannon ball, middle mouse (R3 on gamepad) fires it at you like a ball call, and 1 / 2 / 3 change its yaw, force and pitch.
+
+## Modifier preset (mice with thumb buttons)
+One key becomes a **modifier**: hold it to turn another button into a second action, so modifier + pass is a lob. Only the keyboard layout changes; the gamepad keeps its defaults. "Back" and "Forward" are the mouse thumb buttons.
+
+| Action | Binding |
+|---|---|
+| Modifier | C |
+| Lob | modifier + right mouse |
+| Lobbed push ball | modifier + Back |
+| Push ball / dribble | Back |
+| Low-power pass | right mouse + Back |
+| Low-power lob | right mouse + Back + modifier |
+| Standing and sliding tackle | Forward |
+| Dash | Left Ctrl + Back |
+| Dive (outfield) | Space |
+| Look at ball | F |
+
+## Pass aiming (keyboard and mouse)
+A setting picks how passes and lobs are aimed. On gamepad the left stick always aims them (dead zone 0.3).
+
+| Mode | The pass goes |
+|---|---|
+| Directional aiming | the way your WASD keys point, relative to the camera |
+| Joystick emulation | the way you drag the mouse while charging; the camera stays still, the drag builds up like a virtual stick (dead zone 0.4) and the last direction is kept |
+| Crosshair only | where the crosshair aims |
+
+A pass aimed within **6°** of straight ahead goes straight ahead; the other directions use a wider **22.5°** tolerance.
