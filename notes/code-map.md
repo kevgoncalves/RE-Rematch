@@ -88,6 +88,7 @@ Other pieces: `AbilityTask_ApplyShoot`, `AbilityTask_ApplyVolleyShoot`, `Ability
 ## 6. Abilities and input
 The GA_* Blueprints (availability layers, buffers, windows), the input conditions (`…InputConditionData`, `InputConditionMappingDB`, `InputMappingPresetDB`), `InputModifierModeGameOption`, `InputDelayComponent`.
 **Known:** most ability rules (dribble.md, controls.md).
+**Interpreted:** [responsiveness.md](responsiveness.md) covers when presses count, the chord window, cancel windows, stick exits and when control returns after dribbles, push balls and dashes.
 
 ## 7. Defence and contact
 `SCCombatSystem`: hitboxes and hurtboxes (`HitboxComponent`, `HurtboxSolverComponent`, `BallHurtboxSolver`), attacks (`AbilityTask_HandleAttack`, `AttackComponent`), hit reactions, network hit validation.
