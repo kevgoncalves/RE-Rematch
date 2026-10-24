@@ -2,7 +2,7 @@
 
 How the in-match player camera is placed, turned and smoothed, from the native camera code, the camera Blueprints and the camera data assets. The rules are in our words; the sources are at the end. How shots use the camera is in [shot-aim.md](shot-aim.md).
 
-**Status:** interpreted, waiting for Kev's review. Not coded yet.
+**Status:** reviewed by Kev and coded in the prototype (2026-10-24).
 
 This note replaces three lines of the Camera section in [match-camera-network.md](match-camera-network.md):
 - "framed 2 m above": the pivot is 1.35 m above the feet (§1). The 2 m value belongs to a framing feature that is off.

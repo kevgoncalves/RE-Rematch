@@ -4,7 +4,7 @@ When a press counts, when the move starts, when the ball is touched, which windo
 
 60 fps: 1 frame (f) = 1/60 s. Frames count from the press. Speeds are in m/s.
 
-**Status:** interpreted from the ability Blueprints, the input condition assets, the montages and their metadata, and the native code for the defaults and the move interrupt. Not checked in-game. A few rules lean on engine defaults; they're flagged.
+**Status:** reviewed by Kev and coded in the prototype (2026-10-24), except #8 (push ball wind-up on rails) and #9 (blended body turns). Interpreted from the ability Blueprints, the input condition assets, the montages and their metadata, and the native code for the defaults and the move interrupt. Not checked in-game. A few rules lean on engine defaults; they're flagged.
 
 ## The rules in short
 - **A move starts on the frame of the press.** The ability runs on your own machine at once (no wait for the server), plays its animation that frame, and sets its speed from its curve that frame.

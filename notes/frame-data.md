@@ -26,8 +26,8 @@ This is the game's cancel system.
 | **Lock move** (while strafing) | everything except shooting, passing, push balls, sprinting and volleys |
 | **Dribble stance** | everything except sprinting and extra effort |
 
-## Input buffer
-If you press an action slightly before it is allowed, the game remembers it and fires it as soon as it becomes available.
+## Chord window (not an input buffer)
+**Correction:** these times are not a buffer for presses made too early. When the ability starts, it keeps a few longer chords allowed for that long, so a slightly staggered chord still gives the kick you meant (e.g. push ball, then the low-power pass within 0.1 s). How early presses really count (taps on the release, held kicks as soon as allowed) is in [responsiveness.md](responsiveness.md#1-when-a-press-counts).
 
 | Action | Buffer |
 |---|---|
