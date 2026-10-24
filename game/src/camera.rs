@@ -134,57 +134,46 @@ fn side_offset(s: CamState) -> Option<SideOffset> {
     match s {
         Default | WithBall => o(0.45, -0.2, 3.0, false, false),
         SprintWithBall => o(0.2, -0.2, 0.25, true, false),
-        // Swaps to the left shoulder when facing more than ~22 deg left of the camera.
-        ExtraEffort => o(0.4, -1.6, 2.0, true, false),
+        // The game swaps to the left shoulder here (min -1.6); Kev doesn't want shoulder swaps.
+        ExtraEffort => o(0.4, -0.2, 2.0, true, false),
         Shoot => o(1.0, 0.0, 2.0, false, true),
         LockShot => o(1.0, 0.0, 0.1, false, true),
         SprintNoBall | LockMove | Aim => None,
     }
 }
 
-#[derive(Clone, Copy)]
-enum Shape {
-    /// Zero tangents at both ends.
-    S,
-    /// Steep start, flat end.
-    EaseOut,
-    /// Keys (seconds, ratio), linear between them, holding the last value.
-    Keys(&'static [(f32, f32)]),
-}
-
 /// The transition into `to` from `from` (camera.md §8): the old state's "out" first, then the new
 /// state's "in", then the default 0.65 s.
-fn transition(from: CamState, to: CamState) -> (f32, Shape) {
+fn transition(from: CamState, to: CamState) -> f32 {
     use CamState::*;
     match (from, to) {
-        (SprintNoBall, SprintWithBall) => (2.5, Shape::S),
-        (SprintNoBall, Default | WithBall) => (3.0, Shape::S),
-        (SprintWithBall, Default | WithBall | SprintNoBall | ExtraEffort) => (2.0, Shape::S),
-        (ExtraEffort, _) => (4.0, Shape::EaseOut),
-        (LockShot, _) | (Shoot, Default | WithBall) => (0.9, Shape::S),
-        (LockMove, Aim) => (0.5, Shape::EaseOut),
-        (LockMove, _) => (0.8, Shape::EaseOut),
-        (_, SprintNoBall) => (2.0, Shape::Keys(&[(0.0, 0.0), (0.2, 0.95), (0.3, 0.85)])),
-        (_, ExtraEffort) => (2.0, Shape::Keys(&[(0.0, 0.0), (0.2, 0.85), (0.4, 0.55), (0.5, 0.65)])),
-        (_, SprintWithBall) => (0.25, Shape::S),
-        (_, LockMove) => (0.6, Shape::EaseOut),
-        (Aim, Shoot) => (0.3, Shape::EaseOut),
-        (_, Shoot) => (0.5, Shape::EaseOut),
-        (_, LockShot) => (0.3, Shape::EaseOut),
-        _ => (0.65, Shape::S),
+        (SprintNoBall, SprintWithBall) => 2.5,
+        (SprintNoBall, Default | WithBall) => 3.0,
+        // Every transition eases in and out, at least 0.4 s, with no overshoot: the game's
+        // steep-start curves and its in-out-in keys into sprint and extra effort made the camera
+        // jolt and wobble (Kev).
+        (SprintWithBall, Default | WithBall | SprintNoBall | ExtraEffort) => 2.0,
+        (ExtraEffort, _) => 2.0,
+        (LockShot, _) | (Shoot, Default | WithBall) => 0.9,
+        (LockMove, Aim) => 0.5,
+        (LockMove, _) => 0.8,
+        (_, SprintNoBall) => 0.8,
+        (_, ExtraEffort) => 0.8,
+        (_, SprintWithBall) => 0.5,
+        (_, LockMove) => 0.6,
+        (Aim, Shoot) => 0.4,
+        (_, Shoot) => 0.5,
+        (_, LockShot) => 0.4,
+        _ => 0.65,
     }
 }
 
-fn ratio(t: f32, duration: f32, shape: Shape) -> f32 {
+fn ratio(t: f32, duration: f32) -> f32 {
     if duration <= 0.0 {
         return 1.0;
     }
     let u = (t / duration).min(1.0);
-    match shape {
-        Shape::S => u * u * (3.0 - 2.0 * u),
-        Shape::EaseOut => 1.0 - (1.0 - u).powi(3),
-        Shape::Keys(keys) => curve(keys, t),
-    }
+    u * u * (3.0 - 2.0 * u)
 }
 
 /// The camera's running state.
@@ -201,6 +190,8 @@ pub struct CameraState {
     /// start, how long you've stood still, and whether you've moved since.
     side: f32,
     entry_side: f32,
+    /// How much of the sideways offset the current state takes, eased on its own.
+    side_w: f32,
     still: f32,
     moved: bool,
     /// Gamepad turn boost per axis, -1..1.
@@ -306,8 +297,7 @@ pub fn camera_follow(
     }
     cam.t += dt;
     if cam.from.is_some() {
-        let (duration, shape) = transition(cam.prev, cam.state);
-        cam.r = ratio(cam.t, duration, shape);
+        cam.r = ratio(cam.t, transition(cam.prev, cam.state));
         if cam.r >= 0.9999 {
             cam.from = None;
         }
@@ -340,13 +330,15 @@ pub fn camera_follow(
     }
     // A state without a sideways offset (lock move, sprinting without the ball, aiming) takes it
     // away over the camera's transition, not at once.
-    let has_side = |s: CamState| side_offset(s).is_some() as u8 as f32;
-    let weight = if cam.from.is_some() { has_side(cam.prev) + (has_side(cam.state) - has_side(cam.prev)) * cam.r } else { has_side(cam.state) };
-    let side = cam.side * weight;
-    // The offset can grow or jump to the other shoulder, never shrink below the base.
+    // Eased on its own over 0.4 s, so a transition started mid-transition doesn't jump it.
+    let has_side = side_offset(cam.state).is_some() as u8 as f32;
+    cam.side_w += (has_side - cam.side_w).clamp(-dt / 0.4, dt / 0.4);
+    let side = cam.side * cam.side_w * cam.side_w * (3.0 - 2.0 * cam.side_w);
+    // The offset can grow on its own shoulder, never shrink below the base or jump to the other
+    // shoulder (Kev: the swaps were jarring).
     let shoulder = |base: f32| {
         let sum = base + side;
-        if sum.abs() > base.abs() { sum } else { base.abs().copysign(sum) }
+        if sum.abs() > base.abs() && sum.signum() == base.signum() { sum } else { base }
     };
     let mut d = d;
     for off in [&mut d.ideal, &mut d.above, &mut d.below] {
