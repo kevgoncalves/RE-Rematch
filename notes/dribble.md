@@ -47,7 +47,7 @@ The roulette covers about the same ground as the fast cut (average 4.8 against 4
 - **First 12f (0.2 s): nothing.**
 - **From 12f to the end:**
   - allowed: the feint, passes, lobs, short lobs, a special shot ("shoot after dribble"), sprint, extra effort, lock move, and the **dribble push balls**;
-  - players say the shot after a dribble is almost instant and works at any moment of it, so the shot may be buffered from the start (unconfirmed in the data);
+  - players say shots, passes and lobs after a dribble are almost instant and work at any moment of it, so they may be buffered from the start (unconfirmed in the data);
   - not allowed: a new dribble 1, the dash, tackles, dives, the normal push ball and the normal shot.
 
 ### Cost and exhaustion
