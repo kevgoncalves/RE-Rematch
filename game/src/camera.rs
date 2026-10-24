@@ -338,7 +338,11 @@ pub fn camera_follow(
             }
         }
     }
-    let side = if side_offset(cam.state).is_some() { cam.side } else { 0.0 };
+    // A state without a sideways offset (lock move, sprinting without the ball, aiming) takes it
+    // away over the camera's transition, not at once.
+    let has_side = |s: CamState| side_offset(s).is_some() as u8 as f32;
+    let weight = if cam.from.is_some() { has_side(cam.prev) + (has_side(cam.state) - has_side(cam.prev)) * cam.r } else { has_side(cam.state) };
+    let side = cam.side * weight;
     // The offset can grow or jump to the other shoulder, never shrink below the base.
     let shoulder = |base: f32| {
         let sum = base + side;
