@@ -25,6 +25,8 @@ pub struct Player {
     pub second_dash_cooldown: f32,
     pub dribble: Option<DribbleState>,
     pub dribble_lockout: f32,
+    /// A push ball pressed before the dribble's window opened, waiting for it.
+    pub push_buffered: bool,
     /// Scripted chase after a push ball.
     pub run: Option<Run>,
 }
@@ -136,6 +138,7 @@ impl Default for Player {
             second_dash_cooldown: 0.0,
             dribble: None,
             dribble_lockout: 0.0,
+            push_buffered: false,
             run: None,
         }
     }
@@ -499,6 +502,14 @@ pub fn kicking(
     // you can shoot from stance.
     // Shots are open at any moment of a dribble (players confirm), the rest from 0.2 s.
     let dribble_open = p.dribble.is_none_or(|d| d.t >= DRIBBLE_WINDOW_OPENS);
+    // A push ball pressed early in a dribble waits for the window instead of being lost (the game
+    // buffers 0.1 s; players find it more responsive than that).
+    if p.dribble.is_none() {
+        p.push_buffered = false;
+    } else if !dribble_open && !p.locked && actions.just_pressed(Action::PushBall) {
+        p.push_buffered = true;
+    }
+    let buffered_push = p.push_buffered && dribble_open;
     if p.has_ball && p.kick.is_none() && p.dash.is_none() {
         let charged = [(Action::Shoot, Kick::Shot), (Action::Pass, Kick::Pass), (Action::Lob, Kick::Lob)];
         // In lock move the push ball button dribbles instead (player_move); inside a dribble,
@@ -510,12 +521,13 @@ pub fn kicking(
             .chain(charged)
             .filter(|(a, _)| *a != Action::PushBall || !p.locked)
             .filter(|(a, _)| dribble_open || *a == Action::Shoot)
-            .find(|(a, _)| actions.just_pressed(*a));
+            .find(|(a, _)| actions.just_pressed(*a) || (*a == Action::PushBall && buffered_push));
         // Extra effort can't keep the ball: starting it touches the ball on ahead.
         let pressed = pressed.or((p.extra_active && dribble_open).then_some((Action::ExtraEffort, Kick::PushBall)));
         if let Some((_, kind)) = pressed {
             axes.reset_curve();
             p.dribble = None; // the kick takes over from the dribble
+            p.push_buffered = false;
             let released = kind.charge_action().is_none();
             p.kick = Some(KickState { kind, elapsed: 0.0, held: 0.0, released, aim: Vec2::new(rig.yaw, rig.pitch) });
         }
