@@ -508,6 +508,10 @@ pub fn player_move(
         // sharper turn it runs on to the blend-out (responsiveness.md §5).
         let exit = r.t >= r.free_at && wish != Vec3::ZERO && r.dir.angle_between(wish).to_degrees() <= RUN_TURN_LIMIT;
         p.run = (r.t < r.length && !exit).then_some(r);
+    } else if let Some(k) = p.kick.filter(|k| k.kind.is_pass() && Vec3::new(k.entry.x, 0.0, k.entry.z).length() > PASS_DRAG_MIN_SPEED) {
+        // A pass or lob drags you on at your speed at the press, that way, with no steering
+        // (players confirm: a pass out of a dribble carries you like a shot).
+        p.vel = Vec3::new(k.entry.x, 0.0, k.entry.z);
     } else if let Some(mut d) = p.dribble.filter(|d| d.moving()) {
         d.t += dt;
         let diff = (d.facing - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
@@ -758,9 +762,13 @@ pub fn kicking(
             actions.consume(action);
             axes.reset_curve();
             let from_dribble = p.dribble.is_some();
-            // Shots and push balls take over from the dribble; a pass or lob keeps its momentum
-            // (players confirm), so the dribble runs on under it.
-            if !kind.is_pass() {
+            // Shots and push balls take over from the dribble. A pass or lob keeps the dribble's
+            // permissions, but its own drag moves you from now on (the dribble stops carrying you).
+            if kind.is_pass() {
+                if let Some(d) = p.dribble.as_mut() {
+                    d.t = d.t.max(d.free());
+                }
+            } else {
                 p.dribble = None;
                 p.dash = None;
             }
@@ -891,6 +899,12 @@ pub fn kicking(
     if k.kind == Kick::Shot {
         let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
         p.run = Some(Run { t: 0.0, length: SHOT_FOLLOW_THROUGH, free_at: SHOT_FOLLOW_THROUGH, dir: k.entry.normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], scale: speed });
+    }
+    // After the touch a pass or lob keeps dragging you until its move interrupt; steering the
+    // same way leaves it at once.
+    let entry = Vec3::new(k.entry.x, 0.0, k.entry.z);
+    if k.kind.is_pass() && entry.length() > PASS_DRAG_MIN_SPEED {
+        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: 0.0, dir: entry.normalize(), speeds: &[(0.0, 1.0), (1.0, 1.0)], scale: entry.length() });
     }
     // After a push ball you chase it on the move's own speed (extra effort keeps its running).
     if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) && !p.extra_active {

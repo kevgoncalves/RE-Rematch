@@ -234,6 +234,12 @@ pub const SHOT_SLIDE: f32 = 0.75;
 pub const SHOT_SLIDE_SPRINT: f32 = 0.6;
 /// ...or shooting out of a dribble.
 pub const SHOT_SLIDE_FROM_DRIBBLE: f32 = 0.5;
+/// Passes and lobs keep all of your speed at the press, in that direction, through the build-up
+/// and after the touch (BeforeTapScaleSpeedData, TapAfterShootSpeedData). Under 2 m/s the
+/// animation's own motion plays instead.
+pub const PASS_DRAG_MIN_SPEED: f32 = 2.0;
+/// The after-touch drag runs to the pass animation's move interrupt (frames 18 to 63).
+pub const PASS_AFTER_TOUCH: f32 = 45.0 / 60.0;
 /// After the touch you keep that speed until the move ends (can act moving at 0.75 s, standing 0.67 s).
 pub const SHOT_FOLLOW_THROUGH: f32 = 13.0 / 60.0;
 /// Extra shot speed from your own speed (ShootForceByCharaSpeed, m/s), scaled by how strong the
