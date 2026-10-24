@@ -367,6 +367,11 @@ pub const TURN_RATE_EXTRA_EFFORT: f32 = 150.0;
 /// ball taps it on again. Both use the extra effort friction override.
 pub const EXTRA_EFFORT_TAP_SPEED: f32 = 13.0;
 pub const EXTRA_EFFORT_KNOCK_SPEED: f32 = 12.0;
+/// Reaching a ball that runs the way you push, you ride on it this long before it is tapped on; a
+/// turn of the stick past EFFORT_CHOP_ANGLE in that time chops it the new way (players confirm a
+/// grace on the ball; 0.2 s is the sprint-tap hitbox's first parameter, its meaning unread).
+pub const EFFORT_GRACE: f32 = 0.2;
+pub const EFFORT_CHOP_ANGLE: f32 = 20.0;
 pub const EXTRA_EFFORT_FRICTION: f32 = BASE_FRICTION * 1.5;
 /// At extra effort speed you catch the ball again about half a second after each tap, so a
 /// full gauge (one ~1.5 s hold) gives three cuts, as players report.

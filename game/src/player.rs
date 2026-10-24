@@ -47,6 +47,8 @@ pub struct Player {
     pub last_input: Vec3,
     /// A kick's freeze at the touch: you hold still this long (hitstop).
     pub freeze: f32,
+    /// Seconds riding on the ball in extra effort, before it is tapped on.
+    pub effort_ride: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -259,6 +261,7 @@ impl Default for Player {
             recent_input: Vec::new(),
             last_input: Vec3::ZERO,
             freeze: 0.0,
+            effort_ride: 0.0,
         }
     }
 }
@@ -810,10 +813,18 @@ pub fn ball_control(
         // input (extra-effort.md, the control tap).
         let dir = control_tap_dir(axes.movement, rig.yaw, p.facing);
         let touching = btf.translation.y < CONTROL_MAX_HEIGHT && b.no_control <= 0.0 && flat.length() < EXTRA_EFFORT_KNOCK_REACH;
-        if touching && b.vel.dot(dir) < EXTRA_EFFORT_KNOCK_SPEED * 0.9 {
-            b.vel = dir * EXTRA_EFFORT_KNOCK_SPEED;
-            b.friction = EXTRA_EFFORT_FRICTION;
-            b.spin = Vec3::ZERO;
+        match touching.then(|| effort_touch(b.vel, dir, p.effort_ride)) {
+            Some(EffortTouch::Ride) => {
+                p.effort_ride += time.delta_secs();
+                b.vel = Vec3::new(p.vel.x, b.vel.y, p.vel.z);
+            }
+            Some(EffortTouch::Tap) => {
+                b.vel = dir * EXTRA_EFFORT_KNOCK_SPEED;
+                b.friction = EXTRA_EFFORT_FRICTION;
+                b.spin = Vec3::ZERO;
+                p.effort_ride = 0.0;
+            }
+            Some(EffortTouch::Leave) | None => p.effort_ride = 0.0,
         }
         return;
     }
@@ -821,6 +832,29 @@ pub fn ball_control(
         p.receiving = Some(0.0);
         b.spin = Vec3::ZERO;
     }
+}
+
+#[derive(Debug, PartialEq)]
+enum EffortTouch {
+    /// Run on with the ball under you.
+    Ride,
+    /// Tap it on the way the stick points.
+    Tap,
+    /// It was just tapped: let it go.
+    Leave,
+}
+
+/// What an extra-effort touch does to a ball within reach (extra-effort.md, the control tap). A
+/// ball you catch running the way you push gives you a grace on it: you ride it until the stick
+/// turns away (the chop) or EFFORT_GRACE runs out. Any other ball is tapped on at once.
+fn effort_touch(ball_vel: Vec3, dir: Vec3, ridden: f32) -> EffortTouch {
+    let flat = Vec3::new(ball_vel.x, 0.0, ball_vel.z);
+    if flat.dot(dir) >= EXTRA_EFFORT_KNOCK_SPEED * 0.9 {
+        return EffortTouch::Leave;
+    }
+    // Riding, the ball moves with you, so this compares the stick with your own way.
+    let straight = flat.length() > 1.0 && flat.angle_between(dir).to_degrees() < EFFORT_CHOP_ANGLE;
+    if straight && ridden < EFFORT_GRACE { EffortTouch::Ride } else { EffortTouch::Tap }
 }
 
 pub fn kicking(
@@ -1225,6 +1259,21 @@ mod tests {
         assert_eq!(auto_tap_factor(run, Vec3::NEG_Z, BALL_RADIUS), 1.0);
         assert_eq!(auto_tap_factor(run, Vec3::Z, BALL_RADIUS), EXTRA_EFFORT_TAP_IN_180_TURN);
         assert_eq!(auto_tap_factor(run, Vec3::new(0.7, 0.0, 0.7).normalize(), BALL_RADIUS), EXTRA_EFFORT_TAP_IN_135_TURN);
+    }
+
+    #[test]
+    fn effort_chop_has_a_grace_on_the_ball() {
+        let ahead = Vec3::NEG_Z;
+        // Catching a slowed ball straight on, you ride it; past the grace it is tapped on.
+        assert_eq!(effort_touch(ahead * 6.0, ahead, 0.0), EffortTouch::Ride);
+        assert_eq!(effort_touch(ahead * 9.5, ahead, 0.1), EffortTouch::Ride);
+        assert_eq!(effort_touch(ahead * 9.5, ahead, EFFORT_GRACE), EffortTouch::Tap);
+        // Turning the stick while on it chops at once.
+        assert_eq!(effort_touch(ahead * 9.5, Vec3::X, 0.05), EffortTouch::Tap);
+        // A ball still slow or lying there is tapped on at once; a fresh tap is left alone.
+        assert_eq!(effort_touch(Vec3::ZERO, ahead, 0.0), EffortTouch::Tap);
+        assert_eq!(effort_touch(Vec3::X * 6.0, ahead, 0.0), EffortTouch::Tap);
+        assert_eq!(effort_touch(ahead * 12.0, ahead, 0.0), EffortTouch::Leave);
     }
 
     #[test]
