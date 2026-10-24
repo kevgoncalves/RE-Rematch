@@ -270,7 +270,11 @@ All times are from the press. Charged kicks wait for your release if you hold pa
   - dead zone up to 10%;
   - rises to 825 at full deflection;
   - symmetric.
-- **Top/back spin (stick forward/back):** one direction reaches 780, the other only 120 (unconfirmed which is which).
+- **Top/back spin (stick or mouse forward/back):**
+  - **pulling down dips the ball**, up to 780;
+  - pushing up lifts it, but only up to 120.
+
+  The dip is about 6× stronger than the lift (confirmed in-game).
 - **Spin scales with how long you held**, as a share of the stick's spin:
 
 | Held | Side spin | Top/back spin |
@@ -505,10 +509,12 @@ Which touch wins over the network is in [match-camera-network.md](match-camera-n
 ## Confirmed by players, and open questions
 **Confirmed:**
 - 4.5 s / 2.65 s = how long the goalkeeper is protected holding the ball.
+- Pulling the curve input down dips the ball, and that is the strong direction.
+- You can shoot from lock move (defence stance).
+- A fully charged kick goes off by itself.
 
 **Open questions:**
 1. With a full stamina bar, do you get ~13 s of sprint without the ball and ~9 s with it?
 2. Does a standing tackle cost half the stamina of a sliding tackle?
-3. Which stick direction (forward/back) gives the strong spin?
-4. When does an "instant" reception (0.083 s instead of 0.2 s) happen?
-5. Is the dribble protection window (0.25 s, or 1 s when feinted) tackle immunity?
+3. When does an "instant" reception (0.083 s instead of 0.2 s) happen?
+4. Is the dribble protection window (0.25 s, or 1 s when feinted) tackle immunity?
