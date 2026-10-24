@@ -61,10 +61,7 @@ pub struct DashState {
 }
 
 impl DashState {
-    /// The animation's length (its speed curve spans it) and when you're free.
-    fn length(&self) -> f32 {
-        (if self.second { SECOND_DASH_LENGTH } else { DASH_LENGTH })[self.heading as usize]
-    }
+    /// When you're free (the animation's blend-out).
     fn free(&self) -> f32 {
         (if self.second { SECOND_DASH_FREE } else { DASH_FREE })[self.heading as usize]
     }
@@ -615,7 +612,7 @@ pub fn player_move(
         let max_turn = DRIBBLE_TURN_RATE.to_radians() * dt;
         p.facing += angle_diff(target, p.facing).clamp(-max_turn, max_turn);
         let speeds: &[(f32, f32)] = if d.second { &SECOND_DASH_SPEED } else { &DASH_SPEED };
-        p.vel = d.dir * curve(speeds, d.t / d.length());
+        p.vel = d.dir * curve(speeds, d.t);
         // Free at the blend-out; earlier if you keep the stick within 15 deg of the dash's way
         // (a forward dash, facing where it goes).
         let exit_from = if d.second { SECOND_DASH_EXIT_FROM } else { DASH_EXIT_FROM };
@@ -623,6 +620,14 @@ pub fn player_move(
             && wish.angle_between(d.dir).to_degrees() <= DASH_EXIT_ANGLE
             && forward(p.facing).angle_between(d.dir).to_degrees() <= DASH_EXIT_ANGLE;
         p.dash = (d.t < d.free() && !(d.t >= exit_from && keeps_way)).then_some(d);
+        // Handed back with the stick against the way you're going, you turn as from a run: brake
+        // to the pivot and re-accelerate (players confirm a smooth change of side after a dash).
+        if p.dash.is_none()
+            && !p.locked
+            && let Some(big) = turn_band(p.vel.angle_between(dir_now).to_degrees(), p.has_ball, walking).filter(|_| dir_now != Vec3::ZERO)
+        {
+            p.turn = Some(start_turn(p, dir_now, big, p.vel.length(), top));
+        }
     } else if p.locked {
         // Lock move (mechanics.md §2): face the camera, strafe, slower going backwards.
         let diff = (rig.yaw.to_radians() - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
@@ -903,10 +908,9 @@ pub fn kicking(
         if k.kind.charge_action().is_some_and(|a| actions.pressed(a)) {
             k.held = k.elapsed.min(MAX_HOLD);
         }
-        // The kick waits for the release; the build-up holds meanwhile. The only limit found in
-        // the code is the kick's network sync timeout (value unread).
-        // ponytail: 1 s, the end of the hold-time curves, until that timeout is read.
-        k.released = k.held >= MAX_HOLD || !k.kind.charge_action().is_some_and(|a| actions.pressed(a));
+        // Held to a full gauge, the kick goes off by itself (players confirm: the ball leaves as
+        // the gauge fills).
+        k.released = charge(k.kind, k.held) >= 1.0 || !k.kind.charge_action().is_some_and(|a| actions.pressed(a));
     }
     if k.kind == Kick::Shot {
         // The gamepad's right stick keeps aiming a charging shot; the mouse curves it instead.
@@ -1039,10 +1043,11 @@ fn auto_tap_factor(entry: Vec3, steer: Vec3, ball_height: f32) -> f32 {
     by_turn * if ball_height - BALL_RADIUS >= high { factor } else { 1.0 }
 }
 
-/// How far a kick has charged, 0..1: the seconds held against its build-up, less a frame and the
-/// network margins, so full power comes before the animation ends (mechanics.md §4).
+/// How far a kick has charged, 0..1: the seconds held against its build-up, less a frame, so the
+/// gauge is full just as the foot meets the ball (players confirm; mechanics.md §4 has the network
+/// margins the code also takes off, which would fill it 0.15 s earlier).
 pub fn charge(kind: Kick, held: f32) -> f32 {
-    (held / (kind.buildup() - 1.0 / 60.0 - CHARGE_NETWORK_MARGIN)).clamp(0.0, 1.0)
+    (held / (kind.buildup() - 1.0 / 60.0)).clamp(0.0, 1.0)
 }
 
 /// When the foot meets the ball, from the press (ShootDataTable): a shot under 29.41 m/s is the
@@ -1250,6 +1255,24 @@ mod tests {
         frames(&mut app, &[], 10, 1.0 / 60.0);
         let v2 = app.world_mut().query::<&Player>().single(app.world()).unwrap().vel;
         assert!(v.z >= 0.0 && v2.z > 2.5, "speed back {v2:?}");
+    }
+
+    #[test]
+    fn dash_handed_back_against_the_stick_turns_without_an_arc() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+        app.world_mut().resource_mut::<Axes>().movement = Vec2::NEG_X; // stick left all through
+        let dash = DashState { t: 0.0, second: false, dir: Vec3::X, facing: 0.0, heading: Heading::Side };
+        app.world_mut().spawn((Transform::default(), Player { dash: Some(dash), vel: Vec3::X * 6.0, ..default() }));
+        app.world_mut().spawn(CameraRig::default());
+        let mut max_side: f32 = 0.0;
+        for _ in 0..60 {
+            frames(&mut app, &[], 1, 1.0 / 60.0);
+            max_side = max_side.max(app.world_mut().query::<&Player>().single(app.world()).unwrap().vel.z.abs());
+        }
+        let v = app.world_mut().query::<&Player>().single(app.world()).unwrap().vel;
+        assert!(max_side < 0.01, "sideways {max_side}");
+        assert!(v.x < -1.0, "going left {v:?}");
     }
 
     #[test]

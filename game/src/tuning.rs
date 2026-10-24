@@ -169,11 +169,10 @@ pub const STANCE_MIN_TIME: f32 = 0.15;
 /// Angle between facing and movement (degrees) to speed multiplier.
 pub const LOCK_SPEED_BY_ANGLE: [(f32, f32); 3] = [(0.0, 1.0), (90.0, 1.0), (180.0, 0.9)];
 pub const LOCK_BALL_SPEED_BY_ANGLE: [(f32, f32); 4] = [(0.0, 1.0), (90.0, 0.95), (135.0, 0.88), (180.0, 0.88)];
-// Dash (mechanics.md §8): speed (m/s) over the dash's normalised time
-/// Dash animation lengths and when you're free (blend-out), by sector: forward, side, back.
-pub const DASH_LENGTH: [f32; 3] = [50.0 / 60.0, 41.0 / 60.0, 50.0 / 60.0];
+// Dash (mechanics.md §8): speed (m/s) over the seconds since the press. The game's curves are in
+// seconds: their keys fall on the dash's events (blend-in 6f, after-dash 14f, second dash free 42f).
+/// When you're free (the dash animation's blend-out), by sector: forward, side, back.
 pub const DASH_FREE: [f32; 3] = [32.0 / 60.0, 23.0 / 60.0, 32.0 / 60.0];
-pub const SECOND_DASH_LENGTH: [f32; 3] = [60.0 / 60.0, 42.0 / 60.0, 43.0 / 60.0];
 pub const SECOND_DASH_FREE: [f32; 3] = [42.0 / 60.0, 24.0 / 60.0, 29.0 / 60.0];
 /// Keeping the stick within 15 deg of the dash's way leaves it early from these frames.
 pub const DASH_EXIT_FROM: f32 = 14.4 / 60.0;
@@ -240,18 +239,15 @@ pub const EXHAUSTED_EXIT: f32 = 3.0;
 pub const SPEED_BY_STAMINA: [(f32, f32); 4] = [(0.0, 0.8), (5.9, 0.95), (6.0, 1.0), (8.0, 1.05)];
 
 // Shooting and passing (mechanics.md §4). The force curves run on the charge, 0..1: the time held
-// since the press against the kick's build-up (less a frame and the network margins), so full
-// power comes early: ~0.37 s for shots, ~0.23 s for passes and lobs. The kick waits for the
-// release, and the ball leaves then, but never before the kick's contact frame.
+// since the press against the kick's build-up less a frame, so the gauge is full on the frame
+// before the contact: ~0.52 s for shots, ~0.38 s for passes and lobs. The kick goes off then if
+// you're still holding; a release fires it too, but never before the contact frame.
 pub const SHOT_FORCE: [(f32, f32); 3] = [(0.0, 24.0), (0.3, 24.0), (1.0, 38.0)];
 /// Pass peaks at 60% charge (~0.14 s held); holding longer drops it to 25.6 m/s before it climbs back to 30.65.
 pub const PASS_FORCE: [(f32, f32); 5] = [(0.0, 20.0), (0.3, 20.0), (0.6, 32.0), (0.601, 25.6), (1.0, 30.65)];
 pub const LOB_FORCE: [(f32, f32); 3] = [(0.0, 16.0), (0.3, 16.0), (1.0, 27.0)];
 /// The force curves' last key; spin scales with the raw seconds held over this.
 pub const MAX_HOLD: f32 = 1.0;
-/// Taken off the build-up for the charge: the stadium's network margins (0.12 + 0.03 s, the world
-/// settings' defaults), plus one frame.
-pub const CHARGE_NETWORK_MARGIN: f32 = 0.15;
 pub const SHOT_BUILDUP: f32 = 32.0 / 60.0;
 pub const PASS_BUILDUP: f32 = 24.0 / 60.0;
 pub const LOB_BUILDUP: f32 = 24.0 / 60.0;
@@ -461,10 +457,11 @@ mod tests {
     #[test]
     fn full_power_comes_early() {
         use crate::player::{Kick, charge};
-        // Shots reach full power at ~0.37 s held, passes and lobs at ~0.23 s; the pass peaks at ~0.14 s.
-        assert!(charge(Kick::Shot, 0.36) < 1.0 && charge(Kick::Shot, 0.37) >= 1.0 - 1e-3);
-        assert!(charge(Kick::Pass, 0.23) > 0.98 && charge(Kick::Lob, 0.24) == 1.0);
-        assert!((curve(&PASS_FORCE, charge(Kick::Pass, 0.14)) - 32.0).abs() < 0.6);
+        // The gauge fills on the frame before the contact: shots at ~0.52 s held, passes and lobs
+        // at ~0.38 s; the pass peaks at ~0.23 s.
+        assert!(charge(Kick::Shot, 0.5) < 1.0 && charge(Kick::Shot, 31.0 / 60.0) >= 1.0 - 1e-3);
+        assert!(charge(Kick::Pass, 0.37) > 0.96 && charge(Kick::Lob, 23.0 / 60.0) == 1.0);
+        assert!((curve(&PASS_FORCE, charge(Kick::Pass, 0.23)) - 32.0).abs() < 0.6);
         // A tap stays on the flat start of the curves.
         assert_eq!(curve(&SHOT_FORCE, charge(Kick::Shot, 0.1)), 24.0);
     }
