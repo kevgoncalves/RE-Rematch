@@ -307,15 +307,17 @@ pub fn camera_follow(
     let d = cam.blended();
 
     // Pivot: the capsule centre, trailing by the state's smoothing (frame-rate dependent, as in
-    // the game).
-    let target = ptf.translation;
-    let pivot = cam.pivot.unwrap_or(target);
+    // the game). Through a charged kick it holds still, so the crosshair stays on the locked aim
+    // while you slide on (players confirm the aim locks as the kick starts); it catches up after.
+    let kicking = p.kick.is_some_and(|k| matches!(k.kind, Kick::Shot | Kick::Pass | Kick::Lob));
+    let pivot = cam.pivot.unwrap_or(ptf.translation);
+    let target = if kicking { pivot } else { ptf.translation };
     let pivot = pivot + (target - pivot) * (d.k * dt).min(1.0);
     cam.pivot = Some(pivot);
 
     // Sideways offset from movement.
     let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
-    if let Some(o) = side_offset(cam.state) {
+    if let Some(o) = side_offset(cam.state).filter(|_| !kicking) {
         if speed > 1.0 {
             cam.moved = true;
             cam.still = 0.0;
