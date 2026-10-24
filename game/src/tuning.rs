@@ -33,7 +33,8 @@ pub const GRAVITY: f32 = 9.81; // game: FreeFallMultiplier 0.5 on an unknown bas
 pub const DRAG: f32 = 0.004; // quadratic air drag: TUNE (game: DragForce 0.45, modifier 2.54)
 /// Rolling ball: deceleration = friction coefficient x this (m/s²). The coefficient is the
 /// ball's base 0.8 times the last touch's multiplier, or a touch's own override.
-pub const ROLL_GRAVITY: f32 = 9.81;
+/// The ball's own gravity is 0.5x (BP_GravityTrajectoryModifier); friction uses it.
+pub const ROLL_GRAVITY: f32 = 9.81 * 0.5;
 pub const BASE_FRICTION: f32 = 0.8;
 pub const MAGNUS_SIDE: f32 = 0.0006; // side-spin to curve strength: TUNE
 pub const MAGNUS_VERTICAL: f32 = 0.0012; // top/back-spin to dip/lift strength: TUNE
@@ -160,7 +161,7 @@ pub const SHORT_PASS_FRICTION: f32 = BASE_FRICTION * 1.5;
 pub const LOB_ELEVATION: f32 = 35.0; // TUNE
 pub const SHORT_LOB_SPEED: f32 = 13.2;
 pub const PUSH_BALL_SPEED: f32 = 11.5;
-pub const PUSH_BALL_FRICTION: f32 = BASE_FRICTION * 2.8; // about 3 m of roll at 11.5 m/s
+pub const PUSH_BALL_FRICTION: f32 = BASE_FRICTION * 2.8; // about 5.5 m of roll at 11.5 m/s
 pub const PUSH_BALL_WINDUP: f32 = 8.0 / 60.0;
 pub const PUSH_BALL_NO_CONTROL: f32 = 23.0 / 60.0;
 pub const PUSH_BALL_NO_CONTROL_EXTRA_EFFORT: f32 = 12.0 / 60.0;

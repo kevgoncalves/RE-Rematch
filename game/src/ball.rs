@@ -160,13 +160,13 @@ mod tests {
     }
 
     #[test]
-    fn push_ball_rolls_about_three_metres() {
+    fn push_ball_rolls_about_six_metres() {
         let start = Vec3::new(0.0, BALL_RADIUS, 0.0);
         let mut pos = start;
         let mut ball = Ball { vel: Vec3::new(0.0, 0.0, PUSH_BALL_SPEED), friction: PUSH_BALL_FRICTION, ..default() };
-        run(&mut pos, &mut ball, 2.0);
+        run(&mut pos, &mut ball, 3.0);
         let d = pos.distance(start);
-        assert!((2.5..3.5).contains(&d), "push ball rolled {d} m");
+        assert!((5.0..6.5).contains(&d), "push ball rolled {d} m");
     }
 
     #[test]
