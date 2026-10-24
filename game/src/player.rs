@@ -22,7 +22,11 @@ pub struct Player {
     pub locked: bool,
     pub dash: Option<DashState>,
     pub dash_cooldown: f32,
-    pub second_dash_window: f32,
+    pub second_dash_cooldown: f32,
+    pub dribble: Option<DribbleState>,
+    pub dribble_lockout: f32,
+    /// Scripted chase after a push ball.
+    pub run: Option<Run>,
 }
 
 #[derive(Clone, Copy)]
@@ -30,6 +34,74 @@ pub struct DashState {
     pub t: f32,
     pub second: bool,
     pub dir: Vec3,
+}
+
+/// Which way a dribble or push ball goes, against the camera (dribbles) or your facing (push balls).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Heading {
+    Forward,
+    Side,
+    Back,
+}
+
+impl Heading {
+    /// Unsigned angle in degrees; forward up to `forward`, back beyond `back`.
+    fn of(angle: f32, forward: f32, back: f32) -> Self {
+        match angle.abs() {
+            a if a <= forward => Heading::Forward,
+            a if a <= back => Heading::Side,
+            _ => Heading::Back,
+        }
+    }
+}
+
+/// Dribble sectors from the input (x right, y forward): forward within 45 deg, back beyond 135.
+/// Half a degree of slack keeps the exact keyboard diagonals on the forward and side sectors.
+fn dribble_heading(input: Vec2) -> Heading {
+    Heading::of(input.x.atan2(input.y).to_degrees(), 45.5, 135.5)
+}
+
+/// A dribble in progress. `feint` is the second one of a chain.
+#[derive(Clone, Copy)]
+pub struct DribbleState {
+    pub t: f32,
+    pub feint: bool,
+    pub exhausted: bool,
+    pub heading: Heading,
+    pub dir: Vec3,
+}
+
+impl DribbleState {
+    fn speeds(&self) -> &'static [(f32, f32)] {
+        use Heading::*;
+        match (self.exhausted, self.feint, self.heading) {
+            (true, _, Forward) => &EXHAUSTED_DRIBBLE_FORWARD,
+            (true, _, Side) => &EXHAUSTED_DRIBBLE_SIDE,
+            (true, _, Back) => &EXHAUSTED_DRIBBLE_BACK,
+            (_, true, Forward) => &FEINT_FORWARD,
+            (_, true, Side) => &FEINT_SIDE,
+            (_, true, Back) => &FEINT_BACK,
+            (_, _, Forward) => &DRIBBLE_FORWARD,
+            (_, _, Side) => &DRIBBLE_SIDE,
+            (_, _, Back) => &DRIBBLE_BACK,
+        }
+    }
+
+    fn length(&self) -> f32 {
+        let lengths = if self.exhausted { EXHAUSTED_DRIBBLE_LENGTH } else if self.feint { FEINT_LENGTH } else { DRIBBLE_LENGTH };
+        lengths[self.heading as usize]
+    }
+}
+
+/// Moving on a scripted speed curve (m/s over the run's normalised time).
+#[derive(Clone, Copy)]
+pub struct Run {
+    t: f32,
+    length: f32,
+    /// From here, steering within RUN_TURN_LIMIT hands control back.
+    free_at: f32,
+    dir: Vec3,
+    speeds: &'static [(f32, f32)],
 }
 
 /// A kick from button press to ball contact. The build-up runs while the button is held.
@@ -59,7 +131,10 @@ impl Default for Player {
             locked: false,
             dash: None,
             dash_cooldown: 0.0,
-            second_dash_window: 0.0,
+            second_dash_cooldown: 0.0,
+            dribble: None,
+            dribble_lockout: 0.0,
+            run: None,
         }
     }
 }
@@ -72,6 +147,8 @@ pub enum Kick {
     Lob,
     ShortLob,
     PushBall,
+    /// A push ball from inside a dribble.
+    DribblePushBall,
 }
 
 impl Kick {
@@ -91,7 +168,7 @@ impl Kick {
             Kick::Pass => PASS_BUILDUP,
             Kick::Lob => LOB_BUILDUP,
             Kick::ShortPass | Kick::ShortLob => SHORT_WINDUP,
-            Kick::PushBall => PUSH_BALL_WINDUP,
+            Kick::PushBall | Kick::DribblePushBall => PUSH_BALL_WINDUP,
         }
     }
 }
@@ -196,6 +273,27 @@ pub fn player_move(
 
     p.locked = actions.pressed(Action::Lock);
 
+    // Dribble (notes/dribble.md): the dash you do with the ball, from lock move, on the push ball
+    // or dash button. From 0.2 s into it the same press chains the feint; nothing chains after a
+    // feint, and a tired dribble can't chain at all.
+    p.dribble_lockout -= dt;
+    let dribble_press = actions.just_pressed(Action::PushBall) || actions.just_pressed(Action::Dash);
+    if dribble_press && p.has_ball && p.locked && p.kick.is_none() {
+        let feint = !p.exhausted && p.dribble.is_some_and(|d| !d.feint && !d.exhausted && d.t >= DRIBBLE_WINDOW_OPENS);
+        if feint || (p.dribble.is_none() && p.dribble_lockout <= 0.0) {
+            // No direction is a forward dribble. Keyboard diagonals sit on the 45/135 deg sector edges:
+            // W+A and W+D are fast cuts, S+A and S+D side dribbles going back (players confirm).
+            let dir = if input == Vec2::ZERO { Vec2::Y } else { input.normalize() };
+            let heading = dribble_heading(dir);
+            p.dribble = Some(DribbleState { t: 0.0, feint, exhausted: p.exhausted, heading, dir: camera_relative(dir, rig.yaw) });
+            if feint {
+                p.dribble_lockout = FEINT_LOCKOUT;
+            }
+            p.stamina = (p.stamina - DRIBBLE_COST).max(0.0);
+            p.regen_wait = DRIBBLE_REGEN_DELAY;
+        }
+    }
+
     // Stamina (mechanics.md §1). Lock move and dashes can't sprint.
     let want_sprint = actions.pressed(Action::Sprint) && input != Vec2::ZERO && !p.locked && p.dash.is_none();
     if want_sprint && !p.sprinting && !p.exhausted {
@@ -250,37 +348,46 @@ pub fn player_move(
     } else {
         turn
     };
-    if p.kick.is_some() {
+    if p.kick.is_some_and(|k| !matches!(k.kind, Kick::PushBall | Kick::DribblePushBall)) {
         top *= WINDUP_SPEED_SCALE;
     }
 
-    // Dash (mechanics.md §8): from lock move; a second dash right after is weaker, then a cooldown.
+    // Dash (mechanics.md §8): only without the ball, from lock move. While the first dash's cooldown
+    // runs, a second (weaker) dash can cut into it from 0.24 s; then both wait for its own cooldown.
     p.dash_cooldown -= dt;
-    p.second_dash_window -= dt;
-    if actions.just_pressed(Action::Dash) && p.dash.is_none() {
-        let second = p.second_dash_window > 0.0;
-        if second || p.dash_cooldown <= 0.0 {
+    p.second_dash_cooldown -= dt;
+    if actions.just_pressed(Action::Dash) && !p.has_ball && p.second_dash_cooldown <= 0.0 {
+        let first = p.dash.is_none() && p.locked && p.dash_cooldown <= 0.0;
+        let second = p.dash_cooldown > 0.0 && p.dash.is_none_or(|d| !d.second && d.t >= SECOND_DASH_FROM);
+        if first || second {
             let dir = if wish != Vec3::ZERO { wish.normalize() } else { -forward(p.facing) };
-            p.dash = Some(DashState { t: 0.0, second, dir });
-            p.second_dash_window = 0.0;
+            p.dash = Some(DashState { t: 0.0, second: !first, dir });
+            if first {
+                p.dash_cooldown = DASH_COOLDOWN;
+            } else {
+                p.second_dash_cooldown = DASH_COOLDOWN;
+            }
             p.stamina = (p.stamina - DASH_COST).max(0.0);
             p.regen_wait = REGEN_DELAY;
         }
     }
 
     let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
-    if let Some(mut d) = p.dash {
+    if let Some(mut r) = p.run {
+        r.t += dt;
+        p.vel = r.dir * curve(r.speeds, (r.t / r.length).min(1.0));
+        // Once free, steering within the turn limit hands back to normal running; sharper turns wait.
+        let sharp = wish != Vec3::ZERO && r.dir.angle_between(wish).to_degrees() > RUN_TURN_LIMIT;
+        p.run = (r.t < r.length && (r.t < r.free_at || sharp)).then_some(r);
+    } else if let Some(mut d) = p.dribble {
+        d.t += dt;
+        p.vel = d.dir * curve(d.speeds(), (d.t / DRIBBLE_SPEED_TIME).min(1.0));
+        p.dribble = (d.t < d.length()).then_some(d);
+    } else if let Some(mut d) = p.dash {
         d.t += dt;
         let speeds: &[(f32, f32)] = if d.second { &SECOND_DASH_SPEED } else { &DASH_SPEED };
         p.vel = d.dir * curve(speeds, d.t / DASH_DURATION);
-        p.dash = Some(d);
-        if d.t >= DASH_DURATION {
-            if !d.second {
-                p.second_dash_window = SECOND_DASH_WINDOW;
-            }
-            p.dash_cooldown = DASH_COOLDOWN;
-            p.dash = None;
-        }
+        p.dash = (d.t < DASH_DURATION).then_some(d);
     } else if p.locked {
         // Lock move (mechanics.md §2): face the camera, strafe, slower going backwards.
         let diff = (rig.yaw.to_radians() - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
@@ -326,7 +433,18 @@ pub fn ball_control(mut player: Single<(&Transform, &mut Player), Without<Ball>>
     let flat = Vec2::new(btf.translation.x - ptf.translation.x, btf.translation.z - ptf.translation.z);
     let moving = p.vel.length() > MOVING_THRESHOLD;
     let radius = if moving { CONTROL_RADIUS_MOVING } else { CONTROL_RADIUS_STANDING } + BALL_RADIUS;
-    if b.no_control <= 0.0 && flat.length() < radius && btf.translation.y < CONTROL_MAX_HEIGHT {
+    let in_reach = b.no_control <= 0.0 && flat.length() < radius && btf.translation.y < CONTROL_MAX_HEIGHT;
+    if p.extra_active {
+        // Extra effort can't control the ball: running into it knocks it on ahead.
+        let ahead = forward(p.facing);
+        let knock = Vec3::new(p.vel.x, 0.0, p.vel.z).length() * EXTRA_EFFORT_KNOCK;
+        if in_reach && Vec3::new(flat.x, 0.0, flat.y).dot(ahead) > 0.0 && b.vel.dot(ahead) < knock {
+            b.vel = ahead * knock + Vec3::Y * b.vel.y.max(0.0);
+            b.friction = PUSH_BALL_FRICTION;
+        }
+        return;
+    }
+    if in_reach {
         p.has_ball = true;
         b.held = true;
         b.spin = Vec3::ZERO;
@@ -353,14 +471,26 @@ pub fn kicking(
         return;
     }
 
-    // No kicks during a dash (frame-data.md). Lock move (defence stance) can shoot: the game's
-    // lock-move layer forbids it in the files, but players confirm you can shoot from stance.
-    if p.has_ball && p.kick.is_none() && p.dash.is_none() {
+    // No kicks during a dash or the first 0.2 s of a dribble (frame-data.md). Lock move (defence
+    // stance) can shoot: the game's lock-move layer forbids it in the files, but players confirm
+    // you can shoot from stance.
+    let dribble_open = p.dribble.is_none_or(|d| d.t >= DRIBBLE_WINDOW_OPENS);
+    if p.has_ball && p.kick.is_none() && p.dash.is_none() && dribble_open {
         let charged = [(Action::Shoot, Kick::Shot), (Action::Pass, Kick::Pass), (Action::Lob, Kick::Lob)];
-        let instant = [(Action::LowPowerPass, Kick::ShortPass), (Action::LowPowerLob, Kick::ShortLob), (Action::PushBall, Kick::PushBall)];
-        let pressed = instant.into_iter().chain(charged).find(|(a, _)| actions.just_pressed(*a));
+        // In lock move the push ball button dribbles instead (player_move); inside a dribble,
+        // released from lock move, it's the dribble push ball.
+        let push = if p.dribble.is_some() { Kick::DribblePushBall } else { Kick::PushBall };
+        let instant = [(Action::LowPowerPass, Kick::ShortPass), (Action::LowPowerLob, Kick::ShortLob), (Action::PushBall, push)];
+        let pressed = instant
+            .into_iter()
+            .chain(charged)
+            .filter(|(a, _)| *a != Action::PushBall || !p.locked)
+            .find(|(a, _)| actions.just_pressed(*a));
+        // Extra effort can't keep the ball: starting it touches the ball on ahead.
+        let pressed = pressed.or(p.extra_active.then_some((Action::ExtraEffort, Kick::PushBall)));
         if let Some((_, kind)) = pressed {
             axes.reset_curve();
+            p.dribble = None; // the kick takes over from the dribble
             let released = kind.charge_action().is_none();
             p.kick = Some(KickState { kind, elapsed: 0.0, held: 0.0, released, aim: Vec2::new(rig.yaw, rig.pitch) });
         }
@@ -392,6 +522,16 @@ pub fn kicking(
     let t = k.held.max(k.kind.buildup()).min(MAX_HOLD); // force uses at least the build-up time
     let ratio = t / MAX_HOLD;
     let side = axes.curve.x;
+    // Push balls go the way you steer, or straight on with no direction. The normal one loses
+    // speed going sideways or back and gains it when sprinting; the dribble one only when sprinting.
+    let push_dir = if axes.movement == Vec2::ZERO { forward(p.facing) } else { camera_relative(axes.movement.normalize(), rig.yaw).normalize() };
+    let push_angle = forward(p.facing).angle_between(push_dir).to_degrees();
+    let push_factor = match push_angle {
+        a if a <= 60.0 => 1.0,
+        a if a <= 95.0 => PUSH_BALL_SIDE_FACTOR,
+        _ => PUSH_BALL_BACK_FACTOR,
+    };
+    let sprint = |factor: f32| if p.sprinting { factor } else { 1.0 };
     let (speed, elevation, friction, no_control) = match k.kind {
         Kick::Shot => (curve(&SHOT_FORCE, t), curve(&ELEVATION_BY_PITCH, k.aim.y), SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::Pass => (curve(&PASS_FORCE, t), PASS_ELEVATION, PASS_FRICTION, NO_RECONTROL_TIME),
@@ -399,10 +539,14 @@ pub fn kicking(
         Kick::Lob => (curve(&LOB_FORCE, t), LOB_ELEVATION, SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::ShortLob => (SHORT_LOB_SPEED, LOB_ELEVATION, SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::PushBall if p.extra_active => (PUSH_BALL_SPEED, 0.0, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL_EXTRA_EFFORT),
-        Kick::PushBall => (PUSH_BALL_SPEED, 0.0, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
+        // Tired push balls ignore sprinting and pop up a little.
+        Kick::PushBall if p.exhausted => (EXHAUSTED_PUSH_BALL_SPEED * push_factor, EXHAUSTED_PUSH_BALL_LIFT, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
+        Kick::DribblePushBall if p.exhausted => (EXHAUSTED_PUSH_BALL_SPEED, EXHAUSTED_PUSH_BALL_LIFT, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
+        Kick::PushBall => (PUSH_BALL_SPEED * push_factor * sprint(PUSH_BALL_SPRINT_FACTOR), 0.0, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
+        Kick::DribblePushBall => (DRIBBLE_PUSH_BALL_SPEED * sprint(DRIBBLE_PUSH_BALL_SPRINT_FACTOR), 0.0, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
     };
     let yaw = match k.kind {
-        Kick::PushBall => p.facing, // goes where you're running
+        Kick::PushBall | Kick::DribblePushBall => (-push_dir.x).atan2(-push_dir.z),
         Kick::Shot => (k.aim.x - side * AIM_NUDGE).to_radians(), // locked at the press
         _ => pass_yaw(bindings.pass_aim, &axes, &rig),
     };
@@ -423,9 +567,20 @@ pub fn kicking(
     };
     ball.friction = friction;
     ball.no_control = no_control;
-    if k.kind == Kick::PushBall {
-        p.stamina = (p.stamina - PUSH_BALL_COST).max(0.0);
+    // After a push ball you chase it on the move's own speed (extra effort keeps its running).
+    if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) && !p.extra_active {
+        let cost = if k.kind == Kick::PushBall { PUSH_BALL_COST } else { DRIBBLE_PUSH_BALL_COST };
+        p.stamina = (p.stamina - cost).max(0.0);
         p.regen_wait = PUSH_BALL_REGEN_DELAY;
+        p.facing = yaw;
+        let state = if p.exhausted { 2 } else if p.sprinting { 1 } else { 0 };
+        let (speeds, length) = if k.kind == Kick::DribblePushBall {
+            (DRIBBLE_PUSH_BALL_RUN[state], DRIBBLE_PUSH_BALL_LENGTH[Heading::of(push_angle, 60.0, 135.0) as usize])
+        } else {
+            let i = Heading::of(push_angle, 60.0, 150.0) as usize;
+            ([PUSH_BALL_RUN, SPRINT_PUSH_BALL_RUN, EXHAUSTED_PUSH_BALL_RUN][state][i], PUSH_BALL_LENGTH[i])
+        };
+        p.run = Some(Run { t: 0.0, length: length - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, dir: flat, speeds });
     }
 }
 
@@ -478,6 +633,17 @@ pub fn camera_follow(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dribble_sectors() {
+        let d = Vec2::new(1.0, 1.0).normalize();
+        assert_eq!(dribble_heading(Vec2::Y), Heading::Forward);
+        assert_eq!(dribble_heading(d), Heading::Forward); // W+D: fast cut
+        assert_eq!(dribble_heading(Vec2::new(-d.x, d.y)), Heading::Forward); // W+A
+        assert_eq!(dribble_heading(Vec2::X), Heading::Side);
+        assert_eq!(dribble_heading(-d), Heading::Side); // S+A: side, going back
+        assert_eq!(dribble_heading(Vec2::NEG_Y), Heading::Back); // drag back
+    }
 
     #[test]
     fn pass_aim_modes() {

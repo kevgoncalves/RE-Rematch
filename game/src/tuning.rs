@@ -68,7 +68,31 @@ pub const DASH_SPEED: [(f32, f32); 6] = [(0.0, 6.0), (0.1, 8.5), (0.233, 8.5), (
 pub const SECOND_DASH_SPEED: [(f32, f32); 5] = [(0.0, 6.0), (0.1, 7.2), (0.3, 7.2), (0.7, 2.0), (1.0, 2.0)];
 pub const DASH_COOLDOWN: f32 = 0.8;
 pub const DASH_COST: f32 = 0.75;
-pub const SECOND_DASH_WINDOW: f32 = 0.3; // TUNE: how long after a dash the weaker second dash is offered
+/// The second dash can cut into the first from here, while the first one's cooldown runs.
+pub const SECOND_DASH_FROM: f32 = 14.4 / 60.0;
+
+// Dribble: the dash you do with the ball, from lock move (notes/dribble.md). The second one in a
+// chain is the feint. Speeds (m/s) run over DRIBBLE_SPEED_TIME, then hold until the move ends.
+pub const DRIBBLE_SPEED_TIME: f32 = 45.0 / 60.0;
+/// From here the feint, dribble push balls, passes and shots are allowed.
+pub const DRIBBLE_WINDOW_OPENS: f32 = 12.0 / 60.0;
+pub const DRIBBLE_FORWARD: [(f32, f32); 4] = [(0.0, 4.0), (0.2, 6.8), (0.5, 4.0), (1.0, 4.0)];
+pub const DRIBBLE_SIDE: [(f32, f32); 5] = [(0.0, 4.0), (0.1, 6.5), (0.15, 6.5), (0.35, 3.4), (1.0, 3.4)];
+pub const DRIBBLE_BACK: [(f32, f32); 5] = [(0.0, 3.0), (0.1, 5.8), (0.2, 5.8), (0.45, 3.0), (1.0, 3.0)];
+pub const FEINT_FORWARD: [(f32, f32); 5] = [(0.0, 4.0), (0.1, 6.0), (0.3, 6.0), (0.6, 4.0), (1.0, 4.0)];
+pub const FEINT_SIDE: [(f32, f32); 5] = [(0.0, 4.0), (0.2, 6.8), (0.3, 6.8), (0.5, 3.0), (1.0, 3.4)];
+pub const FEINT_BACK: [(f32, f32); 5] = [(0.0, 3.0), (0.1, 5.8), (0.2, 5.8), (0.5, 2.5), (1.0, 3.0)];
+pub const EXHAUSTED_DRIBBLE_FORWARD: [(f32, f32); 6] = [(0.0, 4.0), (0.1, 6.5), (0.15, 6.5), (0.35, 4.0), (0.8, 2.5), (1.0, 2.5)];
+pub const EXHAUSTED_DRIBBLE_SIDE: [(f32, f32); 6] = [(0.0, 4.0), (0.1, 6.5), (0.15, 6.5), (0.35, 3.5), (0.8, 1.5), (1.0, 1.5)];
+pub const EXHAUSTED_DRIBBLE_BACK: [(f32, f32); 6] = [(0.0, 4.0), (0.1, 6.5), (0.15, 6.5), (0.25, 3.5), (0.4, 2.5), (1.0, 2.5)];
+/// How long each move lasts (its animation), as (forward, side, back).
+pub const DRIBBLE_LENGTH: [f32; 3] = [54.0 / 60.0, 50.0 / 60.0, 64.0 / 60.0];
+pub const FEINT_LENGTH: [f32; 3] = [65.0 / 60.0, 50.0 / 60.0, 53.0 / 60.0];
+pub const EXHAUSTED_DRIBBLE_LENGTH: [f32; 3] = [65.0 / 60.0, 63.0 / 60.0, 67.0 / 60.0];
+pub const DRIBBLE_COST: f32 = 0.5;
+pub const DRIBBLE_REGEN_DELAY: f32 = 0.9;
+/// No new dribble until this long after a feint starts (our reading of the game's 1 s tag time).
+pub const FEINT_LOCKOUT: f32 = 12.0 / 60.0 + 1.0;
 pub const EXHAUSTED_SPRINT: f32 = 6.0;
 pub const EXHAUSTED_BALL_SPRINT: f32 = 5.0;
 
@@ -132,6 +156,29 @@ pub const PUSH_BALL_NO_CONTROL: f32 = 23.0 / 60.0;
 pub const PUSH_BALL_NO_CONTROL_EXTRA_EFFORT: f32 = 12.0 / 60.0;
 pub const PUSH_BALL_COST: f32 = 0.375;
 pub const PUSH_BALL_REGEN_DELAY: f32 = 1.0;
+/// Sprinting switches the push ball's force up; the game's factor isn't in the files (TUNE).
+pub const PUSH_BALL_SPRINT_FACTOR: f32 = 1.2;
+/// Ball speed by push direction against your facing: up to 60 deg, to 95 deg, beyond.
+pub const PUSH_BALL_SIDE_FACTOR: f32 = 0.89;
+pub const PUSH_BALL_BACK_FACTOR: f32 = 0.79;
+pub const EXHAUSTED_PUSH_BALL_SPEED: f32 = 11.25;
+pub const EXHAUSTED_PUSH_BALL_LIFT: f32 = 13.0; // degrees
+/// After the touch you chase the ball on a scripted speed (m/s over the rest of the move),
+/// as (forward, side, back); a turn of more than 30 deg waits until the move ends.
+pub const PUSH_BALL_RUN: [&[(f32, f32)]; 3] = [&[(0.0, 5.0), (0.5, 5.5), (1.0, 5.5)], &[(0.0, 3.5), (0.15, 4.5), (0.7, 5.0), (1.0, 5.0)], &[(0.0, 2.5), (0.222, 2.5), (1.0, 5.5)]];
+pub const SPRINT_PUSH_BALL_RUN: [&[(f32, f32)]; 3] = [&[(0.0, 7.0), (1.0, 7.0)], &[(0.0, 3.5), (0.15, 6.5), (0.7, 7.8), (1.0, 7.8)], &[(0.0, 3.5), (0.302, 3.5), (1.0, 7.5)]];
+pub const EXHAUSTED_PUSH_BALL_RUN: [&[(f32, f32)]; 3] = [&[(0.0, 5.5), (1.0, 5.5)], &[(0.0, 2.8), (0.15, 3.8), (0.7, 5.0), (1.0, 5.0)], &[(0.0, 2.5), (0.222, 2.5), (1.0, 5.5)]];
+pub const PUSH_BALL_LENGTH: [f32; 3] = [55.0 / 60.0, 55.0 / 60.0, 53.0 / 60.0];
+/// You're free to act again this long after the press.
+pub const PUSH_BALL_FREE: f32 = 23.0 / 60.0;
+pub const RUN_TURN_LIMIT: f32 = 30.0; // degrees
+// Push ball during a dribble: no direction falloff; x1.35 when sprinting.
+pub const DRIBBLE_PUSH_BALL_SPEED: f32 = 11.0;
+pub const DRIBBLE_PUSH_BALL_SPRINT_FACTOR: f32 = 1.35;
+pub const DRIBBLE_PUSH_BALL_COST: f32 = 0.6;
+/// You chase at a constant speed: normal, sprinting, exhausted.
+pub const DRIBBLE_PUSH_BALL_RUN: [&[(f32, f32)]; 3] = [&[(0.0, 6.0), (1.0, 6.0)], &[(0.0, 7.8), (1.0, 7.8)], &[(0.0, 5.0), (1.0, 5.0)]];
+pub const DRIBBLE_PUSH_BALL_LENGTH: [f32; 3] = [52.0 / 60.0, 47.0 / 60.0, 74.0 / 60.0];
 
 // Extra effort (mechanics.md §10)
 pub const MAX_EXTRA_EFFORT: f32 = 1.0;
@@ -140,6 +187,9 @@ pub const EXTRA_EFFORT_REGEN: f32 = 0.0625;
 pub const EXTRA_EFFORT_SPEED: f32 = 8.75;
 pub const EXTRA_EFFORT_ACCEL: f32 = 100.0;
 pub const TURN_RATE_EXTRA_EFFORT: f32 = 150.0;
+/// Extra effort can't control the ball: starting it touches the ball forward, and running into
+/// the ball knocks it on ahead of you at this share of your speed (TUNE).
+pub const EXTRA_EFFORT_KNOCK: f32 = 1.3;
 
 // Ball control (hitboxes.md)
 pub const CONTROL_RADIUS_STANDING: f32 = 0.5;
