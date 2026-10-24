@@ -1526,7 +1526,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
 
     // Ball control: in over 0.1 s, back out over 0.25 s, on top of the cycle so the legs keep
     // running.
-    let receiving = p.receiving.is_some_and(|t| t < CONTROL_ACT);
+    let receiving = p.receiving.is_some();
     anim.control += (if receiving { 1.0 } else { 0.0 } - anim.control).clamp(-dt / 0.25, dt / 0.1);
     if anim.control > 0.0 {
         let w = anim.control * anim.control * (3.0 - 2.0 * anim.control);

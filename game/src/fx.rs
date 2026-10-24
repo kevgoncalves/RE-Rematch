@@ -302,7 +302,7 @@ pub fn spawn_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
     commands.insert_resource(FxAssets { sphere: meshes.add(Sphere::new(BALL_RADIUS)), ring: meshes.add(Annulus::new(0.88, 1.0)) });
     // The trails: vertex-coloured ribbons added onto the scene.
     let glow = materials.add(StandardMaterial { base_color: Color::WHITE, unlit: true, alpha_mode: AlphaMode::Add, double_sided: true, cull_mode: None, ..default() });
-    for (source, effect) in [(Source::Ball, Effect::Dribble), (Source::Foot(1.0), Effect::Dribble), (Source::Foot(-1.0), Effect::ExtraEffort), (Source::Foot(1.0), Effect::ExtraEffort), (Source::Ball, Effect::Kick)] {
+    for (source, effect) in [(Source::Ball, Effect::Dribble), (Source::Foot(-1.0), Effect::ExtraEffort), (Source::Foot(1.0), Effect::ExtraEffort), (Source::Ball, Effect::Kick)] {
         let mesh = meshes.add(ribbon(&[], Vec3::ZERO, 0.0, 1.0, Vec3::ZERO));
         // Rebuilt every frame wherever the ball goes, so its first bounds would cull it later.
         commands.spawn((NotShadowCaster, NoFrustumCulling, Trail { source, effect, points: Vec::new(), mesh: mesh.clone() }, Mesh3d(mesh), MeshMaterial3d(glow.clone()), Transform::default(), Visibility::default()));
@@ -376,8 +376,8 @@ fn ribbon(points: &[(Vec3, f32)], eye: Vec3, width: f32, life: f32, colour: Vec3
         .with_inserted_indices(Indices::U32(indices))
 }
 
-/// The moves' trails: a dribble streaks blue behind the ball and the touching foot (players
-/// confirm the look), extra effort behind both feet. Points age out after the effect's life.
+/// The moves' trails: a dribble streaks blue behind the ball (Kev wants none on the foot), extra
+/// effort behind both feet. Points age out after the effect's life.
 pub fn trails(
     time: Res<Time>,
     player: Single<&Player>,

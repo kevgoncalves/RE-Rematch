@@ -402,16 +402,43 @@ pub const BALL_HIT_RADIUS: f32 = 0.12;
 pub const CONTROL_STANDING: (f32, f32, f32) = (0.10, 0.50, 1.85);
 pub const CONTROL_STANDING_GROUND: (f32, f32) = (0.10, 0.83);
 pub const CONTROL_MOVING: (f32, f32, f32) = (0.30, 0.90, 1.84);
-/// Running forward you can also take a ball rolling away from you.
-pub const CONTROL_MOVING_GROUND: (f32, f32, f32) = (-0.10, 0.60, 1.80);
-/// Lock move without the ball catches from any direction.
-pub const CONTROL_LOCK_MOVE: (f32, f32, f32) = (0.10, 0.675, 1.85);
+/// Running forward you can also take a ball rolling away from you: a ground zone 0.4 m behind
+/// you with no direction check, only while your velocity is within CONTROL_GROUND_SECTOR of your
+/// facing (the Season 1 ippy nerf; before it, a turned-round player took balls from 1.1 m).
+pub const CONTROL_MOVING_GROUND: (f32, f32, f32) = (-0.40, 0.60, 1.80);
+pub const CONTROL_GROUND_SECTOR: f32 = 22.5;
+/// Lock move without the ball catches from any direction. The game's radius is 0.675; Kev wants
+/// the stance to reach a little further than any zone without it (0.83 standing on the ground).
+pub const CONTROL_LOCK_MOVE: (f32, f32, f32) = (0.10, 0.95, 1.85);
 /// The normal zones refuse a ball heading away from you: this close to "away" (degrees).
 pub const CONTROL_AWAY_ANGLE: f32 = 75.0;
 /// The ball becomes yours 12 frames into the control (it settles at your feet), and you can act
-/// from the control's action frame (14 to 22 by animation; TUNE within that).
+/// from the control's action frame, by the height you take it at: feet and thighs 14f, stomach
+/// 16f, chest 20f, head 22f.
 pub const CONTROL_SNAP: f32 = 12.0 / 60.0;
-pub const CONTROL_ACT: f32 = 16.0 / 60.0;
+pub const CONTROL_ACT_BY_HEIGHT: [(f32, f32); 4] = [(0.6, 14.0 / 60.0), (1.1, 16.0 / 60.0), (1.5, 20.0 / 60.0), (f32::INFINITY, 22.0 / 60.0)];
+/// A control carries you on at your entry speed (up to 8 m/s), dipping to 90% (the control's
+/// speed scale), with no turn, until its blend-out: 30f from a walk (up to 3 m/s), 42f faster. From
+/// 14f the stick within 15 deg of the way you go leaves it.
+pub const CONTROL_CARRY: [(f32, f32); 4] = [(0.0, 1.0), (0.34, 0.9), (0.73, 1.0), (1.0, 1.0)];
+pub const CONTROL_CARRY_MAX: f32 = 8.0;
+pub const CONTROL_V0_SPEED: f32 = 3.0;
+pub const CONTROL_HAND_BACK: (f32, f32) = (30.0 / 60.0, 42.0 / 60.0);
+pub const CONTROL_EXIT_FROM: f32 = 14.0 / 60.0;
+pub const CONTROL_EXIT_ANGLE: f32 = 15.0;
+/// A ball more than this far round behind you (degrees from your facing) is taken on the back
+/// foot, settling there (m ahead, m to its side) instead of in front (the BfromS controls). TUNE.
+pub const CONTROL_BEHIND_ANGLE: f32 = 112.5;
+pub const CONTROL_REAR_SPOT: (f32, f32) = (-0.25, 0.15);
+/// A control taken with the stick more than this far off your facing (degrees) turns you to it
+/// (the game's lock-move control set): you slide on along your old line, slowing, the ball goes to
+/// the foot behind you (this far out the new way, m), and you leave the new way at the hand-back
+/// without a turn's brake (the ippy slide). TUNE.
+pub const CONTROL_TURN_ANGLE: f32 = 45.0;
+pub const CONTROL_TURN_SPOT: f32 = 0.45;
+pub const CONTROL_TURN_SLIDE: [(f32, f32); 3] = [(0.0, 1.0), (0.35, 0.6), (1.0, 0.1)];
+/// Touches come up to 20% more often as your way turns, from 20 to 180 deg/s.
+pub const TOUCH_TURN_RATES: (f32, f32) = (20.0, 180.0);
 pub const CONTROL_MAX_HEIGHT: f32 = 2.0;
 pub const DRIBBLE_OFFSET: f32 = 0.7; // TUNE: where a control settles the ball, in front
 /// Lock move with the ball: where the ball sits under the right sole (m ahead, m right), how far

@@ -37,7 +37,7 @@ pub struct Player {
     pub push_buffered: bool,
     /// Scripted chase after a push ball.
     pub run: Option<Run>,
-    /// Seconds into receiving the ball (the ball becomes yours at CONTROL_SNAP; you act from CONTROL_ACT).
+    /// Seconds into receiving the ball (the ball becomes yours at CONTROL_SNAP; you act from receive_act).
     pub receiving: Option<f32>,
     /// A kick pressed during a control, and how long it has been held: it waits for the control's
     /// action frame instead of being lost.
@@ -54,6 +54,11 @@ pub struct Player {
     pub effort_ride: f32,
     /// Where a control took the ball from.
     pub receive_from: Vec3,
+    /// The control's action frame, and where it settles the ball (m ahead, m right).
+    pub receive_act: f32,
+    pub receive_spot: Vec2,
+    /// A turning control's new way.
+    pub receive_way: Option<Vec3>,
     /// Running with the ball: its travel from one touch to the next.
     pub carry: Option<Carry>,
 }
@@ -70,6 +75,8 @@ pub struct Carry {
     touches: u32,
     /// When the dribble that owns the touches began.
     move_start: f32,
+    /// Your velocity last frame, for how fast your way turns.
+    vel: Vec3,
 }
 
 /// When a dribble's foot touches the ball, from its start (responsiveness.md): a fast cut at 17f,
@@ -266,8 +273,14 @@ pub struct Run {
     free_at: f32,
     dir: Vec3,
     speeds: &'static [(f32, f32)],
+    /// A push ball's chase follows your live sprint: its walk, sprint and tired tables.
+    tables: Option<[&'static [(f32, f32)]; 3]>,
     /// The curve's values are multiplied by this (1 for absolute speeds).
     scale: f32,
+    /// Steering within this many degrees of the way leaves it, once free.
+    exit: f32,
+    /// At its end you leave this way at once instead of handing back (a turning control).
+    leave: Option<Vec3>,
 }
 
 /// A kick from button press to ball contact. The build-up runs while the button is held.
@@ -288,6 +301,8 @@ pub struct KickState {
     /// Your velocity at the press: a shot slides on from it.
     pub entry: Vec3,
     pub from_dribble: bool,
+    /// Sprinting at the press: a push ball's sprint bonus reads this, not the touch.
+    pub sprint: bool,
     /// The push direction at the press (zero with no stick): push balls go where you steered
     /// when you pressed, not at the touch.
     pub steer: Vec3,
@@ -326,6 +341,9 @@ impl Default for Player {
             freeze: 0.0,
             effort_ride: 0.0,
             receive_from: Vec3::ZERO,
+            receive_act: 16.0 / 60.0,
+            receive_spot: Vec2::new(DRIBBLE_OFFSET, 0.0),
+            receive_way: None,
             carry: None,
         }
     }
@@ -659,13 +677,21 @@ pub fn player_move(
     let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
     if let Some(mut r) = p.run {
         r.t += dt;
-        p.vel = r.dir * curve(r.speeds, (r.t / r.length).min(1.0)) * r.scale;
+        // A push ball's chase reads your sprint live (its ball's speed was set at the press).
+        let speeds = r.tables.map_or(r.speeds, |t| t[if p.exhausted { 2 } else if p.sprinting { 1 } else { 0 }]);
+        p.vel = r.dir * curve(speeds, (r.t / r.length).min(1.0)) * r.scale;
         // Once free, steering within the turn limit leaves the chase at once; with no stick or a
         // sharper turn it runs on to the blend-out (responsiveness.md §5).
-        let exit = r.t >= r.free_at && wish != Vec3::ZERO && r.dir.angle_between(wish).to_degrees() <= RUN_TURN_LIMIT;
+        let exit = r.t >= r.free_at && wish != Vec3::ZERO && r.dir.angle_between(wish).to_degrees() <= r.exit;
         p.run = (r.t < r.length && !exit).then_some(r);
         if p.run.is_none() {
-            hand_back(p, dir_now, walking, top);
+            match r.leave {
+                Some(way) => {
+                    p.vel = way * CONTROL_V0_SPEED;
+                    p.facing = yaw_of(way);
+                }
+                None => hand_back(p, dir_now, walking, top),
+            }
         }
     } else if let Some(k) = p.kick.filter(|k| k.kind.is_pass() && Vec3::new(k.entry.x, 0.0, k.entry.z).length() > PASS_DRAG_MIN_SPEED) {
         // A pass or lob drags you on at your speed at the press, that way, with no steering
@@ -809,7 +835,7 @@ pub fn player_move(
 
 /// Whether a ball at `rel` (relative to you: x forward, y up, z right) moving at `vel` (same frame)
 /// is inside one of your control zones (BC: the character's control hitboxes).
-fn in_control_zone(rel: Vec3, vel: Vec3, speed: f32, locked: bool) -> bool {
+fn in_control_zone(rel: Vec3, vel: Vec3, speed: f32, locked: bool, turning: bool, ahead: bool) -> bool {
     let capsule = |(fwd, radius, half): (f32, f32, f32)| {
         let p = rel - Vec3::X * fwd;
         let axis_y = p.y.clamp(-(half - radius), half - radius);
@@ -819,12 +845,15 @@ fn in_control_zone(rel: Vec3, vel: Vec3, speed: f32, locked: bool) -> bool {
     if locked {
         return capsule(CONTROL_LOCK_MOVE);
     }
-    // A ball heading away from you is refused, unless you're running forward onto it.
-    let coming = vel.length() < 0.5 || rel.angle_between(vel).to_degrees() > CONTROL_AWAY_ANGLE;
-    if speed <= CONTROL_SWITCH_SPEED {
+    // A ball heading away from you is refused; only a ball at rest always passes.
+    let coming = vel.length() < ROLL_STOP_SPEED || rel.angle_between(vel).to_degrees() > CONTROL_AWAY_ANGLE;
+    // The ground zone behind you takes any ball, but only running forward (`ahead`).
+    let ground = speed > CONTROL_SWITCH_SPEED && ahead && capsule(CONTROL_MOVING_GROUND);
+    // Starting or turning uses the moving zones even when slow.
+    if speed <= CONTROL_SWITCH_SPEED && !turning {
         coming && (capsule(CONTROL_STANDING) || sphere(CONTROL_STANDING_GROUND))
     } else {
-        (coming && capsule(CONTROL_MOVING)) || capsule(CONTROL_MOVING_GROUND)
+        (coming && capsule(CONTROL_MOVING)) || ground
     }
 }
 
@@ -841,11 +870,20 @@ pub fn ball_control(
     // control's action frame.
     if let Some(t) = p.receiving {
         let t = t + time.delta_secs();
-        p.receiving = (t < CONTROL_ACT).then_some(t);
+        p.receiving = (t < p.receive_act).then_some(t);
         if !p.has_ball {
             // The ball never jumps to the foot: it blends there from where it was, eased sine-out,
             // by the control's touch frame (TouchBallComponent); only within 10 cm does it snap.
-            let target = ptf.translation + forward(p.facing) * DRIBBLE_OFFSET;
+            let fwd = forward(p.facing);
+            let target = match p.receive_way {
+                // A turning control: the ball goes to the foot behind you, out the new way, as the
+                // body turns to it by the snap.
+                Some(way) => {
+                    p.facing += angle_diff(yaw_of(way), p.facing) * (time.delta_secs() / (CONTROL_SNAP - t + time.delta_secs()).max(time.delta_secs())).min(1.0);
+                    ptf.translation + way * CONTROL_TURN_SPOT
+                }
+                None => ptf.translation + fwd * p.receive_spot.x + fwd.cross(Vec3::Y) * p.receive_spot.y,
+            };
             let target = Vec3::new(target.x, BALL_RADIUS, target.z);
             let u = if p.receive_from.distance(target) < CONTROL_SNAP_NEAR { 1.0 } else { (t / CONTROL_SNAP).min(1.0) };
             btf.translation = p.receive_from.lerp(target, (u * std::f32::consts::FRAC_PI_2).sin());
@@ -874,7 +912,9 @@ pub fn ball_control(
     let rel = Vec3::new(to_ball.dot(fwd), btf.translation.y, to_ball.dot(right));
     let vel = Vec3::new(b.vel.dot(fwd), b.vel.y, b.vel.dot(right));
     let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
-    let in_reach = b.no_control <= 0.0 && in_control_zone(rel, vel, speed, p.locked);
+    let starting = axes.movement.length() > MOVE_DIRECTION_DEAD_ZONE && speed <= CONTROL_SWITCH_SPEED;
+    let ahead = speed > 0.1 && fwd.angle_between(Vec3::new(p.vel.x, 0.0, p.vel.z)).to_degrees() <= CONTROL_GROUND_SECTOR;
+    let in_reach = b.no_control <= 0.0 && in_control_zone(rel, vel, speed, p.locked, starting || p.turn.is_some(), ahead);
     if p.extra_active {
         // Extra effort can't control the ball: touching it taps it on at 12 m/s, flat, wherever
         // your movement input points at that moment (relative to the camera), whatever way your
@@ -906,6 +946,30 @@ pub fn ball_control(
         p.receiving = Some(0.0);
         p.receive_from = btf.translation;
         b.spin = Vec3::ZERO;
+        p.receive_act = CONTROL_ACT_BY_HEIGHT.iter().find(|(h, _)| btf.translation.y < *h).map_or(22.0 / 60.0, |(_, act)| *act);
+        // A ball behind you is taken on the back foot, on its side (the BfromS controls).
+        let behind = Vec2::new(rel.x, rel.z).angle_to(Vec2::X).abs().to_degrees() > CONTROL_BEHIND_ANGLE;
+        p.receive_spot = if behind { Vec2::new(CONTROL_REAR_SPOT.0, CONTROL_REAR_SPOT.1.copysign(rel.z)) } else { Vec2::new(DRIBBLE_OFFSET, 0.0) };
+        // The control interrupts a push ball's chase and any turn, and carries you on at your entry
+        // speed (its montage's root motion) until its blend-out; a dash or lock move keeps its own.
+        p.turn = None;
+        p.run = None;
+        let flat = Vec3::new(p.vel.x, 0.0, p.vel.z);
+        let entry = flat.length();
+        // With the stick well off your facing it is a turning control: you slide on, slowing, and
+        // leave the stick's way at its hand-back (the ippy slide).
+        let wish = (axes.movement.length() > MOVE_DIRECTION_DEAD_ZONE).then(|| camera_relative(axes.movement.normalize(), rig.yaw).normalize());
+        p.receive_way = wish.filter(|w| !p.locked && p.dash.is_none() && fwd.angle_between(*w).to_degrees() > CONTROL_TURN_ANGLE);
+        if entry > 0.1 && !p.locked && p.dash.is_none() {
+            let dir = flat / entry;
+            p.run = Some(match p.receive_way {
+                Some(way) => Run { t: 0.0, length: CONTROL_HAND_BACK.0, free_at: CONTROL_HAND_BACK.0, dir, speeds: &CONTROL_TURN_SLIDE, tables: None, scale: entry.min(CONTROL_CARRY_MAX), exit: 0.0, leave: Some(way) },
+                None => {
+                    let length = if entry <= CONTROL_V0_SPEED { CONTROL_HAND_BACK.0 } else { CONTROL_HAND_BACK.1 };
+                    Run { t: 0.0, length, free_at: CONTROL_EXIT_FROM, dir, speeds: &CONTROL_CARRY, tables: None, scale: entry.min(CONTROL_CARRY_MAX), exit: CONTROL_EXIT_ANGLE, leave: None }
+                }
+            });
+        }
     }
 }
 
@@ -934,7 +998,9 @@ fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3
     let (ahead, every, own) = if p.sprinting { (TOUCH_AHEAD_SPRINT, TOUCH_EVERY_SPRINT, BALL_SPRINT_SPEED) } else { (TOUCH_AHEAD_RUN, TOUCH_EVERY_RUN, BALL_RUN_SPEED) };
     // Touches come with the steps: faster when you run faster (as the cycle's play rate), up to
     // 20% more often on sharp turns, each a little off the beat.
-    let turning = p.turn.is_some() as u8 as f32 * 0.2;
+    let (last, now_way) = (p.carry.map_or(p.vel, |c| c.vel).with_y(0.0), p.vel.with_y(0.0));
+    let rate = if last.length() > 0.1 && now_way.length() > 0.1 { last.angle_between(now_way).to_degrees() / dt.max(1e-4) } else { 0.0 };
+    let turning = 0.2 * ((rate - TOUCH_TURN_RATES.0) / (TOUCH_TURN_RATES.1 - TOUCH_TURN_RATES.0)).clamp(0.0, 1.0);
     let gap = |n: u32| {
         let jitter = ((n as f32 * 12.9898).sin() * 43758.545).fract().abs() * 0.06 - 0.01;
         every / (speed / own).clamp(0.7, 1.5) / (1.0 + turning) + jitter
@@ -947,7 +1013,7 @@ fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3
     };
     let mut c = p.carry.unwrap_or_else(|| {
         let next = now + gap(0);
-        Carry { from: ball, start: now, next, target: predict(next), touches: 0, move_start: -1.0 }
+        Carry { from: ball, start: now, next, target: predict(next), touches: 0, move_start: -1.0, vel: p.vel }
     });
     // A dribble or feint owns the touches: the ball goes from where it is to your foot by the move's
     // contact frame, then is pushed its way until the move ends.
@@ -970,6 +1036,7 @@ fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3
     }
     let alpha = ((now - c.start) / (c.next - c.start)).clamp(0.0, 1.0);
     c.target += (predict(c.next) - c.target) * (curve(&TOUCH_SPRING, alpha) * dt).min(1.0);
+    c.vel = p.vel;
     p.carry = Some(c);
     let eased = 1.0 - (1.0 - alpha).powf(TOUCH_LAUNCH);
     let pos = c.from.lerp(c.target, eased);
@@ -1094,7 +1161,7 @@ pub fn kicking(
             } else {
                 camera_relative(axes.movement.normalize(), rig.yaw).normalize()
             };
-            p.kick = Some(KickState { kind, elapsed: 0.0, held: pre, pre, released, aim: Vec2::new(rig.yaw, rig.pitch), eye: camera.translation, entry: p.vel, from_dribble, steer });
+            p.kick = Some(KickState { kind, elapsed: 0.0, held: pre, pre, released, aim: Vec2::new(rig.yaw, rig.pitch), eye: camera.translation, entry: p.vel, from_dribble, steer, sprint: p.sprinting });
         }
     }
     if p.receiving.is_none() {
@@ -1156,7 +1223,7 @@ pub fn kicking(
         a if a <= 95.0 => PUSH_BALL_SIDE_FACTOR,
         _ => PUSH_BALL_BACK_FACTOR,
     };
-    let sprint = |factor: f32| if p.sprinting { factor } else { 1.0 };
+    let sprint = |factor: f32| if k.sprint { factor } else { 1.0 };
     let (speed, elevation, friction, no_control) = match k.kind {
         // Height from the camera's pitch; a dip launches a little higher to make up for it.
         Kick::Shot => (
@@ -1219,13 +1286,13 @@ pub fn kicking(
     p.freeze = ball.freeze;
     if k.kind == Kick::Shot {
         let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
-        p.run = Some(Run { t: 0.0, length: SHOT_FOLLOW_THROUGH, free_at: SHOT_FOLLOW_THROUGH, dir: k.entry.normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], scale: speed });
+        p.run = Some(Run { t: 0.0, length: SHOT_FOLLOW_THROUGH, free_at: SHOT_FOLLOW_THROUGH, dir: k.entry.normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: speed, exit: RUN_TURN_LIMIT, leave: None });
     }
     // After the touch a pass or lob keeps dragging you until its move interrupt; steering the
     // same way leaves it at once.
     let entry = Vec3::new(k.entry.x, 0.0, k.entry.z);
     if k.kind.is_pass() && entry.length() > PASS_DRAG_MIN_SPEED {
-        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: 0.0, dir: entry.normalize(), speeds: &[(0.0, 1.0), (1.0, 1.0)], scale: entry.length() });
+        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: 0.0, dir: entry.normalize(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: entry.length(), exit: RUN_TURN_LIMIT, leave: None });
     }
     // After a push ball you chase it on the move's own speed (extra effort keeps its running).
     if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) && !p.extra_active {
@@ -1234,14 +1301,15 @@ pub fn kicking(
         p.regen_wait = PUSH_BALL_REGEN_DELAY;
         p.facing = yaw;
         let state = if p.exhausted { 2 } else if p.sprinting { 1 } else { 0 };
-        let (speeds, length) = if k.kind == Kick::DribblePushBall {
-            (DRIBBLE_PUSH_BALL_RUN[state], DRIBBLE_PUSH_BALL_LENGTH[Heading::of(push_angle, 60.0, 135.0) as usize])
+        let (tables, length) = if k.kind == Kick::DribblePushBall {
+            (DRIBBLE_PUSH_BALL_RUN, DRIBBLE_PUSH_BALL_LENGTH[Heading::of(push_angle, 60.0, 135.0) as usize])
         } else {
             let i = Heading::of(push_angle, 60.0, 150.0) as usize;
-            ([PUSH_BALL_RUN, SPRINT_PUSH_BALL_RUN, EXHAUSTED_PUSH_BALL_RUN][state][i], PUSH_BALL_LENGTH[i])
+            ([PUSH_BALL_RUN[i], SPRINT_PUSH_BALL_RUN[i], EXHAUSTED_PUSH_BALL_RUN[i]], PUSH_BALL_LENGTH[i])
         };
+        let speeds = tables[state];
         // The chase runs to the animation's blend-out, or ends earlier on a stick exit.
-        p.run = Some(Run { t: 0.0, length: length - BLEND_OUT - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, dir: flat, speeds, scale: 1.0 });
+        p.run = Some(Run { t: 0.0, length: length - BLEND_OUT - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, dir: flat, speeds, tables: Some(tables), scale: 1.0, exit: RUN_TURN_LIMIT, leave: None });
     }
 }
 
@@ -1521,14 +1589,19 @@ mod tests {
         let away = Vec3::new(5.0, 0.0, 0.0);
         let ground = |x: f32| Vec3::new(x, BALL_RADIUS, 0.0);
         // Standing: a ball rolling at you is taken within ~0.95 m of a point 0.1 m ahead.
-        assert!(in_control_zone(ground(0.9), toward, 0.0, false));
-        assert!(!in_control_zone(ground(1.2), toward, 0.0, false));
-        // A ball rolling away is refused standing, but taken running forward onto it.
-        assert!(!in_control_zone(ground(0.4), away, 0.0, false));
-        assert!(in_control_zone(ground(0.4), away, 6.0, false));
+        assert!(in_control_zone(ground(0.9), toward, 0.0, false, false, true));
+        assert!(!in_control_zone(ground(1.2), toward, 0.0, false, false, true));
+        // A ball rolling away is refused standing, but taken running forward onto it, once it is
+        // almost under you (the ground zone sits 0.4 m behind); turned round, it isn't.
+        assert!(!in_control_zone(ground(0.2), away, 0.0, false, false, true));
+        assert!(in_control_zone(ground(0.2), away, 6.0, false, false, true));
+        assert!(!in_control_zone(ground(0.5), away, 6.0, false, false, true));
+        assert!(!in_control_zone(ground(0.2), away, 6.0, false, false, false));
+        // Starting or turning, the moving zones are on even when slow.
+        assert!(in_control_zone(ground(1.25), toward, 1.0, false, true, true));
         // Moving, the zone reaches further ahead; lock move catches from any side.
-        assert!(in_control_zone(ground(1.25), toward, 4.0, false));
-        assert!(in_control_zone(Vec3::new(0.0, BALL_RADIUS, 0.7), away, 0.0, true));
+        assert!(in_control_zone(ground(1.25), toward, 4.0, false, false, true));
+        assert!(in_control_zone(Vec3::new(0.0, BALL_RADIUS, 0.7), away, 0.0, true, false, true));
     }
 
     #[test]
