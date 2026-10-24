@@ -154,8 +154,7 @@ fn marker_for(pos: Vec3, ball: &Ball, min_speed: f32) -> Option<MarkerSpot> {
 
 #[derive(Component)]
 pub struct Marker {
-    mesh: Handle<Mesh>,
-    total: f32,
+    /// Seconds until the ball gets there (the marker shows no countdown: Rematch's doesn't).
     left: f32,
     /// On a wall or post: when the ball gets there the next marker follows from the bounce.
     chain: bool,
@@ -292,13 +291,13 @@ const MARKER_RADII: (f32, f32) = (0.36, 0.43);
 const MARKER_BLUE: Vec3 = Vec3::new(0.0, 0.25, 0.84);
 const MARKER_CYAN: Vec3 = Vec3::new(0.0, 0.68, 0.74);
 
-fn ring(fill: f32) -> Mesh {
+fn ring() -> Mesh {
     let n = 48;
     let (inner, outer) = MARKER_RADII;
     let mut positions = Vec::new();
     let mut colours = Vec::new();
     for i in 0..=n {
-        let a = FRAC_PI_2 + fill * TAU * i as f32 / n as f32;
+        let a = FRAC_PI_2 + TAU * i as f32 / n as f32;
         let (s, c) = a.sin_cos();
         positions.push([c * inner, 0.0, -s * inner]);
         positions.push([c * outer, 0.0, -s * outer]);
@@ -359,13 +358,13 @@ fn marker_arrow() -> Mesh {
 }
 
 pub fn spawn_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
-    // The marker (NS_Bounce): a glowing blue ring that runs down as the ball comes, a soft glow
-    // inside it and an arrow the way the ball comes in, all added light drawn over the ground.
+    // The marker (NS_Bounce): a glowing blue ring, a soft glow inside it and an arrow the way the
+    // ball comes in, all added light drawn over the ground.
     let flat = |c: Color, mode: AlphaMode| StandardMaterial { base_color: c, unlit: true, alpha_mode: mode, double_sided: true, cull_mode: None, depth_bias: 50.0, ..default() };
-    let mesh = meshes.add(ring(1.0));
+    let mesh = meshes.add(ring());
     let light = materials.add(flat(Color::WHITE, AlphaMode::Add));
     commands
-        .spawn((Marker { mesh: mesh.clone(), total: 1.0, left: 0.0, chain: false }, Transform::default(), Visibility::Hidden))
+        .spawn((Marker { left: 0.0, chain: false }, Transform::default(), Visibility::Hidden))
         .with_children(|m| {
             m.spawn((NotShadowCaster, Mesh3d(mesh), MeshMaterial3d(light.clone()), Transform::from_xyz(0.0, 0.02, 0.0)));
             m.spawn((NotShadowCaster, Mesh3d(meshes.add(glow_disc())), MeshMaterial3d(light.clone()), Transform::from_xyz(0.0, 0.015, 0.0)));
@@ -497,7 +496,7 @@ pub fn trails(
 }
 
 /// The kick marker: placed where a fast kick will first hit a wall or post (lying on it), or else
-/// where it will stop, its ring running down as the ball gets there. At a wall or post the next
+/// where it will stop, until the ball gets there. At a wall or post the next
 /// one follows from the bounce; it is gone when the ball has nearly stopped on it, when anyone
 /// gains the ball, or at the next kick.
 pub fn kick_marker(
@@ -506,7 +505,6 @@ pub fn kick_marker(
     ball: Single<(&Transform, &Ball)>,
     mut marker: Single<(&mut Marker, &mut Transform, &mut Visibility), Without<Ball>>,
     mut arrow: Single<(&mut Transform, &mut Visibility), (With<MarkerArrow>, Without<Marker>, Without<Ball>)>,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut last_kick: Local<Option<Kick>>,
 ) {
     let (btf, b) = *ball;
@@ -527,7 +525,7 @@ pub fn kick_marker(
     if let Some(s) = spot {
         tf.translation = s.at + s.normal * 0.01;
         tf.rotation = Quat::from_rotation_arc(Vec3::Y, s.normal);
-        (m.total, m.left, m.chain) = (s.t, s.t, s.normal != Vec3::Y);
+        (m.left, m.chain) = (s.t, s.normal != Vec3::Y);
         let flat = Vec3::new(s.way.x, 0.0, s.way.z);
         **avis = if m.chain || flat.length() < 0.1 { Visibility::Hidden } else { Visibility::Inherited };
         atf.rotation = Quat::from_rotation_y((-flat.x).atan2(-flat.z));
@@ -537,11 +535,6 @@ pub fn kick_marker(
     }
     m.left -= time.delta_secs();
     **vis = if m.left > 0.0 { Visibility::Inherited } else { Visibility::Hidden };
-    if m.left > 0.0
-        && let Some(mesh) = meshes.get_mut(&m.mesh)
-    {
-        *mesh = ring((m.left / m.total).clamp(0.0, 1.0));
-    }
 }
 
 /// The legs' materials (shins and boots), which glow in extra effort.
