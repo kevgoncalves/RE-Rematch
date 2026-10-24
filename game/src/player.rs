@@ -533,7 +533,8 @@ pub fn kicking(
     // No kicks during a dash or the first 0.2 s of a dribble (frame-data.md). Lock move (defence
     // stance) can shoot: the game's lock-move layer forbids it in the files, but players confirm
     // you can shoot from stance.
-    // Shots are open at any moment of a dribble (players confirm), the rest from 0.2 s.
+    // Shots, passes and lobs are open at any moment of a dribble (players confirm); the dribble
+    // push ball waits for 0.2 s.
     let dribble_open = p.dribble.is_none_or(|d| d.t >= DRIBBLE_WINDOW_OPENS);
     // A push ball pressed early in a dribble waits for the window instead of being lost (the game
     // buffers 0.1 s; players find it more responsive than that).
@@ -553,7 +554,7 @@ pub fn kicking(
             .into_iter()
             .chain(charged)
             .filter(|(a, _)| *a != Action::PushBall || !p.locked)
-            .filter(|(a, _)| dribble_open || *a == Action::Shoot)
+            .filter(|(a, _)| dribble_open || *a != Action::PushBall)
             .find(|(a, _)| actions.just_pressed(*a) || (*a == Action::PushBall && buffered_push));
         // Extra effort can't keep the ball: starting it touches the ball on ahead.
         let pressed = pressed.or((p.extra_active && dribble_open).then_some((Action::ExtraEffort, Kick::PushBall)));
