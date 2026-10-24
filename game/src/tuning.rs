@@ -69,6 +69,8 @@ pub const LOCK_BALL_ACCEL: f32 = LOCK_BALL_SPEED / 0.2;
 /// Turning to face the camera in lock move. The speed table says 400 deg/s for outfielders (nothing
 /// with the ball), but players find the turn to the front much quicker (TUNE).
 pub const LOCK_TURN_RATE: f32 = 720.0;
+/// Stance (lock move with the ball) lasts at least this long from the press (GA_DribbleStance).
+pub const STANCE_MIN_TIME: f32 = 0.15;
 /// Angle between facing and movement (degrees) to speed multiplier.
 pub const LOCK_SPEED_BY_ANGLE: [(f32, f32); 3] = [(0.0, 1.0), (90.0, 1.0), (180.0, 0.9)];
 pub const LOCK_BALL_SPEED_BY_ANGLE: [(f32, f32); 4] = [(0.0, 1.0), (90.0, 0.95), (135.0, 0.88), (180.0, 0.88)];

@@ -25,6 +25,11 @@ pub struct Player {
     pub has_ball: bool,
     pub kick: Option<KickState>,
     pub locked: bool,
+    /// How long lock move has been on, whether you had the ball last frame, and whether losing it
+    /// ended lock move (which then needs a fresh press).
+    pub lock_time: f32,
+    pub had_ball: bool,
+    pub relock_needed: bool,
     pub dash: Option<DashState>,
     pub dash_cooldown: f32,
     pub second_dash_cooldown: f32,
@@ -147,6 +152,9 @@ impl Default for Player {
             has_ball: false,
             kick: None,
             locked: false,
+            lock_time: 0.0,
+            had_ball: false,
+            relock_needed: false,
             dash: None,
             dash_cooldown: 0.0,
             second_dash_cooldown: 0.0,
@@ -302,7 +310,20 @@ pub fn player_move(
     let input = axes.movement;
     let wish = camera_relative(input, rig.yaw);
 
-    p.locked = actions.held(Action::Lock);
+    // Lock move follows the button, with two rules from the stance ability: with the ball it lasts
+    // at least 0.15 s (the release is only checked then), and losing the ball ends it until you
+    // press again.
+    let held = actions.held(Action::Lock);
+    if !held {
+        p.relock_needed = false;
+    }
+    if p.had_ball && !p.has_ball && p.locked {
+        p.relock_needed = true;
+    }
+    let min_stance = p.locked && p.has_ball && p.lock_time < STANCE_MIN_TIME;
+    p.locked = (held && !p.relock_needed) || min_stance;
+    p.lock_time = if p.locked { p.lock_time + dt } else { 0.0 };
+    p.had_ball = p.has_ball;
 
     // Dribble (notes/dribble.md): the dash you do with the ball, from lock move, on the push ball
     // or dash button. From 0.2 s into it the same press chains the feint; nothing chains after a
@@ -357,7 +378,11 @@ pub fn player_move(
     }
 
     // Extra effort: its own gauge, instant acceleration (mechanics.md §10)
-    if actions.just_pressed(Action::ExtraEffort) && p.extra_effort > 0.05 {
+    // No extra effort (or sprint) in lock move: its layers remove both.
+    if p.locked {
+        p.extra_active = false;
+    }
+    if actions.just_pressed(Action::ExtraEffort) && p.extra_effort > 0.05 && !p.locked {
         p.extra_effort -= EXTRA_EFFORT_START_COST;
         p.extra_active = true;
         let dir = if wish != Vec3::ZERO { wish.normalize() } else { forward(p.facing) };
