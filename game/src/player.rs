@@ -271,7 +271,7 @@ pub fn player_move(
     let input = axes.movement;
     let wish = camera_relative(input, rig.yaw);
 
-    p.locked = actions.pressed(Action::Lock);
+    p.locked = actions.held(Action::Lock);
 
     // Dribble (notes/dribble.md): the dash you do with the ball, from lock move, on the push ball
     // or dash button. From 0.2 s into it the same press chains the feint; nothing chains after a
@@ -417,7 +417,9 @@ pub fn player_move(
     tf.translation += p.vel * dt;
     tf.translation.x = tf.translation.x.clamp(-HALF_WIDTH + 0.4, HALF_WIDTH - 0.4);
     tf.translation.z = tf.translation.z.clamp(-HALF_LENGTH + 0.4, HALF_LENGTH - 0.4);
-    tf.rotation = Quat::from_rotation_y(p.facing);
+    // ponytail: no animations yet, so a dribble leans the body into its move to make it readable.
+    let lean = p.dribble.map_or(Quat::IDENTITY, |d| Quat::from_axis_angle(Vec3::Y.cross(d.dir).normalize(), 0.035 * p.vel.length()));
+    tf.rotation = lean * Quat::from_rotation_y(p.facing);
 }
 
 pub fn ball_control(mut player: Single<(&Transform, &mut Player), Without<Ball>>, mut ball: Single<(&mut Transform, &mut Ball)>) {
@@ -438,7 +440,8 @@ pub fn ball_control(mut player: Single<(&Transform, &mut Player), Without<Ball>>
         // Extra effort can't control the ball: running into it knocks it on ahead.
         let ahead = forward(p.facing);
         let knock = Vec3::new(p.vel.x, 0.0, p.vel.z).length() * EXTRA_EFFORT_KNOCK;
-        if in_reach && Vec3::new(flat.x, 0.0, flat.y).dot(ahead) > 0.0 && b.vel.dot(ahead) < knock {
+        let touching = flat.length() < EXTRA_EFFORT_KNOCK_REACH && btf.translation.y < CONTROL_MAX_HEIGHT;
+        if b.no_control <= 0.0 && touching && Vec3::new(flat.x, 0.0, flat.y).dot(ahead) > 0.0 && b.vel.dot(ahead) < knock {
             b.vel = ahead * knock + Vec3::Y * b.vel.y.max(0.0);
             b.friction = PUSH_BALL_FRICTION;
         }
@@ -643,6 +646,43 @@ mod tests {
         assert_eq!(dribble_heading(Vec2::X), Heading::Side);
         assert_eq!(dribble_heading(-d), Heading::Side); // S+A: side, going back
         assert_eq!(dribble_heading(Vec2::NEG_Y), Heading::Back); // drag back
+    }
+
+    /// Runs player_move for `frames` frames of `dt` with `held` held (pressed on the first one).
+    fn frames(app: &mut App, held: &[Action], frames: u32, dt: f32) {
+        for _ in 0..frames {
+            app.world_mut().resource_mut::<Actions>().hold(held);
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(dt));
+            app.update();
+        }
+    }
+
+    fn dribble(app: &mut App) -> Option<DribbleState> {
+        app.world_mut().query::<&Player>().single(app.world()).unwrap().dribble
+    }
+
+    #[test]
+    fn dribble_chain() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+        app.world_mut().spawn((Transform::default(), Player { has_ball: true, ..default() }));
+        app.world_mut().spawn(CameraRig::default());
+        let (lock, press) = ([Action::Lock].as_slice(), [Action::Lock, Action::PushBall].as_slice());
+
+        frames(&mut app, lock, 1, 0.016);
+        frames(&mut app, press, 1, 0.016);
+        assert!(dribble(&mut app).is_some_and(|d| !d.feint), "lock move + push ball dribbles");
+        // Too early for the feint, then in its window.
+        frames(&mut app, lock, 1, 0.016);
+        frames(&mut app, press, 1, 0.016);
+        assert!(dribble(&mut app).is_some_and(|d| !d.feint));
+        frames(&mut app, lock, 5, 0.04);
+        frames(&mut app, press, 1, 0.016);
+        assert!(dribble(&mut app).is_some_and(|d| d.feint && d.t < 0.05), "the feint chains from 0.2 s");
+        // Nothing chains after the feint.
+        frames(&mut app, lock, 6, 0.04);
+        frames(&mut app, press, 1, 0.016);
+        assert!(dribble(&mut app).is_some_and(|d| d.feint && d.t > 0.2));
     }
 
     #[test]

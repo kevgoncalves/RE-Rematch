@@ -248,6 +248,18 @@ impl Actions {
     pub fn just_pressed(&self, a: Action) -> bool {
         self.now.contains(&a) && !self.prev.contains(&a)
     }
+    /// Held, even while a longer chord containing it wins: lock move (Ctrl) stays on during the
+    /// dash chord (Ctrl + C), which is how a dash or dribble from lock move is pressed.
+    pub fn held(&self, a: Action) -> bool {
+        self.raw_prev.contains(&a) // already this frame's chords once read_input has run
+    }
+
+    /// For tests: start a frame with exactly these actions held.
+    #[cfg(test)]
+    pub fn hold(&mut self, held: &[Action]) {
+        self.prev = std::mem::replace(&mut self.now, held.iter().copied().collect());
+        self.raw_prev = self.now.clone();
+    }
 }
 
 /// Analog inputs for this frame.

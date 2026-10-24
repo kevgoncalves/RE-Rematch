@@ -4,6 +4,7 @@ mod ball;
 mod gauges;
 mod input;
 mod menu;
+mod pass_line;
 mod player;
 mod reticle;
 mod tuning;
@@ -30,7 +31,7 @@ fn main() {
                 // The Vulkan loader logs stale overlay layers some launchers leave registered; harmless noise.
                 .set(bevy::log::LogPlugin { filter: "wgpu=error,naga=warn,wgpu_hal::vulkan::instance=off".into(), ..default() }),
         )
-        .add_plugins((UiMaterialPlugin::<reticle::ReticleMaterial>::default(), UiMaterialPlugin::<gauges::GaugeMaterial>::default()))
+        .add_plugins((UiMaterialPlugin::<reticle::ReticleMaterial>::default(), UiMaterialPlugin::<gauges::GaugeMaterial>::default(), MaterialPlugin::<pass_line::PassLineMaterial>::default()))
         .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)))
         .init_resource::<Score>()
         .insert_resource(Bindings::load())
@@ -39,7 +40,7 @@ fn main() {
         .init_resource::<InputBlocked>()
         .init_resource::<menu::Menu>()
         .add_event::<GoalScored>()
-        .add_systems(Startup, (setup, menu::spawn_menu, reticle::spawn_reticle, gauges::spawn_gauges))
+        .add_systems(Startup, (setup, menu::spawn_menu, reticle::spawn_reticle, gauges::spawn_gauges, pass_line::spawn_pass_line))
         .add_systems(
             Update,
             (
@@ -60,7 +61,7 @@ fn main() {
                 player::camera_follow,
                 update_hud,
                 reticle::update_reticle,
-                reticle::pass_line,
+                pass_line::update_pass_line,
                 gauges::update_gauges,
                 auto_screenshot,
             )

@@ -1,15 +1,14 @@
 //! Aim aids, as in Rematch (values from its crosshair widget, notes/hud.md):
 //! - a reticle of two short arcs, white with a soft dark outline. Charging a shot closes them
 //!   into a faint circle that fills solid from the bottom with the shot's force, and shows a
-//!   Magnus point that follows the curve input. Lock move closes them too, at full opacity;
-//! - a line on the ground in the pass direction, blue going green as the pass gets stronger
-//!   (Rematch has no charge bar for passes).
+//!   Magnus point that follows the curve input. Lock move closes them too, at full opacity.
+//! Rematch has no charge bar for passes; the pass line (pass_line.rs) shows their strength.
 
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderRef};
 
-use crate::input::{Axes, Bindings};
-use crate::player::{CameraRig, Kick, Player, forward, pass_yaw};
+use crate::input::Axes;
+use crate::player::{Kick, Player};
 use crate::tuning::*;
 
 /// Reticle size at 1080p; scaled with the window height like the game's UI.
@@ -25,8 +24,6 @@ const FORCE_IN: f32 = 0.083;
 const FORCE_OUT: f32 = 0.2;
 const DEFENSE: f32 = 0.214;
 
-const LINE_WEAK: Color = Color::srgb(0.2, 0.5, 1.0);
-const LINE_STRONG: Color = Color::srgb(0.2, 1.0, 0.35);
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Default)]
 pub struct ReticleMaterial {
@@ -79,7 +76,7 @@ pub fn spawn_reticle(mut commands: Commands, mut materials: ResMut<Assets<Reticl
 }
 
 /// Charge as a 0..1 share of the kick's own force range, for the reticle and the line colour.
-fn power(kind: Kick, held: f32) -> f32 {
+pub fn power(kind: Kick, held: f32) -> f32 {
     let (points, min, max): (&[(f32, f32)], f32, f32) = match kind {
         Kick::Shot => (&SHOT_FORCE, SHOT_FORCE[0].1, SHOT_FORCE[2].1),
         Kick::Pass => (&PASS_FORCE, PASS_FORCE[0].1, PASS_FORCE[2].1), // peak is the 0.6 s sweet spot
@@ -130,15 +127,4 @@ pub fn update_reticle(
         m.magnus = Vec4::new(anim.curve.x, anim.curve.y, aim, 0.0);
     }
 
-}
-
-/// Ground line in the pass direction while a pass or lob charges.
-pub fn pass_line(mut gizmos: Gizmos, player: Single<(&Transform, &Player)>, rig: Single<&CameraRig>, axes: Res<Axes>, bindings: Res<Bindings>) {
-    let (tf, p) = *player;
-    let Some(k) = p.kick.filter(|k| k.kind.is_pass() && !k.released) else { return };
-    let t = power(k.kind, k.held);
-    let dir = forward(pass_yaw(bindings.pass_aim, &axes, &rig));
-    let start = Vec3::new(tf.translation.x, 0.03, tf.translation.z) + dir * 0.6;
-    let color = LINE_WEAK.mix(&LINE_STRONG, t);
-    gizmos.line(start, start + dir * (4.0 + 6.0 * t), color);
 }

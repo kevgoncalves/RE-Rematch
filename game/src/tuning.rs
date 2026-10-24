@@ -190,6 +190,8 @@ pub const TURN_RATE_EXTRA_EFFORT: f32 = 150.0;
 /// Extra effort can't control the ball: starting it touches the ball forward, and running into
 /// the ball knocks it on ahead of you at this share of your speed (TUNE).
 pub const EXTRA_EFFORT_KNOCK: f32 = 1.3;
+/// Ball centre distance at which the body touches it (capsule 0.35 m + ball).
+pub const EXTRA_EFFORT_KNOCK_REACH: f32 = 0.35 + BALL_RADIUS + 0.05;
 
 // Ball control (hitboxes.md)
 pub const CONTROL_RADIUS_STANDING: f32 = 0.5;
