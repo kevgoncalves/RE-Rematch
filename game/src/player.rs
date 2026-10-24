@@ -32,6 +32,9 @@ pub struct Player {
     pub dribble_lockout: f32,
     /// A push ball pressed before the dribble's window opened, waiting for it.
     pub push_buffered: bool,
+    /// Seconds since you last gained the ball, and since you last pressed push ball without it.
+    pub since_control: f32,
+    pub push_press_age: f32,
     /// Scripted chase after a push ball.
     pub run: Option<Run>,
 }
@@ -127,6 +130,8 @@ pub struct KickState {
     /// Your velocity at the press: a shot slides on from it.
     pub entry: Vec3,
     pub from_dribble: bool,
+    /// A control push ball, and the direction (yaw) you snapped to.
+    pub control: Option<f32>,
 }
 
 impl Default for Player {
@@ -151,6 +156,8 @@ impl Default for Player {
             dribble: None,
             dribble_lockout: 0.0,
             push_buffered: false,
+            since_control: f32::INFINITY,
+            push_press_age: f32::INFINITY,
             run: None,
         }
     }
@@ -550,6 +557,7 @@ pub fn ball_control(mut player: Single<(&Transform, &mut Player), Without<Ball>>
         return;
     }
     if in_reach {
+        p.since_control = 0.0;
         p.has_ball = true;
         b.held = true;
         b.spin = Vec3::ZERO;
@@ -567,6 +575,11 @@ pub fn kicking(
 ) {
     let dt = time.delta_secs();
     let p = &mut **player;
+    p.since_control += dt;
+    p.push_press_age += dt;
+    if actions.just_pressed(Action::PushBall) && !p.has_ball {
+        p.push_press_age = 0.0;
+    }
 
     // A pass press while charging a shot is a fake shot (Rematch binds both to the same button).
     if p.charging_shot() && actions.just_pressed(Action::FakeShot) {
@@ -604,8 +617,13 @@ pub fn kicking(
             .find(|(a, _)| actions.just_pressed(*a) || (*a == Action::PushBall && buffered_push));
         // Extra effort can't keep the ball: starting it touches the ball on ahead.
         let pressed = pressed.or((p.extra_active && dribble_open).then_some((Action::ExtraEffort, Kick::PushBall)));
+        // Pressed right as the ball is controlled (or just before it arrived): a control push ball.
+        let control_press = actions.just_pressed(Action::PushBall) || p.push_press_age < CONTROL_PUSH_BUFFER;
+        let control = p.since_control < CONTROL_PUSH_WINDOW && control_press && !p.locked && p.dribble.is_none();
+        let pressed = if control { Some((Action::PushBall, Kick::PushBall)) } else { pressed };
         if let Some((_, kind)) = pressed {
             axes.reset_curve();
+            p.push_press_age = f32::INFINITY;
             let from_dribble = p.dribble.is_some();
             // Shots and push balls take over from the dribble; a pass or lob keeps its momentum
             // (players confirm), so the dribble runs on under it.
@@ -614,7 +632,15 @@ pub fn kicking(
             }
             p.push_buffered = false;
             let released = kind.charge_action().is_none();
-            p.kick = Some(KickState { kind, elapsed: 0.0, held: 0.0, released, aim: Vec2::new(rig.yaw, rig.pitch), entry: p.vel, from_dribble });
+            // The control push ball snaps you at once to where you're steering, or to the camera.
+            let control = control.then(|| {
+                let dir = if axes.movement == Vec2::ZERO { forward(rig.yaw.to_radians()) } else { camera_relative(axes.movement.normalize(), rig.yaw) };
+                yaw_of(dir)
+            });
+            if let Some(yaw) = control {
+                p.facing = yaw;
+            }
+            p.kick = Some(KickState { kind, elapsed: 0.0, held: 0.0, released, aim: Vec2::new(rig.yaw, rig.pitch), entry: p.vel, from_dribble, control });
         }
     }
 
@@ -665,6 +691,7 @@ pub fn kicking(
         Kick::ShortPass => (SHORT_PASS_SPEED, PASS_ELEVATION, SHORT_PASS_FRICTION, NO_RECONTROL_TIME),
         Kick::Lob => (curve(&LOB_FORCE, t), LOB_ELEVATION, SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::ShortLob => (SHORT_LOB_SPEED, LOB_ELEVATION, SHOT_FRICTION, NO_RECONTROL_TIME),
+        Kick::PushBall if k.control.is_some() => (CONTROL_PUSH_BALL_SPEED, 0.0, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
         Kick::PushBall if p.extra_active => (
             EXTRA_EFFORT_TAP_SPEED,
             0.0,
@@ -678,6 +705,7 @@ pub fn kicking(
         Kick::DribblePushBall => (DRIBBLE_PUSH_BALL_SPEED * sprint(DRIBBLE_PUSH_BALL_SPRINT_FACTOR), 0.0, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
     };
     let yaw = match k.kind {
+        Kick::PushBall if k.control.is_some() => k.control.unwrap(),
         Kick::PushBall | Kick::DribblePushBall => (-push_dir.x).atan2(-push_dir.z),
         Kick::Shot => (k.aim.x - side * AIM_NUDGE).to_radians(), // locked at the press
         _ => pass_yaw(bindings.pass_aim, &axes, &rig),
@@ -704,7 +732,7 @@ pub fn kicking(
         p.run = Some(Run { t: 0.0, length: SHOT_FOLLOW_THROUGH, free_at: SHOT_FOLLOW_THROUGH, dir: k.entry.normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], scale: speed });
     }
     // After a push ball you chase it on the move's own speed (extra effort keeps its running).
-    if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) && !p.extra_active {
+    if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) && !p.extra_active && k.control.is_none() {
         let cost = if k.kind == Kick::PushBall { PUSH_BALL_COST } else { DRIBBLE_PUSH_BALL_COST };
         p.stamina = (p.stamina - cost).max(0.0);
         p.regen_wait = PUSH_BALL_REGEN_DELAY;
