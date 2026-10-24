@@ -41,6 +41,10 @@ pub struct Player {
     pub receiving: Option<f32>,
     /// A turn transition in progress.
     pub turn: Option<Turn>,
+    /// Movement input directions that stopped being current in the last 50 ms (time left), and
+    /// the current one: a sharp change against them starts a turn.
+    pub recent_input: Vec<(f32, Vec3)>,
+    pub last_input: Vec3,
 }
 
 #[derive(Clone, Copy)]
@@ -136,13 +140,51 @@ impl DribbleState {
 /// A big change of direction: brake along `from`, then re-accelerate along `to`.
 #[derive(Clone, Copy)]
 pub struct Turn {
+    /// Seconds into the turn (a catch-up starts it partway into the brake).
     t: f32,
+    /// Your velocity's direction at the start: the brake slides along it.
     from: Vec3,
-    to: Vec3,
+    /// The turn's current direction: the re-acceleration runs along it.
+    cur: Vec3,
     entry: f32,
-    target: f32,
+    /// The pivot as a share of top speed.
+    share: f32,
     brake: TurnPhase,
     accel: TurnPhase,
+    big: bool,
+    ball: bool,
+    sprint: bool,
+    face_from: f32,
+    face_t: f32,
+    face_time: f32,
+}
+
+/// Starts a turn toward `dir` (turns.md §2). Entering slower than top speed, the game treats you
+/// as at top speed and starts the brake where its curve gives your speed, at most 20% in.
+fn start_turn(p: &Player, dir: Vec3, big: bool, speed: f32, top: f32) -> Turn {
+    let (brake, accel, share) = turn_data(p.sprint_running, p.has_ball, big);
+    let pivot = share * top;
+    let (entry, skip) = if speed < top {
+        let u = (0..=100).map(|i| i as f32 / 100.0).find(|u| pivot + (top - pivot) * curve(brake.1, *u) <= speed).unwrap_or(1.0);
+        (top, u.min(TURN_CATCH_UP_MAX) * brake.0)
+    } else {
+        (speed, 0.0)
+    };
+    Turn {
+        t: skip,
+        from: Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or(dir),
+        cur: dir,
+        entry,
+        share,
+        brake,
+        accel,
+        big,
+        ball: p.has_ball,
+        sprint: p.sprint_running,
+        face_from: p.facing,
+        face_t: 0.0,
+        face_time: TURN_FACE_TIME.min(brake.0 - skip),
+    }
 }
 
 /// Moving on a scripted speed curve (m/s over the run's normalised time).
@@ -202,6 +244,8 @@ impl Default for Player {
             run: None,
             receiving: None,
             turn: None,
+            recent_input: Vec::new(),
+            last_input: Vec3::ZERO,
         }
     }
 }
@@ -365,9 +409,24 @@ pub fn player_move(
     p.locked = (held && !p.relock_needed) || min_stance;
     p.lock_time = if p.locked { p.lock_time + dt } else { 0.0 };
     p.had_ball = p.has_ball;
-    if p.locked || p.extra_active || p.dribble.is_some_and(|d| d.moving()) || p.dash.is_some() {
-        p.turn = None; // other movement takes over from a turn transition
+    // Other movement takes over from a turn; gaining or losing the ball cancels it too.
+    if p.locked || p.extra_active || p.dribble.is_some_and(|d| d.moving()) || p.dash.is_some() || p.turn.is_some_and(|t| t.ball != p.has_ball) {
+        p.turn = None;
     }
+    // Recent inputs: each one stays for 50 ms after it stops being current.
+    let dir_now = wish.normalize_or_zero();
+    for (life, _) in &mut p.recent_input {
+        *life -= dt;
+    }
+    p.recent_input.retain(|(life, _)| *life > 0.0);
+    if dir_now.angle_between(p.last_input).to_degrees() > 1.0 || (dir_now == Vec3::ZERO) != (p.last_input == Vec3::ZERO) {
+        if p.last_input != Vec3::ZERO {
+            let last = p.last_input;
+            p.recent_input.push((TURN_INPUT_HISTORY, last));
+        }
+        p.last_input = dir_now;
+    }
+    let walking = input.length() < WALK_INPUT;
     // A move's direction needs a 0.3 tilt; less is no direction (keys are always full).
     let tap_input = if input.length() < MOVE_DIRECTION_DEAD_ZONE { Vec2::ZERO } else { input };
 
@@ -568,32 +627,53 @@ pub fn player_move(
         let diff = (yaw - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
         let max_turn = turn.to_radians() * dt;
         p.facing += diff.clamp(-max_turn, max_turn);
-    } else if let Some(mut tr) = p.turn.filter(|_| !p.locked) {
-        // Turn transition: brake along the old direction, then re-accelerate along the new one
-        // (the direction can still change until the re-acceleration starts).
+    } else if let Some(mut tr) = p.turn {
+        // A new turn can cut into the re-acceleration late enough, measured from the turn's own
+        // direction; never into the brake.
+        let accel_ratio = (tr.t - tr.brake.0) / tr.accel.0;
+        if dir_now != Vec3::ZERO
+            && accel_ratio >= turn_cut_in(tr.big, tr.sprint)
+            && let Some(big) = turn_band(tr.cur.angle_between(dir_now).to_degrees(), p.has_ball, walking)
+        {
+            tr = start_turn(p, dir_now, big, speed, top);
+        }
         tr.t += dt;
-        let (brake, accel_phase) = (tr.brake, tr.accel);
-        if tr.t < brake.0 {
-            p.vel = tr.from * tr.entry * curve(brake.1, tr.t / brake.0);
-            if wish != Vec3::ZERO {
-                tr.to = wish.normalize();
-            }
+        let in_brake = tr.t < tr.brake.0;
+        // The turn's direction follows the input at a capped rate, only inside its windows:
+        // faster turning away from the old direction than back toward it.
+        let (away_rate, back_rate, brake_window, accel_window) = turn_steer(tr.ball, tr.big);
+        let window = if in_brake { tr.t / tr.brake.0 < brake_window } else { (tr.t - tr.brake.0) / tr.accel.0 < accel_window };
+        if window && dir_now != Vec3::ZERO {
+            let away = tr.from.angle_between(dir_now) > tr.from.angle_between(tr.cur);
+            let max = if away { away_rate } else { back_rate }.to_radians() * dt;
+            tr.cur = forward(yaw_of(tr.cur) + angle_diff(yaw_of(dir_now), yaw_of(tr.cur)).clamp(-max, max));
+        }
+        // Brake along the old velocity down to the pivot, then back up to full top speed along the
+        // turn's direction. The pivot follows the top speed every frame.
+        let pivot = tr.share * top;
+        p.vel = if in_brake {
+            tr.from * (pivot + (tr.entry - pivot) * curve(tr.brake.1, tr.t / tr.brake.0))
         } else {
-            p.vel = tr.to * tr.target * curve(accel_phase.1, ((tr.t - brake.0) / accel_phase.0).min(1.0));
-        }
-        let body_turn = FACE_HEADING_TURN_RATE.to_radians() * dt;
-        p.facing += angle_diff(yaw_of(tr.to), p.facing).clamp(-body_turn, body_turn);
-        p.turn = (tr.t < brake.0 + accel_phase.0).then_some(tr);
-    } else if wish != Vec3::ZERO && speed > 1.0 && {
-        // A big change of direction starts a turn transition (the game's code-driven turns).
-        let bucket = turn_bucket(p.vel.angle_between(wish).to_degrees());
-        let sprinting = p.sprint_running && speed > RUN_SPEED;
-        if let Some((brake, accel_phase, exit)) = (bucket > 0).then(|| turn_data(sprinting, p.has_ball, bucket)).flatten() {
-            p.turn = Some(Turn { t: 0.0, from: p.vel.normalize(), to: wish.normalize(), entry: speed, target: top * exit, brake, accel: accel_phase });
-        }
-        p.turn.is_some()
-    } {
-        // Started a turn this frame: the next frames run it.
+            tr.cur * (pivot + (top - pivot) * curve(tr.accel.1, ((tr.t - tr.brake.0) / tr.accel.0).min(1.0)))
+        };
+        // The body eases round to the turn's direction, then follows it.
+        tr.face_t += dt;
+        let target = yaw_of(tr.cur);
+        p.facing = if tr.face_t < tr.face_time {
+            let a = (tr.face_t / tr.face_time).clamp(0.0, 1.0);
+            tr.face_from + angle_diff(target, tr.face_from) * a * a * (3.0 - 2.0 * a)
+        } else {
+            target
+        };
+        p.turn = (tr.t < tr.brake.0 + tr.accel.0).then_some(tr);
+    } else if let Some(big) = (dir_now != Vec3::ZERO && speed > 0.5)
+        .then(|| p.recent_input.iter().rev().find_map(|(_, old)| turn_band(old.angle_between(dir_now).to_degrees(), p.has_ball, walking)))
+        .flatten()
+    {
+        // A sharp change of the movement input within 50 ms starts a turn (newest input first).
+        // ponytail: no start transitions modelled, so a turn needs some speed (0.5 m/s).
+        p.turn = Some(start_turn(p, dir_now, big, speed, top));
+        p.recent_input.clear();
     } else if wish != Vec3::ZERO {
         // Your heading turns toward the input at the turn rate (standing still: at once). The body
         // then turns to face your heading on its own, without dragging it: leaving lock move while
@@ -1151,6 +1231,27 @@ mod tests {
         assert!(crosshair_point(Vec3::new(0.0, 3.0, 0.0), 0.0).distance(Vec3::new(0.0, 3.0, -HALF_LENGTH)) < 1e-3);
         let p = crosshair_point(Vec3::new(10.0, 3.0, 0.0), std::f32::consts::FRAC_PI_2);
         assert!((p.x + HALF_WIDTH).abs() < 1e-3 && p.z.abs() < 1e-3, "{p:?}");
+    }
+
+    #[test]
+    fn alternating_w_and_d_keeps_your_speed() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+        app.world_mut().resource_mut::<Axes>().movement = Vec2::Y;
+        app.world_mut().spawn((Transform::default(), Player::default()));
+        app.world_mut().spawn(CameraRig::default());
+        frames(&mut app, &[], 60, 1.0 / 60.0);
+        // W, D, W, D every 0.1 s: the game never brakes below the pivot (85% of 5 m/s).
+        let mut slowest = f32::MAX;
+        for i in 0..20 {
+            app.world_mut().resource_mut::<Axes>().movement = if i % 2 == 0 { Vec2::X } else { Vec2::Y };
+            for _ in 0..6 {
+                frames(&mut app, &[], 1, 1.0 / 60.0);
+                let v = app.world_mut().query::<&Player>().single(app.world()).unwrap().vel;
+                slowest = slowest.min(v.length());
+            }
+        }
+        assert!(slowest > 4.0, "slowest {slowest} m/s");
     }
 
     #[test]

@@ -81,10 +81,10 @@ pub const STOP_DECEL: f32 = 5.0 / 0.38;
 /// Time to stop from full speed by state (the stop transitions): run, with ball, sprint, sprint with ball.
 pub const STOP_TIME: [f32; 4] = [0.38, 0.7, 0.68, 1.0];
 
-// Turn transitions (code-driven transition data, Data/Locomotion/TransitionDB): a big change of
-// direction brakes along the old direction, then re-accelerates along the new one up to a share of
-// top speed. Angles under 30 deg just steer; 30-60 counts as 45, 60-120 as 90, from 120 as 180.
-/// One phase: duration (s) and speed curve over its normalised time (share of the entry or target speed).
+// Turn transitions (turns.md): a sharp change of the movement input within 50 ms brakes you along
+// your old velocity down to a pivot speed, then re-accelerates you to full top speed along a
+// direction that keeps turning toward the input. You never brake to a stop.
+/// One phase: duration (s) and its curve over normalised time (brake 1 -> 0, re-acceleration 0 -> 1).
 pub type TurnPhase = (f32, &'static [(f32, f32)]);
 const LIN_DOWN: &[(f32, f32)] = &[(0.0, 1.0), (1.0, 0.0)];
 const LIN_UP: &[(f32, f32)] = &[(0.0, 0.0), (1.0, 1.0)];
@@ -94,34 +94,63 @@ const V3_TURN90_STOP: &[(f32, f32)] = &[(0.0, 1.0), (0.2, 0.7), (1.0, 0.0)];
 const V3_TURN90_START: &[(f32, f32)] = &[(0.0, 0.0), (0.8, 0.8), (1.0, 1.0)];
 const V3_TURN180_STOP: &[(f32, f32)] = &[(0.0, 1.0), (0.55, 0.65), (1.0, 0.0)];
 
-/// (brake, re-accelerate, exit speed share) for a turn, by sprinting, ball and angle bucket
-/// (1 = 45, 2 = 90, 3 = 135, 4 = 180); None means no transition, just steer.
-pub fn turn_data(sprint: bool, ball: bool, bucket: usize) -> Option<(TurnPhase, TurnPhase, f32)> {
-    match (sprint, ball, bucket) {
-        (false, false, 2 | 3) => Some(((0.14, V2_TURN90_STOP), (0.13, V2_TURN90_START), 0.85)),
-        (false, false, 4) => Some(((0.3, LIN_DOWN), (0.3, LIN_UP), 0.6)),
-        (false, true, 1) => Some(((0.2, LIN_DOWN), (0.12, LIN_UP), 0.55)),
-        (false, true, 2) => Some(((0.25, LIN_DOWN), (0.1, LIN_UP), 0.55)),
-        (false, true, 3 | 4) => Some(((0.35, LIN_DOWN), (0.32, LIN_UP), 0.55)),
-        (true, false, 2 | 3) => Some(((0.165, V3_TURN90_STOP), (0.35, V3_TURN90_START), 0.7)),
-        (true, false, 4) => Some(((0.4, V3_TURN180_STOP), (0.35, LIN_UP), 0.5)),
-        (true, true, 2) => Some(((0.32, LIN_DOWN), (0.25, LIN_UP), 0.7)),
-        (true, true, 3) => Some(((0.3, LIN_DOWN), (0.2, LIN_UP), 0.6)),
-        (true, true, 4) => Some(((0.5, LIN_DOWN), (0.3, LIN_UP), 0.45)),
-        _ => None,
+/// (brake, re-acceleration, pivot as a share of top speed) by sprinting, ball, and the band
+/// (`big` = the 180 band; otherwise the 90-degree data).
+pub fn turn_data(sprint: bool, ball: bool, big: bool) -> (TurnPhase, TurnPhase, f32) {
+    match (sprint, ball, big) {
+        (false, false, false) => ((0.14, V2_TURN90_STOP), (0.13, V2_TURN90_START), 0.85),
+        (false, false, true) => ((0.3, LIN_DOWN), (0.3, LIN_UP), 0.6),
+        (true, false, false) => ((0.165, V3_TURN90_STOP), (0.35, V3_TURN90_START), 0.7),
+        (true, false, true) => ((0.4, V3_TURN180_STOP), (0.35, LIN_UP), 0.5),
+        (false, true, false) => ((0.25, LIN_DOWN), (0.1, LIN_UP), 0.55),
+        (false, true, true) => ((0.35, LIN_DOWN), (0.32, LIN_UP), 0.55),
+        (true, true, false) => ((0.32, LIN_DOWN), (0.25, LIN_UP), 0.7),
+        (true, true, true) => ((0.5, LIN_DOWN), (0.3, LIN_UP), 0.45),
     }
 }
 
-/// Angle bucket for a change of direction (degrees): 0 steer, 1 = 45, 2 = 90, 4 = 180. The 135
-/// range (112.5-157.5) is not allowed in the free-move tables and falls back to 180.
-pub fn turn_bucket(angle: f32) -> usize {
-    match angle {
-        a if a < 30.0 => 0,
-        a if a < 60.0 => 1,
-        a if a < 120.0 => 2,
-        _ => 4,
+/// The band for an angle between two movement inputs (degrees): None to just steer, Some(false)
+/// for the 90-degree data, Some(true) for the 180 band. Without the ball: over 70 deg (walking:
+/// only over 120); with it: over 60.
+pub fn turn_band(angle: f32, ball: bool, walking: bool) -> Option<bool> {
+    let middle = if ball { 60.0 } else if walking { 120.0 } else { 70.0 };
+    if angle > 120.0 {
+        Some(true)
+    } else if angle > middle {
+        Some(false)
+    } else {
+        None
     }
 }
+
+/// How the turn's direction follows the input: rotation rate away from and back toward the old
+/// direction (deg/s), and the share of the brake and of the re-acceleration in which it may turn.
+pub fn turn_steer(ball: bool, big: bool) -> (f32, f32, f32, f32) {
+    match (ball, big) {
+        (false, false) => (270.0, 90.0, 0.8, 1.0),
+        (false, true) => (180.0, 180.0, 0.5, 1.0),
+        (true, false) => (270.0, 90.0, 0.6, 0.8),
+        (true, true) => (180.0, 180.0, 0.4, 0.6),
+    }
+}
+
+/// A new turn may cut into a running turn's re-acceleration after this share of it (never into
+/// the brake).
+pub fn turn_cut_in(big: bool, sprint: bool) -> f32 {
+    match (big, sprint) {
+        (false, _) => 0.8,
+        (true, false) => 0.6,
+        (true, true) => 0.4,
+    }
+}
+/// Inputs count as "recent" for this long after they stop being current.
+pub const TURN_INPUT_HISTORY: f32 = 0.05;
+/// Entering a turn slower than top speed skips at most this share of the brake.
+pub const TURN_CATCH_UP_MAX: f32 = 0.2;
+/// The body turns to the turn's direction over at most this long.
+pub const TURN_FACE_TIME: f32 = 0.2;
+/// A stick under this counts as walking (the walk/run threshold isn't read yet: TUNE).
+pub const WALK_INPUT: f32 = 0.5;
 pub const TURN_RATE_RUN: f32 = 400.0; // degrees per second
 pub const TURN_RATE_BALL_RUN: f32 = 180.0; // with-ball speed table's max angular speed (pi rad/s)
 pub const TURN_RATE_SPRINT: f32 = 180.0;
