@@ -1031,6 +1031,7 @@ pub fn spawn_body(commands: &mut Commands, player: Entity, meshes: &mut Assets<M
     let skin = flat(Color::srgb(0.80, 0.62, 0.5));
     let socks = flat(Color::srgb(0.92, 0.92, 0.9));
     let boots = flat(Color::srgb(0.06, 0.06, 0.07));
+    commands.insert_resource(crate::fx::LegMaterials([socks.clone(), boots.clone()]));
     // A capsule of radius r along a bone of length len, hanging down from its joint.
     let mut limb = |r: f32, len: f32| (Mesh3d(meshes.add(Capsule3d::new(r, (len - r).max(0.01)))), Transform::from_xyz(0.0, -len / 2.0, 0.0));
     let thigh = limb(0.085, THIGH);

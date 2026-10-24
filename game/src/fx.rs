@@ -472,6 +472,24 @@ pub fn kick_marker(
     }
 }
 
+/// The legs' materials (shins and boots), which glow in extra effort.
+#[derive(Resource)]
+pub struct LegMaterials(pub [Handle<StandardMaterial>; 2]);
+
+/// Extra effort lights the legs cyan for as long as it lasts (its leg rays and body overlay), with a
+/// slow pulse; it eases in and out over 0.15 s.
+pub fn effort_legs(time: Res<Time>, player: Single<&Player>, legs: Res<LegMaterials>, mut materials: ResMut<Assets<StandardMaterial>>, mut glow: Local<f32>) {
+    let target = if player.extra_active { 1.0 } else { 0.0 };
+    *glow += (target - *glow).clamp(-time.delta_secs() / 0.15, time.delta_secs() / 0.15);
+    let pulse = 0.8 + 0.2 * (time.elapsed_secs() * 12.0).sin();
+    let c = Vec3::new(0.0, 1.0, 0.8) * *glow * pulse * 1.5;
+    for handle in &legs.0 {
+        if let Some(m) = materials.get_mut(handle) {
+            m.emissive = LinearRgba::rgb(c.x, c.y, c.z);
+        }
+    }
+}
+
 /// A fading glow: the dribble's shell on the ball.
 #[derive(Component)]
 pub struct Glow {
@@ -519,23 +537,23 @@ pub fn dribble_fx(
 /// The moves' bursts (gameplay_fx data): a kick's impact where the ball was, sized by the kick
 /// (shots by power: low under 29.4 m/s, mid under 34.8, high above, with more rings each step); the
 /// kicked ball's trail until anyone gains it (not for push balls on the ground); a control's two
-/// rings closing on the ball, orange to blue, as it pulses; and extra effort's burst at your feet.
+/// rings closing on the ball, orange to blue, as it pulses.
 pub fn action_fx(
     mut commands: Commands,
-    player: Single<(&Player, &Transform)>,
-    ball: Single<(&Transform, &Ball), Without<Player>>,
+    player: Single<&Player>,
+    ball: Single<(&Transform, &Ball)>,
     fx: Res<FxAssets>,
     mut state: ResMut<FxState>,
+    camera: Single<&GlobalTransform, With<Camera3d>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut last_kick: Local<Option<Kick>>,
-    mut was: Local<(bool, bool)>,
+    mut was_receiving: Local<bool>,
 ) {
-    let ((p, ptf), (btf, b)) = (*player, *ball);
+    let (p, (btf, b)) = (*player, *ball);
     let at = btf.translation;
     let kicked = last_kick.filter(|_| p.kick.is_none() && !b.held);
     *last_kick = p.kick.map(|k| k.kind);
     let flat = |v: Vec3| Quat::from_rotation_arc(Vec3::Z, v.normalize_or(Vec3::NEG_Z));
-    let ground = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
     if let Some(kind) = kicked {
         let speed = b.vel.length();
         let facing = flat(b.vel);
@@ -547,31 +565,27 @@ pub fn action_fx(
             _ => (1, 0.8),
         };
         let glow = |c: &mut Commands, m: &mut Assets<StandardMaterial>, mesh: &Handle<Mesh>, rot: Quat, g: Glow| spawn_glow(c, m, mesh, at, rot, g);
-        glow(&mut commands, &mut materials, &fx.sphere, Quat::IDENTITY, Glow::new(0.06, 1.0, (2.0 * size, 3.5 * size), (WHITE, WHITE), false));
-        glow(&mut commands, &mut materials, &fx.sphere, Quat::IDENTITY, Glow::new(0.25, 0.25, (1.5 * size, 4.0 * size), (Vec3::new(0.2, 0.9, 1.0), BLUE), false));
+        glow(&mut commands, &mut materials, &fx.sphere, Quat::IDENTITY, Glow::new(0.05, 0.6, (1.5 * size, 2.8 * size), (WHITE, WHITE), false));
+        glow(&mut commands, &mut materials, &fx.sphere, Quat::IDENTITY, Glow::new(0.22, 0.15, (1.3 * size, 3.2 * size), (Vec3::new(0.2, 0.9, 1.0), BLUE), false));
         for r in 0..rings {
-            let reach = size * (0.45 + 0.25 * r as f32);
-            glow(&mut commands, &mut materials, &fx.ring, facing, Glow::new(0.25 + 0.05 * r as f32, 0.8, (0.12, reach), (Vec3::new(1.0, 0.95, 0.3), Vec3::new(0.9, 0.2, 0.8)), false));
+            let reach = size * (0.35 + 0.2 * r as f32);
+            glow(&mut commands, &mut materials, &fx.ring, facing, Glow::new(0.22 + 0.05 * r as f32, 0.45, (0.1, reach), (Vec3::new(1.0, 0.95, 0.3), Vec3::new(0.9, 0.2, 0.8)), false));
         }
         state.kick_trail = !matches!(kind, Kick::PushBall | Kick::DribblePushBall) || at.y > 0.75;
     }
     if b.held {
         state.kick_trail = false;
     }
-    let (was_receiving, was_effort) = *was;
-    if p.receiving.is_some() && !was_receiving {
+    // A control shows on the ball only (players confirm): two rings closing on it, facing you, as
+    // the ball pulses.
+    if p.receiving.is_some() && !*was_receiving {
+        let facing = Transform::from_translation(at).looking_at(camera.translation(), Vec3::Y).rotation;
         for life in [0.25, 0.35] {
-            spawn_glow(&mut commands, &mut materials, &fx.ring, Vec3::new(at.x, 0.03, at.z), ground, Glow::new(life, 0.9, (1.08, 0.27), (ORANGE, BLUE), false));
+            spawn_glow(&mut commands, &mut materials, &fx.ring, at, facing, Glow::new(life, 0.5, (0.45, 0.14), (ORANGE, BLUE), true));
         }
-        spawn_glow(&mut commands, &mut materials, &fx.sphere, at, Quat::IDENTITY, Glow::new(0.45, 0.8, (1.5, 1.0), (WHITE, BLUE), true));
+        spawn_glow(&mut commands, &mut materials, &fx.sphere, at, Quat::IDENTITY, Glow::new(0.45, 0.5, (1.5, 1.0), (WHITE, BLUE), true));
     }
-    if p.extra_active && !was_effort {
-        let feet = Vec3::new(ptf.translation.x, 0.03, ptf.translation.z);
-        for (life, reach) in [(0.3, 1.2), (0.4, 1.7)] {
-            spawn_glow(&mut commands, &mut materials, &fx.ring, feet, ground, Glow::new(life, 0.9, (0.3, reach), (Vec3::new(0.0, 1.0, 0.8), Vec3::new(0.3, 0.7, 1.0)), false));
-        }
-    }
-    *was = (p.receiving.is_some(), p.extra_active);
+    *was_receiving = p.receiving.is_some();
 }
 
 pub fn fade_glows(
