@@ -208,21 +208,31 @@ A push ball during extra effort is the fastest way to move with the ball: 9.5 m/
 
   **charge = time held ÷ (build-up − 0.15 s), capped at 1.**
   - The build-up is the kick's own:
-    - **Shot:** the length of its build-up animation, 32 frames = **0.53 s** for the power kick.
-    - **Pass and lob:** **24 frames = 0.4 s** from the global shot table.
+    - **Shot:** the time left in its build-up animation, 32 frames = **0.53 s** for the power kick. The table row Shoot_HighPower_VX (32) is only a fallback.
+    - **Pass and lob:** **24 frames = 0.4 s** from the global shot table (rows Tap_VX and LobTap). Both kicks have "clamp with build-up" and "use the global table" on.
 
-    One frame is taken off at the start.
-  - The 0.15 s is the stadium's network margins (time margin 0.12 + tolerance 0.03, the world settings' defaults; a map could change them). Taking them off makes full power arrive before the animation ends.
+    The time of the frame in which the kick starts is taken off: the world's delta time, 1/60 s at 60 fps.
+  - **The 0.15 s** is the stadium's network margins (time margin 0.12 + tolerance 0.03).
+    - It is subtracted for everyone: the local player, the server and the other players' copies alike (no check on who is predicting).
+    - The 5v5 maps' world settings don't change them (Coliseum and Wind main maps checked), and no code writes them at runtime.
+    - Taking them off makes full power arrive before the animation ends.
+  - **The clock** is the input's own hold time. It can only start earlier than the kick (a buffered press), never later. A prototype clock that starts at the press and counts while the button is down is the same thing.
 - **So full power arrives early:**
 
-  | Kick | Full power after holding | Ball contact (build-up end) |
+  | Kick | Full power after holding | Earliest ball contact |
   |---|---|---|
   | Shot | **~0.37 s** | 0.53 s (power kick); a shot under 29.41 m/s is the low-power kick, struck at **0.33 s** |
   | Pass | **~0.23 s** | 0.4 s |
   | Lob | **~0.23 s** | 0.4 s |
-- **Release:** the force is the one at your release (the shot's time is overridden at release time). The ball still leaves at the contact frame.
-  - The shot can't be synced earlier than 0.2 s after the press, or 0.33 s for the fake-shot input.
-  - Where the kick goes off if you keep holding was not found in the code. Players confirm a fully charged kick goes off by itself, so most likely it fires at the end of the build-up.
+- **The kick waits for your release; it doesn't fire at the end of the build-up.**
+  - On press, the ability plays the build-up animation. On release (the sync), it plays the kick animation starting "from context": the position the build-up had reached (TargetData.AnimPos; BP_Final_Tap_Config, BP_Final_Shoot_Config). The ball leaves at that animation's kick notify.
+  - The earliest sync is 0.08 s after the press for a pass and 0.2 s for a shot (0.33 s for the fake-shot input).
+  - Holding past the build-up keeps you in the wind-up until you let go. Several rules run on the raw time held up to 1 s, which only makes sense if you can hold that long:
+    - the pass lift from 0.6 s;
+    - the lob flattening from 44° to 30° over 0.3–1 s;
+    - the spin's charge scaling.
+  - The only cap found is the sync task's timeout (its value wasn't read). That is probably the "fully charged kick goes off by itself" players describe.
+- **Release:** the force is the one at your release (the shot's time is overridden at release time).
 - **The crosshair's force fill** uses the same clock: fill = (current force − the curve's lowest) ÷ (highest − lowest), shown from 3% to 100%. It is full when the force is.
 
 ### Time held to ball speed
