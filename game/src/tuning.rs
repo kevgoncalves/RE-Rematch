@@ -355,6 +355,13 @@ pub const CAMERA_DISTANCE: f32 = 5.0;
 pub const CAMERA_RIGHT: f32 = 0.6;
 pub const CAMERA_HEIGHT: f32 = 2.0;
 pub const FOV: f32 = 80.0;
+/// The FOV option's range (players report a 90 deg maximum; the minimum is a guess: TUNE).
+pub const FOV_OPTION_RANGE: (f32, f32) = (70.0, 90.0);
+/// The "Magnus sensitivity" option multiplies the mouse curve accumulator (default 1; the
+/// range isn't in the game files read so far: TUNE).
+pub const MAGNUS_SENSITIVITY_RANGE: (f32, f32) = (0.1, 2.0);
+/// Gamepad: the curve stick ignores small tilts (InputShootRotationForceComputation's dead zone).
+pub const CURVE_STICK_DEAD_ZONE: f32 = 0.2;
 pub const SPRINT_FOV: f32 = 85.0;
 pub const PITCH_UP_LIMIT: f32 = 22.0;
 pub const PITCH_DOWN_LIMIT: f32 = 15.0;

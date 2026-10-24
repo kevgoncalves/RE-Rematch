@@ -49,9 +49,7 @@ fn main() {
                 menu::toggle_menu,
                 input::read_input,
                 // Capture before clicks, so the click that opens a capture isn't bound.
-                menu::capture_binding,
-                menu::menu_clicks,
-                menu::refresh_labels,
+                (menu::capture_binding, menu::menu_clicks, menu::drag_sliders, menu::refresh_labels).chain(),
                 player::grab_cursor,
                 player::camera_look,
                 player::player_move,
@@ -75,14 +73,21 @@ fn main() {
 
 /// For checking visuals: `RE_SCREENSHOT=out.png` saves a frame after 2 s, then quits.
 /// `RE_VIEW=x,y,z[,tx,ty,tz]` looks from that point at the centre spot (or the target) instead.
+/// `RE_MENU=1` opens the F1 menu first.
 fn auto_screenshot(
     mut commands: Commands,
     time: Res<Time>,
     mut taken: Local<bool>,
     mut exit: EventWriter<AppExit>,
     mut camera: Single<&mut Transform, With<Camera3d>>,
+    mut menu: ResMut<menu::Menu>,
+    mut menu_root: Single<&mut Node, With<menu::MenuRoot>>,
 ) {
     let Ok(path) = std::env::var("RE_SCREENSHOT") else { return };
+    if std::env::var("RE_MENU").is_ok() && !*taken && time.elapsed_secs() > 1.0 {
+        menu.open = true;
+        menu_root.display = Display::Flex;
+    }
     if let Ok(view) = std::env::var("RE_VIEW") {
         let v: Vec<f32> = view.split(',').filter_map(|n| n.trim().parse().ok()).collect();
         let target = if v.len() == 6 { Vec3::new(v[3], v[4], v[5]) } else { Vec3::ZERO };

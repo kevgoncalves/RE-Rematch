@@ -7,7 +7,7 @@ use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::tuning::{MAGNUS_ACCUMULATOR_SENSITIVITY, MOUSE_AXIS_SCALE, MOUSE_SENSITIVITY};
+use crate::tuning::{CURVE_STICK_DEAD_ZONE, FOV, MAGNUS_ACCUMULATOR_SENSITIVITY, MOUSE_AXIS_SCALE, MOUSE_SENSITIVITY};
 
 const SAVE_PATH: &str = "keybinds.ron";
 const DOUBLE_TAP_WINDOW: f32 = 0.3; // TUNE: Rematch's "quick press and hold" window is not in the files
@@ -99,6 +99,20 @@ pub struct Bindings {
     pub gamepad: BTreeMap<Action, Vec<Input>>,
     #[serde(default)]
     pub pass_aim: PassAim,
+    /// Rematch's "Magnus sensitivity" option: scales how much mouse movement curves a shot.
+    #[serde(default = "one")]
+    pub magnus_sensitivity: f32,
+    /// Rematch's field of view option (degrees); the per-state FOVs shift with it.
+    #[serde(default = "default_fov")]
+    pub fov: f32,
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+fn default_fov() -> f32 {
+    FOV
 }
 
 /// How keyboard-and-mouse players aim passes and lobs (Rematch's ETapAimingOptions).
@@ -172,7 +186,13 @@ impl Default for Bindings {
             (Ping, vec![Pad(P::RightThumb)]),
             (BallCall, vec![Pad(P::RightThumb)]),
         ];
-        Self { keyboard: keyboard.into_iter().collect(), gamepad: gamepad.into_iter().collect(), pass_aim: PassAim::default() }
+        Self {
+            keyboard: keyboard.into_iter().collect(),
+            gamepad: gamepad.into_iter().collect(),
+            pass_aim: PassAim::default(),
+            magnus_sensitivity: one(),
+            fov: default_fov(),
+        }
     }
 }
 
@@ -375,20 +395,23 @@ pub fn read_input(
     if !blocked.0 {
         for pad in &pads {
             movement += pad.left_stick();
-            stick_curve += pad.left_stick();
+            if pad.left_stick().length() > CURVE_STICK_DEAD_ZONE {
+                stick_curve += pad.left_stick();
+            }
             look_pad += pad.right_stick() * STICK_LOOK_SPEED * time.delta_secs();
         }
         if window.cursor_options.grab_mode != bevy::window::CursorGrabMode::None {
             let delta = Vec2::new(motion.delta.x, -motion.delta.y);
             look_mouse = delta * MOUSE_SENSITIVITY;
-            axes.curve_mouse += delta * MOUSE_AXIS_SCALE * MAGNUS_ACCUMULATOR_SENSITIVITY;
-            axes.curve_mouse = axes.curve_mouse.clamp(Vec2::NEG_ONE, Vec2::ONE);
+            // The accumulator is held inside a circle: full curve and full dip can't both max out.
+            axes.curve_mouse += delta * MOUSE_AXIS_SCALE * MAGNUS_ACCUMULATOR_SENSITIVITY * bindings.magnus_sensitivity;
+            axes.curve_mouse = axes.curve_mouse.clamp_length_max(1.0);
         }
     }
     axes.movement = movement.clamp_length_max(1.0);
     axes.look_mouse = look_mouse;
     axes.look_pad = look_pad;
-    axes.curve = (axes.curve_mouse + stick_curve).clamp(Vec2::NEG_ONE, Vec2::ONE);
+    axes.curve = (axes.curve_mouse + stick_curve).clamp_length_max(1.0);
 }
 
 pub fn input_name(input: &Input) -> String {

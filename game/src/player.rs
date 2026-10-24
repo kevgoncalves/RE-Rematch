@@ -906,6 +906,7 @@ pub fn ball_call(
 pub fn camera_follow(
     player: Single<(&Transform, &Player), Without<Camera3d>>,
     rig: Single<&CameraRig>,
+    bindings: Res<Bindings>,
     mut camera: Single<(&mut Transform, &mut Projection), With<Camera3d>>,
     time: Res<Time>,
 ) {
@@ -916,7 +917,9 @@ pub fn camera_follow(
     ctf.translation = pivot + rot * Vec3::new(CAMERA_RIGHT, 0.0, CAMERA_DISTANCE);
     ctf.rotation = rot;
     if let Projection::Perspective(persp) = &mut **proj {
-        let target = if p.sprint_running || p.extra_active { SPRINT_FOV } else { FOV }.to_radians();
+        // The FOV option moves every state's FOV by the same amount (assumed).
+        let state = if p.sprint_running || p.extra_active { SPRINT_FOV } else { FOV };
+        let target = (state + bindings.fov - FOV).to_radians();
         persp.fov += (target - persp.fov) * (time.delta_secs() * 5.0).min(1.0);
     }
 }
