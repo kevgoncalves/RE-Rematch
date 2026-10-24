@@ -538,6 +538,10 @@ pub fn player_move(
     let min_stance = p.locked && p.has_ball && p.lock_time < STANCE_MIN_TIME;
     p.locked = (held && !p.relock_needed) || min_stance;
     p.lock_time = if p.locked { p.lock_time + dt } else { 0.0 };
+    // Locking takes over from a control's carry or a kick's drag (not from a push ball's chase).
+    if p.locked && p.run.is_some_and(|r| r.tables.is_none()) {
+        p.run = None;
+    }
     p.had_ball = p.has_ball;
     // Other movement takes over from a turn; gaining or losing the ball cancels it too.
     if p.locked || p.extra_active || p.dribble.is_some_and(|d| d.moving()) || p.dash.is_some() || p.turn.is_some_and(|t| t.ball != p.has_ball) {
@@ -577,6 +581,8 @@ pub fn player_move(
             let dir = camera_relative(dir, rig.yaw);
             let facing = if heading == Heading::Forward { (-dir.x).atan2(-dir.z) } else { rig.yaw.to_radians() };
             p.dribble = Some(DribbleState { t: 0.0, feint, exhausted: p.exhausted, heading, dir, facing });
+            // A new move takes over from a control's carry (or any other scripted run).
+            p.run = None;
             actions.consume(Action::PushBall);
             actions.consume(Action::Dash);
             if feint {
@@ -672,6 +678,7 @@ pub fn player_move(
             };
             let facing = if heading == Heading::Forward { yaw_of(dir) } else { rig.yaw.to_radians() };
             p.dash = Some(DashState { t: 0.0, second: !first, dir, facing, heading });
+            p.run = None;
             actions.consume(Action::Dash);
             if first {
                 p.dash_cooldown = DASH_COOLDOWN;
@@ -695,6 +702,10 @@ pub fn player_move(
         // A push ball's chase reads your sprint live (its ball's speed was set at the press).
         let speeds = r.tables.map_or(r.speeds, |t| t[if p.exhausted { 2 } else if p.sprinting { 1 } else { 0 }]);
         p.vel = r.dir * curve(speeds, (r.t / r.length).min(1.0)) * r.scale;
+        if r.tables.is_some() && r.t >= r.free_at && wish != Vec3::ZERO && r.dir.angle_between(wish).to_degrees() > r.exit {
+            let max = CHASE_TURN_RATE.to_radians() * dt;
+            p.facing += angle_diff(yaw_of(wish), p.facing).clamp(-max, max);
+        }
         // Once free, steering within the turn limit leaves the chase at once; with no stick or a
         // sharper turn it runs on to the blend-out (responsiveness.md §5).
         let exit = r.t >= r.free_at && wish != Vec3::ZERO && r.dir.angle_between(wish).to_degrees() <= r.exit;
@@ -1189,6 +1200,7 @@ pub fn kicking(
             } else {
                 camera_relative(axes.movement.normalize(), rig.yaw).normalize()
             };
+            p.run = None;
             p.kick = Some(KickState { kind, elapsed: 0.0, held: pre, pre, released, aim: Vec2::new(rig.yaw, rig.pitch), eye: camera.translation, entry: p.vel, from_dribble, steer, sprint: p.sprinting });
         }
     }

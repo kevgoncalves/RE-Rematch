@@ -354,6 +354,10 @@ pub const PUSH_BALL_LENGTH: [f32; 3] = [55.0 / 60.0, 55.0 / 60.0, 53.0 / 60.0];
 /// You're free to act again this long after the press.
 pub const PUSH_BALL_FREE: f32 = 23.0 / 60.0;
 pub const RUN_TURN_LIMIT: f32 = 30.0; // degrees
+/// Kev's ippy (as before the Season 1 fix to turning quickly after a push ball): once the chase is
+/// free, a stick turned further away turns your body to it at this rate (deg/s) as you run on, so
+/// you meet the ball already turning. TUNE.
+pub const CHASE_TURN_RATE: f32 = 540.0;
 // Push ball during a dribble: no direction falloff; x1.35 when sprinting.
 pub const DRIBBLE_PUSH_BALL_SPEED: f32 = 11.0;
 pub const DRIBBLE_PUSH_BALL_SPRINT_FACTOR: f32 = 1.35;
