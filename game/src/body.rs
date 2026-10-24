@@ -8,7 +8,7 @@ use std::f32::consts::{PI, TAU};
 
 use bevy::prelude::*;
 
-use crate::player::{Kick, Player};
+use crate::player::{CameraRig, Kick, Player};
 use crate::tuning::*;
 
 #[derive(Component, Clone, Copy, PartialEq)]
@@ -35,14 +35,22 @@ struct Pose {
     drop: f32,
 }
 
-/// Running state of the animation: the stride's phase and the kick follow-through.
+/// Running state of the animation.
 #[derive(Default)]
 pub struct Gait {
+    /// The stride's phase, radians.
     phase: f32,
     /// Seconds since the ball left on a kick, and that kick's kind.
     follow: Option<(f32, Kick)>,
     last_kick: Option<Kick>,
     receive: f32,
+    /// Smoothed acceleration in the body's frame and turning speed (rad/s), from last frame's
+    /// velocity and facing.
+    accel: Vec3,
+    yaw_rate: f32,
+    prev_vel: Vec3,
+    prev_facing: f32,
+    clock: f32,
 }
 
 pub fn spawn_body(commands: &mut Commands, player: Entity, meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) {
@@ -99,21 +107,41 @@ pub fn spawn_body(commands: &mut Commands, player: Entity, meshes: &mut Assets<M
 }
 
 /// Poses every joint from the player's state: idle, run and sprint strides (also backwards and
-/// sideways), lock move's crouch, dribbles, dashes, extra effort, receiving and kicks.
+/// sideways), leaning against braking and into curves, turning on the spot, lock move's crouch,
+/// dribbles and feints, dashes, extra effort, exhaustion, carrying and receiving the ball, and kicks.
+/// The head follows the camera's aim.
 pub fn animate_body(
     time: Res<Time>,
     player: Single<(&Player, &Transform)>,
+    camera: Option<Single<&CameraRig>>,
     mut parts: Query<(&Part, &mut Transform), Without<Player>>,
     mut gait: Local<Gait>,
 ) {
     let dt = time.delta_secs();
+    if dt <= 0.0 {
+        return;
+    }
     let (p, root) = *player;
-    let local = root.rotation.inverse() * p.vel;
+    let to_local = root.rotation.inverse();
+    let local = to_local * p.vel;
     let (fwd, side, speed) = (-local.z, local.x, local.length());
 
-    // Stride: one full cycle covers more ground the faster you go.
-    gait.phase = (gait.phase + speed * dt / (1.2 + 0.45 * speed) * TAU) % TAU;
-    let amp = (speed / 6.0).min(1.3);
+    // Acceleration and turning speed, smoothed over a few frames: they drive the leans.
+    let smooth = 1.0 - (-10.0 * dt).exp();
+    let accel = to_local * (p.vel - gait.prev_vel) / dt;
+    gait.accel = gait.accel.lerp(accel, smooth);
+    let yaw_rate = wrap(p.facing - gait.prev_facing) / dt;
+    gait.yaw_rate += (yaw_rate - gait.yaw_rate) * smooth;
+    gait.prev_vel = p.vel;
+    gait.prev_facing = p.facing;
+    gait.clock += dt;
+    let (fwd_accel, side_accel) = (-gait.accel.z, gait.accel.x);
+
+    // Stride: one cycle covers more ground the faster you go; turning on the spot shuffles the feet.
+    let shuffle = (gait.yaw_rate.abs() * 0.5).min(3.0);
+    let pace = speed.max(shuffle);
+    gait.phase = (gait.phase + pace * dt / (1.2 + 0.45 * pace) * TAU) % TAU;
+    let amp = (speed / 6.0).max(shuffle * 0.08).min(1.3);
     let (fwd_share, side_share) = if speed > 0.1 { (fwd / speed, side / speed) } else { (1.0, 0.0) };
 
     // Kick follow-through starts the frame the ball leaves.
@@ -124,7 +152,7 @@ pub fn animate_body(
     gait.last_kick = kick;
     if let Some((t, k)) = &mut gait.follow {
         *t += dt;
-        if *t > follow_time(*k) {
+        if *t > kick_shape(*k).follow {
             gait.follow = None;
         }
     }
@@ -137,7 +165,9 @@ pub fn animate_body(
         match part {
             Part::Body => {
                 q.drop = 0.03 * amp - 0.035 * amp * (2.0 * phase).cos();
-                q.pitch = -0.05 * amp * fwd_share;
+                // Lean back against braking and forward into pushing off; bank into curves.
+                q.pitch = -0.05 * amp * fwd_share - (0.03 * fwd_accel).clamp(-0.3, 0.35);
+                q.roll = -(0.03 * side_accel).clamp(-0.35, 0.35);
             }
             Part::Spine => {
                 q.pitch = -(0.04 + 0.035 * speed.min(9.5)) * fwd_share.max(0.0);
@@ -159,16 +189,37 @@ pub fn animate_body(
         }
         q
     };
-    let mut poses: Vec<(Part, Pose)> = Vec::new();
-    for part in all_parts() {
-        poses.push((part, pose(part)));
-    }
+    let mut poses: Vec<(Part, Pose)> = all_parts().map(|part| (part, pose(part))).collect();
     let set = |poses: &mut Vec<(Part, Pose)>, part: Part, f: &dyn Fn(&mut Pose)| {
         if let Some((_, q)) = poses.iter_mut().find(|(p, _)| *p == part) {
             f(q);
         }
     };
+    let get = |poses: &Vec<(Part, Pose)>, part: Part| poses.iter().find(|(p, _)| *p == part).map_or(Pose::default(), |(_, q)| *q);
 
+    // Standing still: breathing and a slow weight shift.
+    if speed < 0.3 && shuffle < 0.5 && p.kick.is_none() && !p.locked {
+        let (breath, shift) = ((gait.clock * 1.7).sin(), (gait.clock * 0.6).sin());
+        set(&mut poses, Part::Spine, &|q| q.pitch += 0.025 * breath);
+        set(&mut poses, Part::Body, &|q| q.roll += 0.03 * shift);
+        for s in [-1.0f32, 1.0] {
+            set(&mut poses, Part::UpperArm(s), &|q| q.roll += 0.03 * breath);
+            set(&mut poses, Part::Thigh(s), &|q| q.roll -= 0.03 * shift * s);
+        }
+    }
+    // Hard braking (stops and the brake of a big turn): the leading leg plants, the other bends.
+    let brake = ((-fwd_accel - 5.0) / 8.0).clamp(0.0, 1.0) * if speed > 0.5 { 1.0 } else { 0.0 };
+    if brake > 0.0 {
+        let mix = |q: &mut Pose, target: f32| q.pitch += (target - q.pitch) * brake;
+        set(&mut poses, Part::Thigh(-1.0), &|q| mix(q, 0.55));
+        set(&mut poses, Part::Shin(-1.0), &|q| mix(q, -0.1));
+        set(&mut poses, Part::Foot(-1.0), &|q| mix(q, 0.3));
+        set(&mut poses, Part::Thigh(1.0), &|q| mix(q, -0.25));
+        set(&mut poses, Part::Shin(1.0), &|q| mix(q, -0.75));
+        for s in [-1.0f32, 1.0] {
+            set(&mut poses, Part::UpperArm(s), &|q| q.roll += 0.35 * brake);
+        }
+    }
     // Lock move: crouched, arms out, short steps.
     if p.locked {
         set(&mut poses, Part::Body, &|q| q.drop += 0.13);
@@ -188,6 +239,15 @@ pub fn animate_body(
             set(&mut poses, Part::Forearm(s), &|q| q.pitch = 0.6);
         }
     }
+    // Exhausted: hunched, arms hanging.
+    if p.exhausted {
+        set(&mut poses, Part::Spine, &|q| q.pitch -= 0.22);
+        set(&mut poses, Part::Head, &|q| q.pitch += 0.1);
+        for s in [-1.0f32, 1.0] {
+            set(&mut poses, Part::UpperArm(s), &|q| q.pitch *= 0.5);
+            set(&mut poses, Part::Forearm(s), &|q| q.pitch = 0.25);
+        }
+    }
     // Extra effort: pumping arms and a deeper lean.
     if p.extra_active {
         set(&mut poses, Part::Spine, &|q| q.pitch -= 0.15);
@@ -196,14 +256,30 @@ pub fn animate_body(
             set(&mut poses, Part::Forearm(s), &|q| q.pitch = 1.4);
         }
     }
-    // Dribble: lean into the move, the right foot carrying the ball.
+    // Running with the ball: the right foot touches it once a stride.
+    if p.has_ball && p.kick.is_none() && p.dribble.is_none() && p.receiving.is_none() && !p.locked && speed > 1.0 {
+        let touch = phase.sin().max(0.0).powi(6);
+        set(&mut poses, Part::Thigh(1.0), &|q| q.pitch += 0.2 * touch);
+        set(&mut poses, Part::Shin(1.0), &|q| q.pitch += (-0.15 - q.pitch) * touch);
+        set(&mut poses, Part::Foot(1.0), &|q| q.pitch = -0.25 * touch);
+    }
+    // Dribble: lean into the move, the right foot carrying the ball. A feint first drops the
+    // shoulder the other way.
     if let Some(d) = p.dribble {
-        let dir = root.rotation.inverse() * d.dir;
+        let dir = to_local * d.dir;
         set(&mut poses, Part::Body, &|q| {
-            q.pitch -= 0.2 * -dir.z;
+            q.pitch = -0.05 - 0.2 * -dir.z;
             q.roll = -0.25 * dir.x;
         });
         set(&mut poses, Part::Thigh(1.0), &|q| q.roll -= 0.25 * dir.x);
+        if d.feint {
+            let fake = (1.0 - d.t / 0.2).max(0.0);
+            let s = if dir.x.abs() > 0.2 { dir.x.signum() } else { 1.0 };
+            set(&mut poses, Part::Spine, &|q| {
+                q.roll += 0.5 * s * fake;
+                q.yaw += 0.4 * s * fake;
+            });
+        }
     }
     // Dash: a long lunge.
     if p.dash.is_some() {
@@ -221,44 +297,55 @@ pub fn animate_body(
         set(&mut poses, Part::Shin(1.0), &|q| q.pitch = q.pitch * (1.0 - reach) - 0.35 * reach);
         set(&mut poses, Part::Foot(1.0), &|q| q.pitch = 0.4 * reach);
     }
-    // Kicks: the right leg draws back while you charge, then swings through.
+    // Kicks: the right leg draws back while you charge, then swings through. Shots lean over the
+    // ball, lobs lean back and scoop higher.
     if let Some(k) = p.kick {
         let wind = (k.elapsed / k.kind.buildup()).min(1.0);
-        let (back, knee, open) = kick_shape(k.kind);
-        set(&mut poses, Part::Thigh(1.0), &|q| q.pitch = -back * wind);
-        set(&mut poses, Part::Shin(1.0), &|q| q.pitch = -knee * wind);
+        let shape = kick_shape(k.kind);
+        set(&mut poses, Part::Thigh(1.0), &|q| q.pitch = -shape.back * wind);
+        set(&mut poses, Part::Shin(1.0), &|q| q.pitch = -shape.knee * wind);
         set(&mut poses, Part::Thigh(-1.0), &|q| q.pitch = 0.15 * wind);
         set(&mut poses, Part::Shin(-1.0), &|q| q.pitch = -0.35 * wind);
         set(&mut poses, Part::Spine, &|q| {
             q.pitch = 0.12 * wind;
-            q.yaw = -0.3 * wind * open;
+            q.yaw = -0.3 * wind * shape.open;
         });
         set(&mut poses, Part::UpperArm(-1.0), &|q| {
             q.pitch = 0.4 * wind;
-            q.roll = 0.12 + 0.8 * wind * open;
+            q.roll = 0.12 + 0.8 * wind * shape.open;
         });
         set(&mut poses, Part::UpperArm(1.0), &|q| {
             q.pitch = -0.5 * wind;
             q.roll = 0.12 + 0.4 * wind;
         });
     } else if let Some((t, kind)) = gait.follow {
-        let (back, _, open) = kick_shape(kind);
-        let u = t / follow_time(kind);
+        let shape = kick_shape(kind);
+        let u = t / shape.follow;
         // Through the ball in the first third, then settle.
-        let through = if u < 0.33 { -back + (back + 1.3 * back.min(1.0)) * (u / 0.33) } else { 1.3 * back.min(1.0) * (1.0 - (u - 0.33) / 0.67) };
+        let through = if u < 0.33 { -shape.back + (shape.back + shape.peak) * (u / 0.33) } else { shape.peak * (1.0 - (u - 0.33) / 0.67) };
         set(&mut poses, Part::Thigh(1.0), &|q| q.pitch = through);
         set(&mut poses, Part::Shin(1.0), &|q| q.pitch = -0.15);
         set(&mut poses, Part::Foot(1.0), &|q| q.pitch = -0.3);
         set(&mut poses, Part::Spine, &|q| {
-            q.pitch = -0.15 * (1.0 - u);
-            q.yaw = 0.25 * open * (1.0 - u);
+            q.pitch = shape.lean * (1.0 - u);
+            q.yaw = 0.25 * shape.open * (1.0 - u);
         });
-        set(&mut poses, Part::UpperArm(-1.0), &|q| q.roll = 0.12 + 0.7 * open * (1.0 - u));
+        set(&mut poses, Part::UpperArm(-1.0), &|q| q.roll = 0.12 + 0.7 * shape.open * (1.0 - u));
+    }
+    // The head turns to where the camera aims; the upper body follows a little.
+    if let Some(rig) = camera {
+        let look = wrap(rig.yaw.to_radians() - p.facing).clamp(-1.4, 1.4);
+        set(&mut poses, Part::Spine, &|q| q.yaw += 0.25 * look);
+        let spine_yaw = get(&poses, Part::Spine).yaw;
+        set(&mut poses, Part::Head, &|q| {
+            q.yaw = (look - spine_yaw).clamp(-1.2, 1.2);
+            q.pitch += (rig.pitch.to_radians() * 0.6).clamp(-0.45, 0.35);
+        });
     }
 
     let blend = 1.0 - (-25.0 * dt).exp();
     for (part, mut tf) in &mut parts {
-        let Some((_, q)) = poses.iter().find(|(p, _)| p == part) else { continue };
+        let q = get(&poses, *part);
         let limb_side = match *part {
             Part::UpperArm(s) | Part::Forearm(s) | Part::Thigh(s) | Part::Shin(s) | Part::Foot(s) => s,
             _ => 1.0,
@@ -278,60 +365,101 @@ fn all_parts() -> impl Iterator<Item = Part> {
     }))
 }
 
-/// How far the kicking leg draws back, how much the knee bends, and how much the body opens up.
-fn kick_shape(kind: Kick) -> (f32, f32, f32) {
-    match kind {
-        Kick::Shot => (1.0, 1.5, 1.0),
-        Kick::Pass | Kick::ShortPass => (0.6, 0.9, 0.5),
-        Kick::Lob | Kick::ShortLob => (0.75, 1.2, 0.6),
-        _ => (0.35, 0.6, 0.2),
-    }
+/// Angle wrapped to -pi..pi.
+fn wrap(a: f32) -> f32 {
+    (a + PI).rem_euclid(TAU) - PI
 }
 
-fn follow_time(kind: Kick) -> f32 {
-    match kind {
-        Kick::Shot => SHOT_FOLLOW_THROUGH + 0.2,
-        _ => 0.3,
-    }
+/// How a kick looks: how far the leg draws back, the knee bend, how much the body opens up, the
+/// spine's lean through the ball (negative = over it), how high the leg finishes, and how long
+/// the follow-through lasts.
+struct KickShape {
+    back: f32,
+    knee: f32,
+    open: f32,
+    lean: f32,
+    peak: f32,
+    follow: f32,
+}
+
+fn kick_shape(kind: Kick) -> KickShape {
+    let (back, knee, open, lean, peak, follow) = match kind {
+        Kick::Shot => (1.0, 1.5, 1.0, -0.25, 1.3, SHOT_FOLLOW_THROUGH + 0.2),
+        Kick::Pass | Kick::ShortPass => (0.6, 0.9, 0.5, -0.1, 0.9, 0.3),
+        Kick::Lob | Kick::ShortLob => (0.75, 1.2, 0.6, 0.25, 1.5, 0.4),
+        Kick::PushBall | Kick::DribblePushBall => (0.35, 0.6, 0.2, -0.1, 0.6, 0.2),
+    };
+    KickShape { back, knee, open, lean, peak, follow }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn pose_after(player: Player, seconds: f32) -> Vec<(Part, Quat, f32)> {
+    fn app_with(player: Player) -> App {
         let mut app = App::new();
         app.init_resource::<Time>().add_systems(Update, animate_body);
         let world = app.world_mut();
         let root = world.spawn((player, Transform::default())).id();
         spawn_body(&mut world.commands(), root, &mut Assets::default(), &mut Assets::default());
         world.flush();
-        for _ in 0..(seconds * 60.0) as usize {
+        app
+    }
+
+    fn run_for(app: &mut App, seconds: f32) {
+        for _ in 0..(seconds * 60.0).round() as usize {
             app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(1.0 / 60.0));
             app.update();
         }
-        app.world_mut().query::<(&Part, &Transform)>().iter(app.world()).map(|(p, t)| (*p, t.rotation, t.translation.y)).collect()
     }
 
-    fn pitch(poses: &[(Part, Quat, f32)], part: Part) -> f32 {
-        let (_, q, _) = poses.iter().find(|(p, ..)| *p == part).unwrap();
-        q.to_euler(EulerRot::YZX).2
+    /// A joint's pitch and height.
+    fn joint(app: &mut App, part: Part) -> (f32, f32) {
+        let tf = *app.world_mut().query::<(&Part, &Transform)>().iter(app.world()).find(|(p, _)| **p == part).unwrap().1;
+        (tf.rotation.to_euler(EulerRot::YZX).2, tf.translation.y)
+    }
+
+    fn set_speed(app: &mut App, z: f32) {
+        app.world_mut().query::<&mut Player>().single_mut(app.world_mut()).unwrap().vel.z = z;
     }
 
     #[test]
     fn running_swings_the_legs_and_lock_move_crouches() {
         // Running forward, at some point within a stride the legs are clearly apart.
-        let run = Player { vel: Vec3::new(0.0, 0.0, -5.0), ..default() };
+        let mut app = app_with(Player { vel: Vec3::new(0.0, 0.0, -5.0), ..default() });
         let mut apart: f32 = 0.0;
-        for t in [0.3, 0.4, 0.5, 0.6] {
-            let poses = pose_after(Player { ..run }, t);
-            apart = apart.max((pitch(&poses, Part::Thigh(1.0)) - pitch(&poses, Part::Thigh(-1.0))).abs());
+        for _ in 0..30 {
+            run_for(&mut app, 1.0 / 60.0);
+            apart = apart.max((joint(&mut app, Part::Thigh(1.0)).0 - joint(&mut app, Part::Thigh(-1.0)).0).abs());
         }
         assert!(apart > 0.6, "legs apart by {apart} rad");
         // Lock move, standing: hips lower and both knees bent.
-        let poses = pose_after(Player { locked: true, ..default() }, 0.5);
-        let body = poses.iter().find(|(p, ..)| *p == Part::Body).unwrap().2;
-        assert!(body < -0.1, "body at {body}");
-        assert!(pitch(&poses, Part::Shin(1.0)) < -0.7 && pitch(&poses, Part::Shin(-1.0)) < -0.7);
+        let mut app = app_with(Player { locked: true, ..default() });
+        run_for(&mut app, 0.5);
+        assert!(joint(&mut app, Part::Body).1 < -0.1);
+        assert!(joint(&mut app, Part::Shin(1.0)).0 < -0.7 && joint(&mut app, Part::Shin(-1.0)).0 < -0.7);
+    }
+
+    #[test]
+    fn braking_leans_back_and_pushing_off_leans_forward() {
+        let mut app = app_with(Player { vel: Vec3::new(0.0, 0.0, -5.0), ..default() });
+        run_for(&mut app, 1.0);
+        // Stop over 0.38 s, as from a run: the body leans back.
+        let mut lean: f32 = 0.0;
+        for i in 1..=23 {
+            set_speed(&mut app, -5.0 * (1.0 - i as f32 / 23.0));
+            run_for(&mut app, 1.0 / 60.0);
+            lean = lean.max(joint(&mut app, Part::Body).0);
+        }
+        assert!(lean > 0.15, "leaned back {lean} rad");
+        // Pushing off from standing leans forward.
+        run_for(&mut app, 1.0);
+        let mut lean: f32 = 0.0;
+        for i in 1..=12 {
+            set_speed(&mut app, -5.0 * i as f32 / 12.0);
+            run_for(&mut app, 1.0 / 60.0);
+            lean = lean.min(joint(&mut app, Part::Body).0);
+        }
+        assert!(lean < -0.15, "leaned forward {lean} rad");
     }
 }

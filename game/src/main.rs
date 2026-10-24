@@ -164,7 +164,7 @@ fn update_hud(
         _ => "-".into(),
     };
     hud.0 = format!(
-        "Score  {} - {}\nStamina {:4.1}/10{}   Extra effort {:3.0}%{}\nSpeed {:4.1} m/s{}\nCharge {}\nBall {:4.1} m/s\n\nF1 Controls",
+        "Score  {} - {}\nStamina {:4.1}/10{}   Extra effort {:3.0}%{}\nSpeed {:4.1} m/s{}{}\nCharge {}\nBall {:4.1} m/s\n\nF1 Controls",
         score.0[0],
         score.0[1],
         p.stamina,
@@ -180,6 +180,7 @@ fn update_hud(
             (.., true) => "  sprint",
             _ => "",
         },
+        if p.turn.is_some() { "  turning" } else { "" },
         charge,
         ball.vel.length(),
     );
