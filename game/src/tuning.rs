@@ -381,10 +381,12 @@ pub const EXTRA_EFFORT_REGEN_FULL_STAMINA: f32 = 0.1875;
 pub const EXTRA_EFFORT_SPEED: f32 = 9.5;
 pub const EXTRA_EFFORT_ACCEL: f32 = 100.0;
 pub const TURN_RATE_EXTRA_EFFORT: f32 = 150.0;
-/// A sharp change of way in extra effort (past this many degrees) is a cut (Kev: sharp, with a
-/// drastic change-of-direction move): the body swings to the new way at EE_CUT_TURN deg/s and a
-/// plant-and-push pose plays over EE_CUT_TIME.
-pub const EE_CUT_ANGLE: f32 = 60.0;
+/// A reversal in extra effort (past this many degrees) is a cut (Kev: sharp, with a drastic
+/// change-of-direction move, only for a full turn back): the body swings to the new way at
+/// EE_CUT_TURN deg/s and a plant-and-push pose plays over EE_CUT_TIME.
+pub const EE_CUT_ANGLE: f32 = 150.0;
+/// In extra effort the body follows your way this fast (deg/s), so the torso never trails the legs.
+pub const EE_BODY_TURN: f32 = 720.0;
 pub const EE_CUT_TURN: f32 = 1080.0;
 pub const EE_CUT_TIME: f32 = 0.25;
 /// Extra effort can't control the ball: starting it taps the ball on, and running into the
@@ -490,6 +492,13 @@ pub const TOUCH_SPRING: [(f32, f32); 2] = [(0.35, 15.0), (0.5, 5.0)];
 pub const TOUCH_SIDE_LIMIT: [(f32, f32); 3] = [(0.0, 0.4), (0.2, 0.6), (0.8, 2.4)];
 /// A control blends the ball to the foot (sine-out) unless it is this close.
 pub const CONTROL_SNAP_NEAR: f32 = 0.1;
+/// A control brings the ball to your foot no faster than this against you (m/s; the ippy's pull
+/// round a little faster), so a ball taken from the edge of the magnet glides in instead of
+/// jumping (Kev: the ball moved too fast all of a sudden).
+pub const CONTROL_PULL_SPEED: (f32, f32) = (5.0, 9.0);
+/// The ball you carry never moves faster than this against you (m/s), kicks aside: a sudden
+/// change of way, the stance's sole or a touch glides it there instead of jumping it.
+pub const CARRY_MAX_REL_SPEED: f32 = 6.0;
 pub const NO_RECONTROL_TIME: f32 = 0.5; // GE_LostBall: no control of your own kick for 0.5 s
 
 // Freeplay ball call

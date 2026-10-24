@@ -27,11 +27,21 @@ struct Score([u32; 2]);
 #[derive(Component)]
 struct Hud;
 
+/// The window; a scripted test run (RE_SCREENSHOT) opens behind everything, unfocused and off the
+/// taskbar, so it doesn't get in the way of a game being played.
+fn test_window() -> Window {
+    let window = Window { title: "RE Rematch (prototype)".into(), ..default() };
+    if std::env::var("RE_SCREENSHOT").is_err() {
+        return window;
+    }
+    Window { focused: false, skip_taskbar: true, window_level: bevy::window::WindowLevel::AlwaysOnBottom, ..window }
+}
+
 fn main() {
     App::new()
         .add_plugins(
             DefaultPlugins
-                .set(WindowPlugin { primary_window: Some(Window { title: "RE Rematch (prototype)".into(), ..default() }), ..default() })
+                .set(WindowPlugin { primary_window: Some(test_window()), ..default() })
                 // The Vulkan loader logs stale overlay layers some launchers leave registered; harmless noise.
                 .set(bevy::log::LogPlugin { filter: "wgpu=error,naga=warn,wgpu_hal::vulkan::instance=off".into(), ..default() }),
         )

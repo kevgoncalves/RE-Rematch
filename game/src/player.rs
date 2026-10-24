@@ -65,8 +65,6 @@ pub struct Player {
     pub freeze: f32,
     /// Seconds riding on the ball in extra effort, before it is tapped on.
     pub effort_ride: f32,
-    /// Where a control took the ball from.
-    pub receive_from: Vec3,
     /// The control's action frame.
     pub receive_act: f32,
     /// A turning control's new way.
@@ -383,7 +381,6 @@ impl Default for Player {
             last_input: Vec3::ZERO,
             freeze: 0.0,
             effort_ride: 0.0,
-            receive_from: Vec3::ZERO,
             receive_act: 16.0 / 60.0,
             receive_way: None,
             carry: None,
@@ -822,7 +819,7 @@ pub fn player_move(
         p.vel = p.vel.move_towards(target, accel * dt);
         let yaw = (-p.vel.x).atan2(-p.vel.z);
         let diff = (yaw - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
-        let max_turn = if p.ee_cut > 0.0 { EE_CUT_TURN } else { turn }.to_radians() * dt;
+        let max_turn = if p.ee_cut > 0.0 { EE_CUT_TURN } else { EE_BODY_TURN.max(turn) }.to_radians() * dt;
         p.facing += diff.clamp(-max_turn, max_turn);
     } else if p.pivot > 0.0 && wish != Vec3::ZERO {
         // A quick pivot: heading and body swing round together, your speed dipping while far off.
@@ -960,8 +957,9 @@ pub fn ball_control(
         let t = t + time.delta_secs();
         p.receiving = (t < p.receive_act).then_some(t);
         if !p.has_ball {
-            // The ball never jumps to the foot: it blends there from where it was, eased sine-out,
-            // by the control's touch frame (TouchBallComponent); only within 10 cm does it snap.
+            // The ball glides to your foot: it moves on with you and closes on the spot by the
+            // control's touch frame, but never faster than CONTROL_PULL_SPEED against you; only
+            // within 10 cm does it snap.
             let fwd = forward(p.facing);
             let target = match p.receive_way {
                 // The ippy: the foot pulls the ball round in front of you as you swing.
@@ -969,9 +967,15 @@ pub fn ball_control(
                 None => ptf.translation + fwd * DRIBBLE_OFFSET,
             };
             let target = Vec3::new(target.x, BALL_RADIUS, target.z);
-            let u = if p.receive_from.distance(target) < CONTROL_SNAP_NEAR { 1.0 } else { (t / CONTROL_SNAP).min(1.0) };
-            btf.translation = p.receive_from.lerp(target, (u * std::f32::consts::FRAC_PI_2).sin());
-            b.vel = p.vel;
+            let dt = time.delta_secs();
+            let to = Vec3::new(target.x - btf.translation.x, 0.0, target.z - btf.translation.z);
+            let left = (CONTROL_SNAP - t + dt).max(dt);
+            let cap = if p.receive_way.is_some() { CONTROL_PULL_SPEED.1 } else { CONTROL_PULL_SPEED.0 } * dt;
+            let step = if to.length() < CONTROL_SNAP_NEAR { to } else { (to * (dt / left).min(1.0)).clamp_length_max(cap) };
+            let before = btf.translation;
+            btf.translation += Vec3::new(p.vel.x, 0.0, p.vel.z) * dt + step;
+            btf.translation.y += (BALL_RADIUS - btf.translation.y) * (dt / left).min(1.0);
+            b.vel = (btf.translation - before) / dt.max(1e-4);
             if t >= CONTROL_SNAP {
                 p.has_ball = true;
                 b.held = true;
@@ -982,9 +986,15 @@ pub fn ball_control(
     }
     if p.has_ball {
         let now = time.elapsed_secs();
+        let dt = time.delta_secs();
         let before = btf.translation;
-        btf.translation = carry_ball(p, ptf.translation, btf.translation, now, time.delta_secs());
-        b.vel = (btf.translation - before) / time.delta_secs().max(1e-4);
+        let carried = carry_ball(p, ptf.translation, btf.translation, now, dt);
+        // Never faster than CARRY_MAX_REL_SPEED against you, kicks aside.
+        let own = Vec3::new(p.vel.x, 0.0, p.vel.z) * dt;
+        let rel = carried - before - own;
+        let rel = if p.kick.is_some() { rel } else { rel.clamp_length_max(CARRY_MAX_REL_SPEED * dt) };
+        btf.translation = before + own + rel;
+        b.vel = (btf.translation - before) / dt.max(1e-4);
         return;
     }
     p.carry = None;
@@ -1022,7 +1032,6 @@ pub fn ball_control(
             return;
         }
         p.receiving = Some(0.0);
-        p.receive_from = btf.translation;
         p.receive_way = Some(w);
         p.receive_act = CONTROL_ACT_BY_HEIGHT[0].1;
         p.own_push = f32::INFINITY;
@@ -1076,7 +1085,6 @@ pub fn ball_control(
     }
     if in_reach {
         p.receiving = Some(0.0);
-        p.receive_from = btf.translation;
         b.spin = Vec3::ZERO;
         p.receive_act = CONTROL_ACT_BY_HEIGHT.iter().find(|(h, _)| btf.translation.y < *h).map_or(22.0 / 60.0, |(_, act)| *act);
         // A control ends a push ball's chase; you move freely as it settles the ball (Kev: no
