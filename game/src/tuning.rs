@@ -109,6 +109,10 @@ pub const SIDE_SPIN_BY_CHARGE: [(f32, f32); 2] = [(0.1, 0.5), (1.0, 0.9)];
 pub const MAGNUS_ACCUMULATOR_SENSITIVITY: f32 = 0.2;
 pub const MOUSE_AXIS_SCALE: f32 = 0.07; // Unreal's default MouseX/MouseY axis scale (unconfirmed for Rematch)
 pub const PASS_FRICTION: f32 = 0.3;
+// Pass aiming (Tap_OrientationDataTable_*, BP_*_Tap_FilteredInputDirectionComputation)
+pub const PASS_STICK_DEAD_ZONE: f32 = 0.3;
+pub const PASS_MOUSE_DEAD_ZONE: f32 = 0.4;
+pub const PASS_FORWARD_SNAP: f32 = 6.0; // degrees
 pub const SHOT_FRICTION: f32 = 1.0;
 /// Stick/mouse forward-back to top/back spin; one direction is much stronger (which one is unconfirmed).
 pub const TOP_SPIN: [(f32, f32); 6] = [(-1.0, 780.0), (-0.5, 330.0), (-0.1, 0.0), (0.2, 0.0), (0.5, -40.0), (1.0, -120.0)];

@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 
 use crate::ball::Ball;
-use crate::input::{Action, Actions, Axes, InputBlocked};
+use crate::input::{Action, Actions, Axes, Bindings, InputBlocked, PassAim};
 use crate::tuning::*;
 
 #[derive(Component)]
@@ -96,11 +96,41 @@ impl Kick {
     }
 }
 
+impl Kick {
+    /// Passes and lobs follow the pass-aim option; shots and push balls don't.
+    pub fn is_pass(self) -> bool {
+        matches!(self, Kick::Pass | Kick::ShortPass | Kick::Lob | Kick::ShortLob)
+    }
+}
+
 impl Player {
     /// Charging a shot: the mouse curves the ball instead of turning the camera.
     pub fn charging_shot(&self) -> bool {
         self.kick.is_some_and(|k| k.kind == Kick::Shot && !k.released)
     }
+
+    /// While charging, the mouse feeds the curve or a virtual stick instead of the camera.
+    pub fn mouse_steers_kick(&self, aim: PassAim) -> bool {
+        self.charging_shot() || (aim == PassAim::JoystickEmulation && self.kick.is_some_and(|k| k.kind.is_pass() && !k.released))
+    }
+}
+
+/// Where a pass goes right now, for the chosen aim mode (yaw in radians).
+pub fn pass_yaw(aim: PassAim, axes: &Axes, rig: &CameraRig) -> f32 {
+    let (stick, dead_zone) = match aim {
+        PassAim::CrosshairOnly => (Vec2::ZERO, 1.0),
+        PassAim::DirectionalAiming => (axes.movement, PASS_STICK_DEAD_ZONE),
+        PassAim::JoystickEmulation => (axes.curve, PASS_MOUSE_DEAD_ZONE),
+    };
+    let camera = rig.yaw.to_radians();
+    if stick.length() < dead_zone {
+        return camera;
+    }
+    let dir = camera_relative(stick.normalize(), rig.yaw);
+    let yaw = (-dir.x).atan2(-dir.z);
+    // Straight ahead snaps to the camera within a few degrees (the "Top" tolerance).
+    let off = (yaw - camera + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+    if off.abs() < PASS_FORWARD_SNAP.to_radians() { camera } else { yaw }
 }
 
 /// Camera orbit angles, in degrees. Pitch + is up.
@@ -110,7 +140,7 @@ pub struct CameraRig {
     pub pitch: f32,
 }
 
-fn forward(yaw_rad: f32) -> Vec3 {
+pub fn forward(yaw_rad: f32) -> Vec3 {
     Vec3::new(-yaw_rad.sin(), 0.0, -yaw_rad.cos())
 }
 
@@ -140,13 +170,14 @@ pub fn camera_look(
     actions: Res<Actions>,
     player: Single<(&Transform, &Player)>,
     ball: Single<&Transform, With<Ball>>,
+    bindings: Res<Bindings>,
 ) {
     let (ptf, p) = *player;
     if actions.just_pressed(Action::LookAtBall) {
         let to_ball = ball.translation - ptf.translation;
         rig.yaw = (-to_ball.x).atan2(-to_ball.z).to_degrees();
     }
-    let look = if p.charging_shot() { axes.look_pad } else { axes.look_pad + axes.look_mouse };
+    let look = if p.mouse_steers_kick(bindings.pass_aim) { axes.look_pad } else { axes.look_pad + axes.look_mouse };
     rig.yaw -= look.x;
     rig.pitch = (rig.pitch + look.y).clamp(-PITCH_DOWN_LIMIT, PITCH_UP_LIMIT);
 }
@@ -308,6 +339,7 @@ pub fn kicking(
     rig: Single<&CameraRig>,
     actions: Res<Actions>,
     mut axes: ResMut<Axes>,
+    bindings: Res<Bindings>,
     time: Res<Time>,
 ) {
     let dt = time.delta_secs();
@@ -372,7 +404,7 @@ pub fn kicking(
     let yaw = match k.kind {
         Kick::PushBall => p.facing, // goes where you're running
         Kick::Shot => (k.aim.x - side * AIM_NUDGE).to_radians(), // locked at the press
-        _ => rig.yaw.to_radians(),
+        _ => pass_yaw(bindings.pass_aim, &axes, &rig),
     };
     let flat = forward(yaw);
     let dir = (flat * elevation.to_radians().cos() + Vec3::Y * elevation.to_radians().sin()).normalize();
@@ -440,5 +472,26 @@ pub fn camera_follow(
     if let Projection::Perspective(persp) = &mut **proj {
         let target = if p.sprinting || p.extra_active { SPRINT_FOV } else { FOV }.to_radians();
         persp.fov += (target - persp.fov) * (time.delta_secs() * 5.0).min(1.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pass_aim_modes() {
+        let rig = CameraRig::default();
+        let camera = rig.yaw.to_radians();
+        let mut axes = Axes::default();
+        axes.movement = Vec2::X;
+        // Crosshair ignores the keys; directional sends the pass to the right.
+        assert_eq!(pass_yaw(PassAim::CrosshairOnly, &axes, &rig), camera);
+        assert!(forward(pass_yaw(PassAim::DirectionalAiming, &axes, &rig)).dot(forward(camera - std::f32::consts::FRAC_PI_2)) > 0.99);
+        // Inside the dead zone, or a few degrees off straight ahead, it goes where the camera looks.
+        axes.movement = Vec2::new(0.05, 0.2);
+        assert_eq!(pass_yaw(PassAim::DirectionalAiming, &axes, &rig), camera);
+        axes.movement = Vec2::new(0.05, 1.0);
+        assert_eq!(pass_yaw(PassAim::DirectionalAiming, &axes, &rig), camera);
     }
 }

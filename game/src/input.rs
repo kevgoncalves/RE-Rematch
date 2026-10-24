@@ -97,6 +97,30 @@ pub enum Device {
 pub struct Bindings {
     pub keyboard: BTreeMap<Action, Vec<Input>>,
     pub gamepad: BTreeMap<Action, Vec<Input>>,
+    #[serde(default)]
+    pub pass_aim: PassAim,
+}
+
+/// How keyboard-and-mouse players aim passes and lobs (Rematch's ETapAimingOptions).
+#[derive(Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Debug)]
+pub enum PassAim {
+    /// The pass goes the way your WASD keys point, relative to the camera.
+    #[default]
+    DirectionalAiming,
+    /// Dragging the mouse while charging steers a virtual stick; the camera stays put.
+    JoystickEmulation,
+    /// The pass goes where the crosshair aims.
+    CrosshairOnly,
+}
+
+impl PassAim {
+    pub fn next(self) -> Self {
+        match self {
+            PassAim::DirectionalAiming => PassAim::JoystickEmulation,
+            PassAim::JoystickEmulation => PassAim::CrosshairOnly,
+            PassAim::CrosshairOnly => PassAim::DirectionalAiming,
+        }
+    }
 }
 
 impl Default for Bindings {
@@ -126,7 +150,7 @@ impl Default for Bindings {
             (Dash, vec![K(KeyCode::ControlLeft), K(KeyCode::KeyC)]),
             (Dive, vec![K(KeyCode::KeyQ)]),
             (Ping, vec![M(MouseButton::Middle)]),
-            (BallCall, vec![K(KeyCode::KeyT)]), // provisional until read from Rematch's presets
+            (BallCall, vec![M(MouseButton::Middle)]), // freeplay "trigger cannon ball"
         ];
         // Movement and camera stay on the sticks; the rest follows Rematch's gamepad preset.
         let gamepad = [
@@ -146,12 +170,48 @@ impl Default for Bindings {
             (Dash, vec![Pad(P::LeftTrigger2), Pad(P::South)]),
             (Dive, vec![Pad(P::North)]),
             (Ping, vec![Pad(P::RightThumb)]),
+            (BallCall, vec![Pad(P::RightThumb)]),
         ];
-        Self { keyboard: keyboard.into_iter().collect(), gamepad: gamepad.into_iter().collect() }
+        Self { keyboard: keyboard.into_iter().collect(), gamepad: gamepad.into_iter().collect(), pass_aim: PassAim::default() }
     }
 }
 
 impl Bindings {
+    /// Rematch's "custom modifier" keyboard preset: side mouse buttons, with C held as the modifier
+    /// (Modifier + Pass = lob). Gamepad stays on the default preset.
+    pub fn rematch_modifier_preset() -> Self {
+        use Action::*;
+        use Input::{Key as K, Modifier as Mod, Mouse as M};
+        let (thumb, thumb2) = (M(MouseButton::Back), M(MouseButton::Forward));
+        let keyboard = [
+            (MoveForward, vec![K(KeyCode::KeyW)]),
+            (MoveBack, vec![K(KeyCode::KeyS)]),
+            (MoveLeft, vec![K(KeyCode::KeyA)]),
+            (MoveRight, vec![K(KeyCode::KeyD)]),
+            (Sprint, vec![K(KeyCode::ShiftLeft)]),
+            (ExtraEffort, vec![K(KeyCode::ShiftLeft)]),
+            (Shoot, vec![M(MouseButton::Left)]),
+            (FakeShot, vec![M(MouseButton::Right)]),
+            (Pass, vec![M(MouseButton::Right)]),
+            (LowPowerPass, vec![M(MouseButton::Right), thumb]),
+            (Lob, vec![Mod, M(MouseButton::Right)]),
+            (LowPowerLob, vec![M(MouseButton::Right), thumb, Mod]),
+            (PushBall, vec![thumb]),
+            (LobbedPushBall, vec![Mod, thumb]),
+            (LookAtBall, vec![K(KeyCode::KeyF)]),
+            // Rematch puts both tackles on the same button and picks one from context.
+            (StandingTackle, vec![thumb2]),
+            (SlidingTackle, vec![thumb2]),
+            (Lock, vec![K(KeyCode::ControlLeft)]),
+            (Dash, vec![K(KeyCode::ControlLeft), thumb]),
+            (Dive, vec![K(KeyCode::Space)]),
+            (Ping, vec![M(MouseButton::Middle)]),
+            (Modifier, vec![K(KeyCode::KeyC)]),
+            (BallCall, vec![M(MouseButton::Middle)]),
+        ];
+        Self { keyboard: keyboard.into_iter().collect(), ..Self::default() }
+    }
+
     pub fn load() -> Self {
         std::fs::read_to_string(SAVE_PATH).ok().and_then(|s| ron::from_str(&s).ok()).unwrap_or_default()
     }

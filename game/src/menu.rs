@@ -18,8 +18,15 @@ pub struct MenuRoot;
 #[derive(Component, Clone, Copy)]
 pub struct BindButton(Action, Device);
 
-#[derive(Component)]
-pub struct ResetButton;
+#[derive(Component, Clone, Copy)]
+pub enum MenuButton {
+    /// Rematch's default layout.
+    Defaults,
+    /// Rematch's "modifier" layout for mice with thumb buttons (modifier + pass = lob).
+    ModifierPreset,
+    /// Cycles the keyboard-and-mouse pass aiming mode.
+    PassAim,
+}
 
 const BG: Color = Color::srgba(0.02, 0.03, 0.05, 0.92);
 const BUTTON: Color = Color::srgb(0.16, 0.18, 0.24);
@@ -68,14 +75,16 @@ pub fn spawn_menu(mut commands: Commands) {
                             }
                         });
                 }
-                panel
-                    .spawn((
-                        Button,
-                        ResetButton,
-                        Node { margin: UiRect::top(Val::Px(8.0)), padding: UiRect::all(Val::Px(6.0)), ..default() },
-                        BackgroundColor(BUTTON),
-                    ))
-                    .with_child(text("Reset to Rematch defaults".into(), 15.0));
+                panel.spawn(Node { margin: UiRect::top(Val::Px(8.0)), column_gap: Val::Px(8.0), ..default() }).with_children(|row| {
+                    for (button, label) in [
+                        (MenuButton::Defaults, "Rematch defaults"),
+                        (MenuButton::ModifierPreset, "Rematch modifier (thumb buttons)"),
+                        (MenuButton::PassAim, ""),
+                    ] {
+                        row.spawn((Button, button, Node { padding: UiRect::all(Val::Px(6.0)), ..default() }, BackgroundColor(BUTTON)))
+                            .with_child(text(label.into(), 15.0));
+                    }
+                });
             });
         });
 }
@@ -103,7 +112,7 @@ pub fn menu_clicks(
     mut menu: ResMut<Menu>,
     mut bindings: ResMut<Bindings>,
     binds: Query<(&Interaction, &BindButton), Changed<Interaction>>,
-    reset: Query<&Interaction, (Changed<Interaction>, With<ResetButton>)>,
+    buttons: Query<(&Interaction, &MenuButton), Changed<Interaction>>,
 ) {
     // While capturing, clicks are inputs to bind, not menu clicks.
     if !menu.open || menu.capturing.is_some() {
@@ -114,10 +123,18 @@ pub fn menu_clicks(
             menu.capturing = Some((button.0, button.1, Vec::new()));
         }
     }
-    if reset.iter().any(|i| *i == Interaction::Pressed) {
-        *bindings = Bindings::default();
+    for (interaction, button) in &buttons {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        // Presets swap the buttons but keep the pass aiming choice.
+        let aim = bindings.pass_aim;
+        match button {
+            MenuButton::Defaults => *bindings = Bindings { pass_aim: aim, ..Bindings::default() },
+            MenuButton::ModifierPreset => *bindings = Bindings { pass_aim: aim, ..Bindings::rematch_modifier_preset() },
+            MenuButton::PassAim => bindings.pass_aim = aim.next(),
+        }
         bindings.save();
-        menu.capturing = None;
     }
 }
 
@@ -180,6 +197,7 @@ pub fn refresh_labels(
     menu: Res<Menu>,
     bindings: Res<Bindings>,
     mut buttons: Query<(&BindButton, &Children, &mut BackgroundColor)>,
+    menu_buttons: Query<(&MenuButton, &Children)>,
     mut texts: Query<&mut Text>,
 ) {
     if !menu.open {
@@ -197,6 +215,14 @@ pub fn refresh_labels(
         };
         bg.0 = if capturing { BUTTON_ACTIVE } else { BUTTON };
         if let Some(mut text) = children.first().and_then(|c| texts.get_mut(*c).ok()) {
+            if text.0 != label {
+                text.0 = label;
+            }
+        }
+    }
+    for (button, children) in &menu_buttons {
+        if let (MenuButton::PassAim, Some(mut text)) = (button, children.first().and_then(|c| texts.get_mut(*c).ok())) {
+            let label = format!("Pass aim: {:?}", bindings.pass_aim);
             if text.0 != label {
                 text.0 = label;
             }

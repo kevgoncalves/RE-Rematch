@@ -57,6 +57,7 @@ fn main() {
                 player::camera_follow,
                 update_hud,
                 reticle::update_reticle,
+                reticle::pass_line,
             )
                 .chain(),
         )
