@@ -78,6 +78,17 @@ pub const SPRINT_ACCEL: f32 = SPRINT_SPEED / 0.6;
 pub const BALL_RUN_ACCEL: f32 = 4.5 / 0.6;
 pub const BALL_SPRINT_ACCEL: f32 = 6.5 / 0.8;
 pub const STOP_DECEL: f32 = 5.0 / 0.38;
+/// Above your top speed (out of extra effort, a dash or a sprint) you slow to it at this rate
+/// instead of dropping to it at once: an extra-effort tap is a little burst (Kev: the pros' mini
+/// dash).
+pub const OVERSPEED_DECEL: f32 = 15.0;
+/// Each extra-effort touch on the ball keeps your own magnet off this long (the game's
+/// BP_NoSelfInteract_ExtraEffort and its 0.5 s no-control for the kicker), so letting go of extra
+/// effort doesn't hand you the ball at once.
+pub const EE_TOUCH_NO_CONTROL: f32 = 0.5;
+/// Letting go of extra effort keeps your magnet off this long too (Kev: the magnet doesn't come
+/// back at once, which the pros use to run over a push ball and take it further on). TUNE.
+pub const EE_END_NO_CONTROL: f32 = 0.4;
 /// Time to stop from full speed by state (the stop transitions): run, with ball, sprint, sprint with ball.
 pub const STOP_TIME: [f32; 4] = [0.38, 0.7, 0.68, 1.0];
 

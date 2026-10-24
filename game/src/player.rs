@@ -57,6 +57,10 @@ pub struct Player {
     pub push_way: Vec3,
     /// Whether that push ball was sprinted at the press (no ippy then, as in the game).
     pub push_sprinted: bool,
+    /// Your magnet is off this long after an extra-effort touch on the ball or its end.
+    pub magnet_off: f32,
+    /// Extra effort was on last frame.
+    pub ee_was: bool,
     /// An extra-effort cut's time left, and whether it cuts right.
     pub ee_cut: f32,
     pub ee_cut_right: bool,
@@ -377,6 +381,8 @@ impl Default for Player {
             push_way: Vec3::ZERO,
             push_sprinted: false,
             ee_cut: 0.0,
+            magnet_off: 0.0,
+            ee_was: false,
             ee_cut_right: false,
             last_input: Vec3::ZERO,
             freeze: 0.0,
@@ -724,6 +730,11 @@ pub fn player_move(
     p.since_dribble = if p.dribble.is_some() { 0.0 } else { p.since_dribble + dt };
     p.own_push += dt;
     p.ee_cut -= dt;
+    p.magnet_off -= dt;
+    if p.ee_was && !p.extra_active {
+        p.magnet_off = p.magnet_off.max(EE_END_NO_CONTROL);
+    }
+    p.ee_was = p.extra_active;
     // After the hand-back a dribble keeps only its permissions, to the animation's end.
     if let Some(mut d) = p.dribble.filter(|d| !d.moving()) {
         d.t += dt;
@@ -895,7 +906,7 @@ pub fn player_move(
         let max_turn = if speed < 0.5 { f32::INFINITY } else { turn.to_radians() * dt };
         let heading = heading_now + angle_diff(yaw_of(wish), heading_now).clamp(-max_turn, max_turn);
         let new_speed = (speed + accel * input.length() * dt).min(top * input.length());
-        p.vel = forward(heading) * new_speed.max(speed.min(top) - STOP_DECEL * dt);
+        p.vel = forward(heading) * new_speed.max(speed.min(top) - STOP_DECEL * dt).max(speed - OVERSPEED_DECEL * dt);
         let lag = angle_diff(heading, p.facing);
         // Past 90 deg behind your heading the body catches up a little faster.
         let catch_up = if lag.abs() > std::f32::consts::FRAC_PI_2 { BODY_CATCH_UP } else { 0.0 };
@@ -1055,7 +1066,7 @@ pub fn ball_control(
         return;
     }
     let hands_off = p.own_push < OWN_PUSH_HANDS_OFF && wish.is_none();
-    let in_reach = b.no_control <= 0.0 && !hands_off && in_control_zone(rel, vel, speed, p.locked, starting || p.turn.is_some());
+    let in_reach = b.no_control <= 0.0 && p.magnet_off <= 0.0 && !hands_off && in_control_zone(rel, vel, speed, p.locked, starting || p.turn.is_some());
     if p.extra_active {
         // Extra effort can't control the ball: touching it taps it on at 12 m/s, flat, wherever
         // your movement input points at that moment (relative to the camera), whatever way your
@@ -1065,6 +1076,7 @@ pub fn ball_control(
         let touching = btf.translation.y < CONTROL_MAX_HEIGHT && b.no_control <= 0.0 && flat.length() < EXTRA_EFFORT_KNOCK_REACH;
         match touching.then(|| effort_touch(b.vel, dir, p.effort_ride)) {
             Some(EffortTouch::Ride) => {
+                p.magnet_off = EE_TOUCH_NO_CONTROL;
                 p.effort_ride += time.delta_secs();
                 b.vel = Vec3::new(p.vel.x, b.vel.y, p.vel.z);
                 // While you can chop, the ball sits under you, so the window shows.
@@ -1074,6 +1086,7 @@ pub fn ball_control(
                 btf.translation.z += (under.z - btf.translation.z) * pull;
             }
             Some(EffortTouch::Tap) => {
+                p.magnet_off = EE_TOUCH_NO_CONTROL;
                 b.vel = dir * EXTRA_EFFORT_KNOCK_SPEED;
                 b.friction = EXTRA_EFFORT_FRICTION;
                 b.spin = Vec3::ZERO;
