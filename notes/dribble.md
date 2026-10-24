@@ -115,9 +115,10 @@ The push ball's ground friction isn't exported, so these are estimates from our 
 
 ## Extra effort and the ball
 Players confirm that **extra effort can't control the ball**:
-- Starting it with the ball touches the ball on ahead (at 8f).
-- Running into the ball during extra effort taps it on again, **in the direction you're running, from any side**. So changing direction on the ball takes it with you.
-- Each touch sends the ball several metres ahead. The game's touch speeds (13 m/s at the start, 12 m/s after) barely beat your 8.75 m/s, so with the 1.5 friction override they would only lead by under a metre; something else must add to them (unconfirmed).
+- Starting it with the ball touches the ball on ahead (13 m/s, at 8f).
+- Running into the ball taps it on again (12 m/s). Against your 8.75 m/s that keeps the ball within about a metre.
+- **Cuts:** you hold extra effort and change direction with the ball at your feet; each change taps the ball the new way. Touches on a sharp turn are weaker: ×0.8 at 135°, ×0.5 at 180°.
+- **A full gauge gives three cuts** in one hold: activating costs a quarter of the gauge and holding drains 0.5/s, about 1.5 s in all.
 - **Changing direction in extra effort is snappy**: its near-instant acceleration (100 m/s²) turns your run; the 150°/s turn rate seems to apply to the body only (our reading of the players' description).
 
 ## The dash (without the ball)
