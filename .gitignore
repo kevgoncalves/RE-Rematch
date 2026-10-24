@@ -2,6 +2,7 @@
 bin/
 obj/
 out/
+out_bp/
 run*.log
 tools/rmx/files.txt
 *.dll

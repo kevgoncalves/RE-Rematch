@@ -1,0 +1,14 @@
+Runtime/Content/GAS/Abilities/Shoot/BaseAssets/Animation/HighPowerAfterShootScaleSpeedData.uasset
+Runtime/Content/GAS/Abilities/Shoot/BaseAssets/Animation/HighPowerBeforeShootScaleSpeedData.uasset
+Runtime/Content/GAS/Abilities/Shoot/BaseAssets/Animation/ShootAfterDribbleSpeedScale.uasset
+Runtime/Content/GAS/Abilities/Shoot/BaseAssets/Animation/TapAfterShootSpeedData.uasset
+Runtime/Content/GAS/Abilities/Shoot/BaseAssets/Animation/V2ToShootSpeedScale.uasset
+Runtime/Content/GAS/Abilities/Shoot/BaseAssets/Animation/V3ToShootSpeedScale.uasset
+Runtime/Content/GAS/Abilities/Shoot/BaseAssets/DT_FakeShoot.uasset
+Runtime/Content/GAS/Abilities/Shoot/BaseAssets/GA_BaseShoot.uasset
+Runtime/Content/GAS/Abilities/Shoot/BaseAssets/ShootDataRow.uasset
+Runtime/Content/GAS/Abilities/Shoot/BaseAssets/ShootDataTable.uasset
+Runtime/Content/GAS/Abilities/Shoot/Shoot/AbilityDataModifiers/NegativeShootForceByCharaSpeed.uasset
+Runtime/Content/GAS/Abilities/Shoot/Shoot/AbilityDataModifiers/ShootForceByCharaSpeed.uasset
+Runtime/Content/GAS/Abilities/Shoot/Shoot/AbilityDataModifiers/ShootOrientationRatioCharaSpeed.uasset
+Runtime/Content/GAS/Abilities/Shoot/Shoot/GA_Shoot.uasset
