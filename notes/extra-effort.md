@@ -32,6 +32,9 @@ What the extra effort ability does to the gauge and to the ball. Movement speed,
 
 ## Without the ball: the control tap
 - While active, a sprint-tap hitbox (BallSteal.Hitbox.Sprint.Tap) looks for the loose ball. Its parameters 0.2, 0.04 and 5 were not interpreted.
+  - The ball control's no-control status doesn't stop it: the hitbox only skips a ball marked no-deflect or under goalkeeper protection (SprintHitbox's condition).
+  - Each touch marks the ball: no-deflect 0.35 s and no-volley 0.35 s for everyone, no-control 0.5 s and "no hit, no repeat" 0.5 s for the kicker only (BP_NoSelfInteract_ExtraEffort). So your own next touch waits 0.5 s.
+  - **Chops have a grace on the ball** (players confirm). Reaching a ball that runs the way you push, you ride on it for a moment, and turning the stick then sends it the new way. The prototype rides it up to 0.2 s (the hitbox's first parameter, its meaning unread) and chops on a turn past 20°.
 - When it touches the ball it kicks it on (the "control tap"):
   - **12 m/s** along your **movement input at the moment of the touch, read relative to the camera** (the direction computation's default space is the camera; it uses the input stored with the touch, with no clamp to your body's facing);
   - flat (vertical angle 0);
