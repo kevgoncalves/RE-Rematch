@@ -5,6 +5,7 @@
 use std::f32::consts::{FRAC_PI_2, TAU};
 
 use bevy::asset::RenderAssetUsages;
+use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 
@@ -164,6 +165,14 @@ pub struct BallShadow;
 #[derive(Resource)]
 pub struct FxAssets {
     sphere: Handle<Mesh>,
+    /// A thin ring of radius 1, flat in its XY plane.
+    ring: Handle<Mesh>,
+}
+
+/// Whether the kicked ball draws its trail: from a kick until anyone gains the ball.
+#[derive(Resource, Default)]
+pub struct FxState {
+    kick_trail: bool,
 }
 
 /// The marker's ring, about 80 cm across (SM_Bounce_Circle, 75 x 86 cm).
@@ -213,41 +222,41 @@ pub fn spawn_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
     commands
         .spawn((Marker { mesh: mesh.clone(), total: 1.0, left: 0.0 }, Transform::default(), Visibility::Hidden))
         .with_children(|m| {
-            m.spawn((Mesh3d(mesh), MeshMaterial3d(materials.add(flat(Color::srgba(1.0, 1.0, 1.0, 0.95), AlphaMode::Blend))), Transform::from_xyz(0.0, 0.02, 0.0)));
-            m.spawn((
+            m.spawn((NotShadowCaster, Mesh3d(mesh), MeshMaterial3d(materials.add(flat(Color::srgba(1.0, 1.0, 1.0, 0.95), AlphaMode::Blend))), Transform::from_xyz(0.0, 0.02, 0.0)));
+            m.spawn((NotShadowCaster, 
                 Mesh3d(meshes.add(Circle::new(0.7))),
                 MeshMaterial3d(materials.add(flat(Color::srgb(0.25, 0.3, 0.35), AlphaMode::Add))),
                 Transform::from_xyz(0.0, 0.015, 0.0).with_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
             ));
-            m.spawn((MarkerArrow, Mesh3d(meshes.add(arrow())), MeshMaterial3d(materials.add(flat(Color::srgba(1.0, 1.0, 1.0, 0.5), AlphaMode::Blend))), Transform::from_xyz(0.0, 0.02, 0.0)));
+            m.spawn((NotShadowCaster, MarkerArrow, Mesh3d(meshes.add(arrow())), MeshMaterial3d(materials.add(flat(Color::srgba(1.0, 1.0, 1.0, 0.5), AlphaMode::Blend))), Transform::from_xyz(0.0, 0.02, 0.0)));
         });
     commands
         .spawn((MarkerBeacon, Transform::default(), Visibility::Hidden))
         .with_children(|b| {
-            b.spawn((Mesh3d(meshes.add(Annulus::new(0.2, 0.28))), MeshMaterial3d(materials.add(flat(Color::srgb(0.85, 0.95, 1.0), AlphaMode::Add))), Transform::default()));
-            b.spawn((Mesh3d(meshes.add(Circle::new(0.09))), MeshMaterial3d(materials.add(flat(Color::srgb(0.85, 0.95, 1.0), AlphaMode::Add))), Transform::default()));
+            b.spawn((NotShadowCaster, Mesh3d(meshes.add(Annulus::new(0.2, 0.28))), MeshMaterial3d(materials.add(flat(Color::srgb(0.85, 0.95, 1.0), AlphaMode::Add))), Transform::default()));
+            b.spawn((NotShadowCaster, Mesh3d(meshes.add(Circle::new(0.09))), MeshMaterial3d(materials.add(flat(Color::srgb(0.85, 0.95, 1.0), AlphaMode::Add))), Transform::default()));
         });
     // The ball's shadow, always on: a soft dark disc and a faint ring under it (NS_Shadow_Ball).
     commands
         .spawn((BallShadow, Transform::default(), Visibility::default()))
         .with_children(|s| {
-            s.spawn((
+            s.spawn((NotShadowCaster, 
                 Mesh3d(meshes.add(Circle::new(0.18))),
                 MeshMaterial3d(materials.add(flat(Color::srgba(0.0, 0.0, 0.0, 0.5), AlphaMode::Blend))),
                 Transform::from_xyz(0.0, 0.012, 0.0).with_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
             ));
-            s.spawn((
+            s.spawn((NotShadowCaster, 
                 Mesh3d(meshes.add(Annulus::new(0.34, 0.39))),
                 MeshMaterial3d(materials.add(flat(Color::srgba(1.0, 1.0, 1.0, 0.15), AlphaMode::Blend))),
                 Transform::from_xyz(0.0, 0.013, 0.0).with_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
             ));
         });
-    commands.insert_resource(FxAssets { sphere: meshes.add(Sphere::new(BALL_RADIUS)) });
+    commands.insert_resource(FxAssets { sphere: meshes.add(Sphere::new(BALL_RADIUS)), ring: meshes.add(Annulus::new(0.88, 1.0)) });
     // The trails: vertex-coloured ribbons added onto the scene.
     let glow = materials.add(StandardMaterial { base_color: Color::WHITE, unlit: true, alpha_mode: AlphaMode::Add, double_sided: true, cull_mode: None, ..default() });
-    for (source, effect) in [(Source::Ball, Effect::Dribble), (Source::Foot(1.0), Effect::Dribble), (Source::Foot(-1.0), Effect::ExtraEffort), (Source::Foot(1.0), Effect::ExtraEffort)] {
+    for (source, effect) in [(Source::Ball, Effect::Dribble), (Source::Foot(1.0), Effect::Dribble), (Source::Foot(-1.0), Effect::ExtraEffort), (Source::Foot(1.0), Effect::ExtraEffort), (Source::Ball, Effect::Kick)] {
         let mesh = meshes.add(ribbon(&[], Vec3::ZERO, 0.0, 1.0, Vec3::ZERO));
-        commands.spawn((Trail { source, effect, points: Vec::new(), mesh: mesh.clone() }, Mesh3d(mesh), MeshMaterial3d(glow.clone()), Transform::default(), Visibility::default()));
+        commands.spawn((NotShadowCaster, Trail { source, effect, points: Vec::new(), mesh: mesh.clone() }, Mesh3d(mesh), MeshMaterial3d(glow.clone()), Transform::default(), Visibility::default()));
     }
 }
 
@@ -277,6 +286,8 @@ pub struct TrailPoint(pub f32);
 pub enum Effect {
     Dribble,
     ExtraEffort,
+    /// The kicked ball's trail.
+    Kick,
 }
 
 impl Effect {
@@ -285,8 +296,10 @@ impl Effect {
         match self {
             // The dribble's blue (NS_Dribble's colour, 0.3 / 1.05 / 5.0, scaled down to display).
             Effect::Dribble => (Vec3::new(0.06, 0.21, 1.0), 0.25, 0.16),
-            // ponytail: extra effort's colour and size until its effect data is read.
-            Effect::ExtraEffort => (Vec3::new(1.0, 0.55, 0.12), 0.18, 0.1),
+            // Extra effort's streaks on the legs (its rays: 00FFCB, 56FFFD, 4BB5FF).
+            Effect::ExtraEffort => (Vec3::new(0.1, 1.0, 0.85), 0.2, 0.1),
+            // The kicked ball's trail: additive at 0.55 (NS_Ball_Trail; its colour isn't in the data).
+            Effect::Kick => (Vec3::new(0.5, 0.55, 0.6), 0.45, 0.2),
         }
     }
 }
@@ -332,6 +345,7 @@ pub fn trails(
     ball: Single<&GlobalTransform, With<Ball>>,
     feet: Query<(&TrailPoint, &GlobalTransform)>,
     camera: Single<&GlobalTransform, With<Camera3d>>,
+    state: Res<FxState>,
     mut trails: Query<&mut Trail>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
@@ -342,6 +356,7 @@ pub fn trails(
         let on = match trail.effect {
             Effect::Dribble => player.dribble.is_some_and(|d| d.t < 0.45),
             Effect::ExtraEffort => player.extra_active,
+            Effect::Kick => state.kick_trail,
         };
         for point in &mut trail.points {
             point.1 += dt;
@@ -413,9 +428,25 @@ pub struct Glow {
     age: f32,
     life: f32,
     alpha: f32,
-    /// Grows to this scale over its life.
-    grow: f32,
+    /// Scale and colour (linear) from and to, over its life.
+    scale: (f32, f32),
+    colour: (Vec3, Vec3),
     follow: bool,
+}
+
+impl Glow {
+    fn new(life: f32, alpha: f32, scale: (f32, f32), colour: (Vec3, Vec3), follow: bool) -> Glow {
+        Glow { age: 0.0, life, alpha, scale, colour, follow }
+    }
+}
+
+const BLUE: Vec3 = Vec3::new(0.06, 0.21, 1.0);
+const ORANGE: Vec3 = Vec3::new(1.0, 0.42, 0.08);
+const WHITE: Vec3 = Vec3::ONE;
+
+fn spawn_glow(commands: &mut Commands, materials: &mut Assets<StandardMaterial>, mesh: &Handle<Mesh>, at: Vec3, rotation: Quat, glow: Glow) {
+    let material = materials.add(StandardMaterial { base_color: Color::BLACK, unlit: true, alpha_mode: AlphaMode::Add, double_sided: true, cull_mode: None, ..default() });
+    commands.spawn((NotShadowCaster, Mesh3d(mesh.clone()), MeshMaterial3d(material), Transform { translation: at, rotation, scale: Vec3::splat(glow.scale.0) }, glow));
 }
 
 /// The dribble's glow on the ball (GC_Dribble, NS_Dribble): a blue shell riding the ball through
@@ -431,13 +462,66 @@ pub fn dribble_fx(
     let started = player.dribble.is_some_and(|d| last.is_none_or(|t| d.t < t));
     *last = player.dribble.map(|d| d.t);
     if started {
-        let material = materials.add(StandardMaterial { base_color: blue(0.9), unlit: true, alpha_mode: AlphaMode::Add, ..default() });
-        commands.spawn((Glow { age: 0.0, life: 0.5, alpha: 0.9, grow: 1.25, follow: true }, Mesh3d(fx.sphere.clone()), MeshMaterial3d(material), Transform::from_translation(ball.translation).with_scale(Vec3::splat(1.25))));
+        spawn_glow(&mut commands, &mut materials, &fx.sphere, ball.translation, Quat::IDENTITY, Glow::new(0.5, 0.9, (1.25, 1.25), (BLUE, BLUE), true));
     }
 }
 
-fn blue(alpha: f32) -> Color {
-    Color::linear_rgba(0.3 / 5.0, 1.05 / 5.0, 1.0, 1.0).with_alpha(alpha)
+/// The moves' bursts (gameplay_fx data): a kick's impact where the ball was, sized by the kick
+/// (shots by power: low under 29.4 m/s, mid under 34.8, high above, with more rings each step); the
+/// kicked ball's trail until anyone gains it (not for push balls on the ground); a control's two
+/// rings closing on the ball, orange to blue, as it pulses; and extra effort's burst at your feet.
+pub fn action_fx(
+    mut commands: Commands,
+    player: Single<(&Player, &Transform)>,
+    ball: Single<(&Transform, &Ball), Without<Player>>,
+    fx: Res<FxAssets>,
+    mut state: ResMut<FxState>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut last_kick: Local<Option<Kick>>,
+    mut was: Local<(bool, bool)>,
+) {
+    let ((p, ptf), (btf, b)) = (*player, *ball);
+    let at = btf.translation;
+    let kicked = last_kick.filter(|_| p.kick.is_none() && !b.held);
+    *last_kick = p.kick.map(|k| k.kind);
+    let flat = |v: Vec3| Quat::from_rotation_arc(Vec3::Z, v.normalize_or(Vec3::NEG_Z));
+    let ground = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+    if let Some(kind) = kicked {
+        let speed = b.vel.length();
+        let facing = flat(b.vel);
+        let (rings, size) = match kind {
+            Kick::Shot if speed >= 34.82 => (2, 1.6),
+            Kick::Shot if speed >= SHOT_HIGH_POWER_SPEED => (1, 1.2),
+            Kick::Shot => (0, 1.0),
+            Kick::PushBall | Kick::DribblePushBall => (1, 0.5),
+            _ => (1, 0.8),
+        };
+        let glow = |c: &mut Commands, m: &mut Assets<StandardMaterial>, mesh: &Handle<Mesh>, rot: Quat, g: Glow| spawn_glow(c, m, mesh, at, rot, g);
+        glow(&mut commands, &mut materials, &fx.sphere, Quat::IDENTITY, Glow::new(0.06, 1.0, (2.0 * size, 3.5 * size), (WHITE, WHITE), false));
+        glow(&mut commands, &mut materials, &fx.sphere, Quat::IDENTITY, Glow::new(0.25, 0.25, (1.5 * size, 4.0 * size), (Vec3::new(0.2, 0.9, 1.0), BLUE), false));
+        for r in 0..rings {
+            let reach = size * (0.45 + 0.25 * r as f32);
+            glow(&mut commands, &mut materials, &fx.ring, facing, Glow::new(0.25 + 0.05 * r as f32, 0.8, (0.12, reach), (Vec3::new(1.0, 0.95, 0.3), Vec3::new(0.9, 0.2, 0.8)), false));
+        }
+        state.kick_trail = !matches!(kind, Kick::PushBall | Kick::DribblePushBall) || at.y > 0.75;
+    }
+    if b.held {
+        state.kick_trail = false;
+    }
+    let (was_receiving, was_effort) = *was;
+    if p.receiving.is_some() && !was_receiving {
+        for life in [0.25, 0.35] {
+            spawn_glow(&mut commands, &mut materials, &fx.ring, Vec3::new(at.x, 0.03, at.z), ground, Glow::new(life, 0.9, (1.08, 0.27), (ORANGE, BLUE), false));
+        }
+        spawn_glow(&mut commands, &mut materials, &fx.sphere, at, Quat::IDENTITY, Glow::new(0.45, 0.8, (1.5, 1.0), (WHITE, BLUE), true));
+    }
+    if p.extra_active && !was_effort {
+        let feet = Vec3::new(ptf.translation.x, 0.03, ptf.translation.z);
+        for (life, reach) in [(0.3, 1.2), (0.4, 1.7)] {
+            spawn_glow(&mut commands, &mut materials, &fx.ring, feet, ground, Glow::new(life, 0.9, (0.3, reach), (Vec3::new(0.0, 1.0, 0.8), Vec3::new(0.3, 0.7, 1.0)), false));
+        }
+    }
+    *was = (p.receiving.is_some(), p.extra_active);
 }
 
 pub fn fade_glows(
@@ -458,11 +542,13 @@ pub fn fade_glows(
         if g.follow {
             tf.translation = ball.translation;
         }
-        let start = tf.scale.x.min(g.grow);
-        tf.scale = Vec3::splat(start + (g.grow - start) * (time.delta_secs() / (g.life - g.age + time.delta_secs())).min(1.0));
+        // Eased out: fast at first, settling.
+        let e = 1.0 - (1.0 - u) * (1.0 - u);
+        tf.scale = Vec3::splat(g.scale.0 + (g.scale.1 - g.scale.0) * e);
         if let Some(m) = materials.get_mut(&mat.0) {
             // Additive: fading the colour fades the glow.
-            m.base_color = Color::linear_rgba(0.3 / 5.0, 1.05 / 5.0, 1.0, 1.0).mix(&Color::BLACK, u).with_alpha(g.alpha * (1.0 - u));
+            let c = g.colour.0.lerp(g.colour.1, u) * g.alpha * (1.0 - u);
+            m.base_color = Color::linear_rgb(c.x, c.y, c.z);
         }
     }
 }

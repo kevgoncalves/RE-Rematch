@@ -44,6 +44,7 @@ fn main() {
         .init_resource::<InputBlocked>()
         .init_resource::<menu::Menu>()
         .init_resource::<fx::Cheats>()
+        .init_resource::<fx::FxState>()
         .add_event::<GoalScored>()
         .add_systems(Startup, (arena::spawn_arena, setup, menu::spawn_menu, reticle::spawn_reticle, gauges::spawn_gauges, pass_line::spawn_pass_line, fx::spawn_fx))
         .add_systems(
@@ -60,7 +61,7 @@ fn main() {
                 player::ball_call,
                 player::ball_control,
                 ball::ball_physics,
-                (fx::apply_cheats, fx::kick_marker, fx::dribble_fx, fx::fade_glows, fx::ball_lines).chain(),
+                (fx::apply_cheats, fx::kick_marker, fx::dribble_fx, fx::action_fx, fx::fade_glows, fx::ball_lines).chain(),
                 (fx::trails, fx::ball_shadow),
                 on_goal,
                 body::animate_body,
