@@ -4,7 +4,7 @@ What the game's own HUD widgets and materials tell us. Values are the widget and
 
 ## Aim reticle (crosshair)
 
-The reticle is one 140 × 140 px image (at 1080p) in the middle of the screen. A single material draws all of it from parameters, which the widget animates.
+The reticle is one 140 × 140 px image (at 1080p), centred horizontally and **38% down from the top of the screen** (12% above the middle; see [camera.md](camera.md) for how the shot aims through it). A single material draws all of it from parameters, which the widget animates.
 
 ### Shape
 | Part | What it is | Default |

@@ -22,7 +22,7 @@ The game state has three end-of-match timeouts:
 - Delay after a goal before the celebration: 1 s. A match-part transition lasts at most 3 s.
 
 ## Camera
-The game ships two sets of camera settings: "default" and "Market". "Market" is probably the alternative camera option in the settings (unconfirmed).
+The game ships two sets of camera settings: "default" and "Market". "Market" is only switched on by a cheat command, not a player setting. The full camera rig is in [camera.md](camera.md).
 
 ### Default set
 | Camera | FOV | Turn speed (horizontal / vertical) |
@@ -37,8 +37,8 @@ The game ships two sets of camera settings: "default" and "Market". "Market" is 
 | Stunned | 83° | |
 | Wall run | 115° | |
 
-- **Position:** 5 m behind the player, 0.6 m to the right, framed 2 m above.
-- **Pitch limits:** 22° up, 15° down. Since shot height comes from camera pitch, these limits cap how high and low you can aim.
+- **Position:** pivot 1.35 m above the feet (capsule centre + 0.45 m), camera 5 m behind it and 0.6 m to the right at level pitch; the arm turns with the pitch and shortens to 4 m looking up, lengthens to 5.5 m looking down (camera.md).
+- **Pitch limits:** 22° down, 15° up. Since shot height comes from camera pitch, these limits cap how high and low you can aim.
 - **Options:** the field of view can be changed in the settings, **up to 90°** (players confirm; the minimum and how it shifts the per-state FOVs are unread). "Magnus sensitivity" scales the mouse curve (default 1).
 
 ### "Market" set
