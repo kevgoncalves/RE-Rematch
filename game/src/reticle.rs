@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderRef};
 
 use crate::input::Axes;
-use crate::player::{Kick, Player};
+use crate::player::{Kick, Player, charge};
 use crate::tuning::*;
 
 /// Reticle size at 1080p; scaled with the window height like the game's UI.
@@ -81,11 +81,11 @@ pub fn spawn_reticle(mut commands: Commands, mut materials: ResMut<Assets<Reticl
 pub fn power(kind: Kick, held: f32) -> f32 {
     let (points, min, max): (&[(f32, f32)], f32, f32) = match kind {
         Kick::Shot => (&SHOT_FORCE, SHOT_FORCE[0].1, SHOT_FORCE[2].1),
-        Kick::Pass => (&PASS_FORCE, PASS_FORCE[0].1, PASS_FORCE[2].1), // peak is the 0.6 s sweet spot
+        Kick::Pass => (&PASS_FORCE, PASS_FORCE[0].1, PASS_FORCE[2].1), // peak is the 60% sweet spot
         Kick::Lob => (&LOB_FORCE, LOB_FORCE[0].1, LOB_FORCE[2].1),
         _ => return 0.0,
     };
-    ((curve(points, held) - min) / (max - min)).clamp(0.0, 1.0)
+    ((curve(points, charge(kind, held)) - min) / (max - min)).clamp(0.0, 1.0)
 }
 
 /// Moves `x` toward on/off at a rate that takes `time_in` / `time_out` seconds end to end.

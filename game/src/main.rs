@@ -158,9 +158,9 @@ fn update_hud(
     let charge = match p.kick {
         Some(k) if !k.released => {
             let force = match k.kind {
-                Kick::Shot => curve(&SHOT_FORCE, k.held.max(SHOT_BUILDUP)),
-                Kick::Pass => curve(&PASS_FORCE, k.held.max(PASS_BUILDUP)),
-                Kick::Lob => curve(&LOB_FORCE, k.held.max(LOB_BUILDUP)),
+                Kick::Shot => curve(&SHOT_FORCE, player::charge(k.kind, k.held)),
+                Kick::Pass => curve(&PASS_FORCE, player::charge(k.kind, k.held)),
+                Kick::Lob => curve(&LOB_FORCE, player::charge(k.kind, k.held)),
                 _ => 0.0,
             };
             let curve_info = if k.kind == Kick::Shot { format!("  curve ({:+.2}, {:+.2})", axes.curve.x, axes.curve.y) } else { String::new() };

@@ -751,8 +751,8 @@ pub fn kicking(
         if k.kind.charge_action().is_some_and(|a| actions.pressed(a)) {
             k.held = k.elapsed.min(MAX_HOLD);
         }
-        // Release, or full power: a fully charged kick goes off by itself.
-        k.released = k.held >= MAX_HOLD || !k.kind.charge_action().is_some_and(|a| actions.pressed(a));
+        // Release, or the end of the build-up: a fully charged kick goes off by itself.
+        k.released = k.held >= k.kind.buildup() || !k.kind.charge_action().is_some_and(|a| actions.pressed(a));
     }
     if k.kind == Kick::Shot {
         // The gamepad's right stick keeps aiming a charging shot; the mouse curves it instead.
@@ -770,8 +770,9 @@ pub fn kicking(
         return;
     }
 
-    let t = k.held.max(k.kind.buildup()).min(MAX_HOLD); // force uses at least the build-up time
-    let ratio = t / MAX_HOLD;
+    let t = charge(k.kind, k.held);
+    // Spin scales with the raw seconds held, not the charge (shot-aim.md).
+    let ratio = (k.held / MAX_HOLD).min(1.0);
     let side = axes.curve.x;
     // Push balls go the way you steer, or straight on with no direction. The normal one loses
     // speed going sideways or back and gains it when sprinting; the dribble one only when sprinting.
@@ -876,10 +877,16 @@ fn auto_tap_factor(entry: Vec3, steer: Vec3, ball_height: f32) -> f32 {
     by_turn * if ball_height - BALL_RADIUS >= high { factor } else { 1.0 }
 }
 
+/// How far a kick has charged, 0..1: the seconds held against its build-up, less a frame and the
+/// network margins, so full power comes before the animation ends (mechanics.md §4).
+pub fn charge(kind: Kick, held: f32) -> f32 {
+    (held / (kind.buildup() - 1.0 / 60.0 - CHARGE_NETWORK_MARGIN)).clamp(0.0, 1.0)
+}
+
 /// A shot's ball speed: the force curve by seconds held (at least the build-up), plus your run-up
 /// speed's bonus, which only counts for stronger shots.
 fn shot_speed(k: &KickState) -> f32 {
-    let force = curve(&SHOT_FORCE, k.held.max(SHOT_BUILDUP).min(MAX_HOLD));
+    let force = curve(&SHOT_FORCE, charge(Kick::Shot, k.held));
     let strength = (force - SHOT_FORCE[0].1) / (SHOT_FORCE[2].1 - SHOT_FORCE[0].1);
     force + curve(&SHOT_FORCE_BY_RUN_SPEED, k.entry.length()) * curve(&SHOT_RUN_BONUS_BY_FORCE, strength)
 }

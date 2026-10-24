@@ -188,14 +188,19 @@ pub const EXHAUSTED_REGEN_DELAY: f32 = 2.0;
 pub const EXHAUSTED_EXIT: f32 = 3.0;
 pub const SPEED_BY_STAMINA: [(f32, f32); 4] = [(0.0, 0.8), (5.9, 0.95), (6.0, 1.0), (8.0, 1.05)];
 
-// Shooting and passing (mechanics.md §4). Force curves are by seconds held since the press
-// ("ShootForceByTimeHeld"). The build-up runs while you hold: the ball leaves on release, but
-// never before the build-up ends, and the force uses at least the build-up time.
+// Shooting and passing (mechanics.md §4). The force curves run on the charge, 0..1: the time held
+// since the press against the kick's build-up (less a frame and the network margins), so full
+// power comes early: ~0.37 s for shots, ~0.23 s for passes and lobs. The ball leaves on release,
+// but never before the kick's contact frame; held to the end of the build-up it goes off by itself.
 pub const SHOT_FORCE: [(f32, f32); 3] = [(0.0, 24.0), (0.3, 24.0), (1.0, 38.0)];
-/// Pass peaks at 0.6 s; holding longer drops it to 25.6 m/s before it climbs back to 30.65.
+/// Pass peaks at 60% charge (~0.14 s held); holding longer drops it to 25.6 m/s before it climbs back to 30.65.
 pub const PASS_FORCE: [(f32, f32); 5] = [(0.0, 20.0), (0.3, 20.0), (0.6, 32.0), (0.601, 25.6), (1.0, 30.65)];
 pub const LOB_FORCE: [(f32, f32); 3] = [(0.0, 16.0), (0.3, 16.0), (1.0, 27.0)];
-pub const MAX_HOLD: f32 = 1.0; // last key of the force curves
+/// The force curves' last key; spin scales with the raw seconds held over this.
+pub const MAX_HOLD: f32 = 1.0;
+/// Taken off the build-up for the charge: the stadium's network margins (0.12 + 0.03 s, the world
+/// settings' defaults), plus one frame.
+pub const CHARGE_NETWORK_MARGIN: f32 = 0.15;
 pub const SHOT_BUILDUP: f32 = 32.0 / 60.0;
 pub const PASS_BUILDUP: f32 = 24.0 / 60.0;
 pub const LOB_BUILDUP: f32 = 24.0 / 60.0;
@@ -225,7 +230,7 @@ pub const SHOT_DIP_PITCH_CORRECTION: f32 = 4.0;
 /// The shot flies from the ball toward where the crosshair meets the arena walls (traced 150 m
 /// from the camera, through the floor, which the trace ignores).
 pub const SHOT_TRACE_RANGE: f32 = 150.0;
-/// Passes leave flat; holding past the 0.6 s sweet spot lifts them (degrees by seconds held).
+/// Passes leave flat; charging past the 60% sweet spot lifts them (degrees by charge).
 pub const PASS_LIFT_BY_HOLD: [(f32, f32); 4] = [(0.0, 0.0), (0.6, 0.0), (0.601, 3.9), (1.0, 6.0)];
 /// The side curve input turns the shot this many degrees the other way, so the ball bends back
 /// toward the crosshair (Curve_TrajectoryYawByXAxis, applied against the input).
@@ -259,7 +264,7 @@ pub const FAKE_SHOT_COST: f32 = 1.5;
 pub const SHORT_WINDUP: f32 = 16.0 / 60.0;
 pub const SHORT_PASS_SPEED: f32 = 24.25;
 pub const SHORT_PASS_FRICTION: f32 = BASE_FRICTION * 1.5 * 1.675; // multiplier x the override's weight
-/// Lob launch angle by seconds held (overrides the aim): longer lobs are flatter and faster.
+/// Lob launch angle by charge (overrides the aim): longer lobs are flatter and faster.
 pub const LOB_ANGLE_BY_HOLD: [(f32, f32); 2] = [(0.3, 44.0), (1.0, 30.26)];
 pub const SHORT_LOB_ANGLE: f32 = 52.0;
 pub const SHORT_LOB_SPEED: f32 = 13.2;
@@ -383,7 +388,18 @@ mod tests {
     #[test]
     fn pass_has_a_sweet_spot() {
         assert_eq!(curve(&PASS_FORCE, 0.6), 32.0);
-        assert!(curve(&PASS_FORCE, 0.7) < 32.0, "holding past 0.6 s makes the pass weaker");
+        assert!(curve(&PASS_FORCE, 0.7) < 32.0, "charging past 60% makes the pass weaker");
+    }
+
+    #[test]
+    fn full_power_comes_early() {
+        use crate::player::{Kick, charge};
+        // Shots reach full power at ~0.37 s held, passes and lobs at ~0.23 s; the pass peaks at ~0.14 s.
+        assert!(charge(Kick::Shot, 0.36) < 1.0 && charge(Kick::Shot, 0.37) >= 1.0 - 1e-3);
+        assert!(charge(Kick::Pass, 0.23) > 0.98 && charge(Kick::Lob, 0.24) == 1.0);
+        assert!((curve(&PASS_FORCE, charge(Kick::Pass, 0.14)) - 32.0).abs() < 0.6);
+        // A tap stays on the flat start of the curves.
+        assert_eq!(curve(&SHOT_FORCE, charge(Kick::Shot, 0.1)), 24.0);
     }
 
     #[test]
