@@ -158,6 +158,112 @@ pub struct MarkerArrow;
 #[derive(Component)]
 pub struct MarkerBeacon;
 
+/// The volley diamond on the ball (GC_VolleyPredict).
+#[derive(Component)]
+pub struct VolleyDiamond;
+
+/// A point where a volley could meet the ball, and when the ball gets there.
+#[derive(Clone, Copy, Debug)]
+#[allow(dead_code)] // the diamond only asks whether there is one; the volleys will aim at it
+pub struct VolleySpot {
+    pub at: Vec3,
+    pub t: f32,
+}
+
+/// Whether you could volley the ball, and where (the volley abilities' own target query, which the
+/// diamond shows). Your state must allow volleys: no lock move or dash, not your ball, not just
+/// after your own kick. Then the ball must reach a point 0.33-0.6 s from now that is within 6 m,
+/// 1.2 m behind to 6 m ahead of where you face, inside a side margin that widens to 5 m by 3 m
+/// ahead, under 2.8 m high, and close enough to reach at 9.2 m/s (11 in extra effort).
+pub fn volley_target(p: &Player, root: &Transform, pos: Vec3, ball: &Ball) -> Option<VolleySpot> {
+    // ponytail: the ball's own no-control stands in for the game's HasLostBall and NoVolley timers.
+    if p.locked || p.dash.is_some() || p.has_ball || p.kick.is_some() || p.receiving.is_some() || ball.held || ball.no_control > 0.0 {
+        return None;
+    }
+    let forward = root.rotation * Vec3::NEG_Z;
+    let side = root.rotation * Vec3::X;
+    let feet = root.translation.y - 0.9;
+    let reach = if p.extra_active { 11.0 } else { 9.2 };
+    // The side margin: a smooth rise from 0 at 1.2 m behind to 5 m at 3 m ahead.
+    let margin = |f: f32| {
+        let u = ((f + 1.2) / 4.2).clamp(0.0, 1.0);
+        let (h00, h10, h01) = (2.0 * u.powi(3) - 3.0 * u * u + 1.0, u.powi(3) - 2.0 * u * u + u, -2.0 * u.powi(3) + 3.0 * u * u);
+        let _ = h00;
+        h10 * 4.2 * 2.512 + h01 * 5.0
+    };
+    let (mut at, mut ball) = (pos, ball.clone());
+    let dt = 1.0 / 240.0;
+    for i in 1..=(0.6 / dt) as usize {
+        if ball.vel != Vec3::ZERO && step(&mut at, &mut ball, dt).is_some() {
+            return None;
+        }
+        let t = i as f32 * dt;
+        if t < 0.33 || i % 4 != 0 {
+            continue;
+        }
+        let rel = at - root.translation;
+        let (f, s) = (rel.dot(forward), rel.dot(side));
+        let fits = Vec2::new(f, s).length() <= 6.0
+            && (-1.2..=6.0).contains(&f)
+            && s.abs() < margin(f)
+            && at.y - feet < 2.8
+            && rel.length() / t <= reach;
+        if fits {
+            return Some(VolleySpot { at, t });
+        }
+    }
+    None
+}
+
+/// The diamond: a square plate stood on a point with a round hole, 0.55 m tip to tip around a
+/// 0.32 m hole, in the plane facing +Z.
+fn diamond() -> Mesh {
+    let n = 64;
+    let (tip, hole) = (0.547 / 2.0, 0.315 / 2.0);
+    let mut positions = Vec::new();
+    for i in 0..=n {
+        let a = TAU * i as f32 / n as f32;
+        let (s, c) = a.sin_cos();
+        let outer = tip / (c.abs() + s.abs());
+        positions.push([c * hole, s * hole, 0.0]);
+        positions.push([c * outer, s * outer, 0.0]);
+    }
+    let indices = (0..n as u32).flat_map(|i| [2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 1, 2 * i + 3, 2 * i + 2]).collect();
+    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; positions.len()])
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_indices(Indices::U32(indices))
+}
+
+/// Shows the diamond on the ball while a volley is on (players' "lock" diamond): it fades in over
+/// 0.23 s with a flash at 0.06 s, faces the camera, and goes at once when the volley is off.
+pub fn volley_diamond(
+    time: Res<Time>,
+    player: Single<(&Player, &Transform), Without<VolleyDiamond>>,
+    ball: Single<(&Transform, &Ball), (Without<Player>, Without<VolleyDiamond>)>,
+    camera: Single<&GlobalTransform, With<Camera3d>>,
+    mut diamond: Single<(&mut Transform, &mut Visibility, &MeshMaterial3d<StandardMaterial>), With<VolleyDiamond>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut shown: Local<f32>,
+) {
+    let ((p, root), (btf, b)) = (*player, *ball);
+    let (tf, vis, mat) = &mut *diamond;
+    if volley_target(p, root, btf.translation, b).is_none() {
+        *shown = 0.0;
+        **vis = Visibility::Hidden;
+        return;
+    }
+    *shown += time.delta_secs();
+    **vis = Visibility::Inherited;
+    **tf = Transform::from_translation(btf.translation).looking_at(camera.translation(), Vec3::Y);
+    let fade = (*shown / 0.23).min(1.0);
+    let flash = 1.0 + 3.0 * (-((*shown - 0.058) / 0.03).powi(2)).exp();
+    if let Some(m) = materials.get_mut(&mat.0) {
+        let c = Vec3::new(0.0, 0.385, 1.65) * fade * flash * 0.6;
+        m.base_color = Color::linear_rgb(c.x, c.y, c.z);
+    }
+}
+
 /// The ball's shadow on the ground.
 #[derive(Component)]
 pub struct BallShadow;
@@ -236,7 +342,16 @@ pub fn spawn_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
             b.spawn((NotShadowCaster, Mesh3d(meshes.add(Annulus::new(0.2, 0.28))), MeshMaterial3d(materials.add(flat(Color::srgb(0.85, 0.95, 1.0), AlphaMode::Add))), Transform::default()));
             b.spawn((NotShadowCaster, Mesh3d(meshes.add(Circle::new(0.09))), MeshMaterial3d(materials.add(flat(Color::srgb(0.85, 0.95, 1.0), AlphaMode::Add))), Transform::default()));
         });
-    // The ball's shadow, always on: a soft dark disc and a faint ring under it (NS_Shadow_Ball).
+    commands.spawn((
+        VolleyDiamond,
+        NotShadowCaster,
+        Mesh3d(meshes.add(diamond())),
+        MeshMaterial3d(materials.add(flat(Color::BLACK, AlphaMode::Add))),
+        Transform::default(),
+        Visibility::Hidden,
+    ));
+    // The ball's shadow, always on: a soft dark disc under it (NS_Shadow_Ball; its faint ring is
+    // left out, players don't see one).
     commands
         .spawn((BallShadow, Transform::default(), Visibility::default()))
         .with_children(|s| {
@@ -244,11 +359,6 @@ pub fn spawn_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
                 Mesh3d(meshes.add(Circle::new(0.18))),
                 MeshMaterial3d(materials.add(flat(Color::srgba(0.0, 0.0, 0.0, 0.5), AlphaMode::Blend))),
                 Transform::from_xyz(0.0, 0.012, 0.0).with_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
-            ));
-            s.spawn((NotShadowCaster, 
-                Mesh3d(meshes.add(Annulus::new(0.34, 0.39))),
-                MeshMaterial3d(materials.add(flat(Color::srgba(1.0, 1.0, 1.0, 0.15), AlphaMode::Blend))),
-                Transform::from_xyz(0.0, 0.013, 0.0).with_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
             ));
         });
     commands.insert_resource(FxAssets { sphere: meshes.add(Sphere::new(BALL_RADIUS)), ring: meshes.add(Annulus::new(0.88, 1.0)) });
@@ -556,6 +666,24 @@ pub fn fade_glows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn volley_target_needs_a_reachable_ball_in_front() {
+        let root = Transform::from_xyz(0.0, 0.9, 0.0);
+        let p = Player::default();
+        // A ball rolling at you from 5 m ahead comes within reach.
+        let rolling = Ball { vel: Vec3::new(0.0, 0.0, 8.0), friction: PASS_FRICTION, ..default() };
+        assert!(volley_target(&p, &root, Vec3::new(0.0, BALL_RADIUS, -5.0), &rolling).is_some());
+        // Too far, too high, behind you, or in lock move: no volley.
+        let still = Ball::default();
+        assert!(volley_target(&p, &root, Vec3::new(0.0, BALL_RADIUS, -9.0), &still).is_none());
+        assert!(volley_target(&p, &root, Vec3::new(0.0, 6.0, -2.0), &Ball { vel: Vec3::Y * 3.0, ..default() }).is_none());
+        assert!(volley_target(&p, &root, Vec3::new(0.0, BALL_RADIUS, 3.0), &still).is_none());
+        let locked = Player { locked: true, ..default() };
+        assert!(volley_target(&locked, &root, Vec3::new(0.0, BALL_RADIUS, -2.0), &still).is_none());
+        // A still ball close in front shows it too.
+        assert!(volley_target(&p, &root, Vec3::new(0.3, BALL_RADIUS, -2.0), &still).is_some());
+    }
 
     #[test]
     fn markers_mark_the_landing_or_where_a_pass_gets_to() {
