@@ -1193,28 +1193,30 @@ fn turn_progress(u: f32, brake: f32) -> f32 {
 
 pub fn spawn_body(commands: &mut Commands, player: Entity, meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) {
     let mut flat = |c: Color| materials.add(StandardMaterial { base_color: c, perceptual_roughness: 0.9, ..default() });
-    let shirt = flat(Color::srgb(0.92, 0.38, 0.16));
-    let shorts = flat(Color::srgb(0.10, 0.12, 0.22));
+    // A blue kit (Kev): royal blue shirt, navy shorts, white socks.
+    let shirt = flat(Color::srgb(0.10, 0.30, 0.85));
+    let shorts = flat(Color::srgb(0.05, 0.10, 0.32));
     let skin = flat(Color::srgb(0.80, 0.62, 0.5));
     let socks = flat(Color::srgb(0.92, 0.92, 0.9));
     let boots = flat(Color::srgb(0.06, 0.06, 0.07));
     commands.insert_resource(crate::fx::LegMaterials([socks.clone(), boots.clone()]));
     // A capsule of radius r along a bone of length len, hanging down from its joint.
     let mut limb = |r: f32, len: f32| (Mesh3d(meshes.add(Capsule3d::new(r, (len - r).max(0.01)))), Transform::from_xyz(0.0, -len / 2.0, 0.0));
-    let thigh = limb(0.085, THIGH);
-    let shin = limb(0.062, SHIN);
-    let upper = limb(0.048, UPPER_ARM);
-    let fore = limb(0.042, FOREARM);
+    // Sturdy limbs (Kev wants a more robust player than the bare physics radii).
+    let thigh = limb(0.105, THIGH);
+    let shin = limb(0.075, SHIN);
+    let upper = limb(0.062, UPPER_ARM);
+    let fore = limb(0.052, FOREARM);
     // The trunk is one smooth shape, wider than deep, from the hips to the base of the neck; the
     // shorts sit over the pelvis and the shoulders are rounded off.
     let mut trunk = |r: f32, len: f32, at: Vec3, scale: Vec3| (Mesh3d(meshes.add(Capsule3d::new(r, len))), Transform::from_translation(at).with_scale(scale));
-    let pelvis_mesh = trunk(0.115, 0.08, Vec3::new(0.0, -0.03, 0.0), Vec3::new(1.3, 1.0, 0.85));
-    let chest_mesh = trunk(0.13, 0.2, Vec3::new(0.0, -0.02, -0.005), Vec3::new(1.32, 1.0, 0.78));
-    let shoulder_mesh = Mesh3d(meshes.add(Sphere::new(0.062)));
-    let neck_mesh = Mesh3d(meshes.add(Capsule3d::new(0.06, 0.05)));
-    let head_mesh = Mesh3d(meshes.add(Sphere::new(0.105)));
-    let hand = Mesh3d(meshes.add(Capsule3d::new(0.035, 0.08)));
-    let foot = Mesh3d(meshes.add(Cuboid::new(0.1, 0.085, 0.27)));
+    let pelvis_mesh = trunk(0.125, 0.08, Vec3::new(0.0, -0.03, 0.0), Vec3::new(1.35, 1.0, 0.9));
+    let chest_mesh = trunk(0.145, 0.2, Vec3::new(0.0, -0.02, -0.005), Vec3::new(1.38, 1.0, 0.84));
+    let shoulder_mesh = Mesh3d(meshes.add(Sphere::new(0.078)));
+    let neck_mesh = Mesh3d(meshes.add(Capsule3d::new(0.07, 0.05)));
+    let head_mesh = Mesh3d(meshes.add(Sphere::new(0.108)));
+    let hand = Mesh3d(meshes.add(Capsule3d::new(0.04, 0.08)));
+    let foot = Mesh3d(meshes.add(Cuboid::new(0.11, 0.09, 0.28)));
     let joint = |j: usize, at: Vec3| (Joint(j), Transform::from_translation(at), Visibility::default());
 
     commands.entity(player).with_children(|root| {
