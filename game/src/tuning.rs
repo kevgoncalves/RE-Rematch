@@ -180,8 +180,8 @@ pub const PUSH_BALL_NO_CONTROL: f32 = 23.0 / 60.0;
 pub const PUSH_BALL_NO_CONTROL_EXTRA_EFFORT: f32 = 12.0 / 60.0;
 pub const PUSH_BALL_COST: f32 = 0.375;
 pub const PUSH_BALL_REGEN_DELAY: f32 = 1.0;
-/// Sprinting switches the push ball's force up; the game's factor isn't in the files (TUNE).
-pub const PUSH_BALL_SPRINT_FACTOR: f32 = 1.2;
+/// Sprinting switches the push ball's force up (BP_FastTap_ForceFromSpeed bytecode).
+pub const PUSH_BALL_SPRINT_FACTOR: f32 = 1.4;
 /// Ball speed by push direction against your facing: up to 60 deg, to 95 deg, beyond.
 pub const PUSH_BALL_SIDE_FACTOR: f32 = 0.89;
 pub const PUSH_BALL_BACK_FACTOR: f32 = 0.79;

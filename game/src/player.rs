@@ -561,7 +561,11 @@ pub fn kicking(
         if let Some((_, kind)) = pressed {
             axes.reset_curve();
             let from_dribble = p.dribble.is_some();
-            p.dribble = None; // the kick takes over from the dribble
+            // Shots and push balls take over from the dribble; a pass or lob keeps its momentum
+            // (players confirm), so the dribble runs on under it.
+            if !kind.is_pass() {
+                p.dribble = None;
+            }
             p.push_buffered = false;
             let released = kind.charge_action().is_none();
             p.kick = Some(KickState { kind, elapsed: 0.0, held: 0.0, released, aim: Vec2::new(rig.yaw, rig.pitch), entry: p.vel, from_dribble });
