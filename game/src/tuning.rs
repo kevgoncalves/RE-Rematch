@@ -205,12 +205,6 @@ pub const DRIBBLE_PUSH_BALL_COST: f32 = 0.6;
 /// You chase at a constant speed: normal, sprinting, exhausted.
 pub const DRIBBLE_PUSH_BALL_RUN: [&[(f32, f32)]; 3] = [&[(0.0, 6.0), (1.0, 6.0)], &[(0.0, 7.8), (1.0, 7.8)], &[(0.0, 5.0), (1.0, 5.0)]];
 pub const DRIBBLE_PUSH_BALL_LENGTH: [f32; 3] = [52.0 / 60.0, 47.0 / 60.0, 74.0 / 60.0];
-// Control push ball: a push ball pressed right as you control the ball (or just before it
-// arrives) snaps you instantly to the push direction, camera flick included, and only nudges the
-// ball. A bug the community loves (players confirm); the numbers are ours (TUNE).
-pub const CONTROL_PUSH_WINDOW: f32 = 0.15;
-pub const CONTROL_PUSH_BUFFER: f32 = 0.1;
-pub const CONTROL_PUSH_BALL_SPEED: f32 = 6.0;
 
 // Extra effort (mechanics.md §10)
 pub const MAX_EXTRA_EFFORT: f32 = 1.0;
