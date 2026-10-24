@@ -32,7 +32,8 @@ pub const BALL_MAX_SPEED: f32 = 70.0;
 pub const GRAVITY: f32 = 9.81; // game: FreeFallMultiplier 0.5 on an unknown base force: TUNE
 pub const DRAG: f32 = 0.004; // quadratic air drag: TUNE (game: DragForce 0.45, modifier 2.54)
 pub const ROLL_DECEL: f32 = 0.8 * 2.5; // base friction 0.8 x TUNE scale, m/s², times the touch multiplier
-pub const MAGNUS: f32 = 0.0003; // spin to curve strength: TUNE
+pub const MAGNUS_SIDE: f32 = 0.0006; // side-spin to curve strength: TUNE
+pub const MAGNUS_VERTICAL: f32 = 0.0012; // top/back-spin to dip/lift strength: TUNE
 pub const SPIN_DECAY: f32 = 0.6; // per second: TUNE
 pub const GRASS_BOUNCE: (f32, f32) = (0.475, 0.95); // (perpendicular, parallel)
 pub const WALL_BOUNCE: (f32, f32) = (0.675, 0.675);
@@ -144,6 +145,10 @@ pub const CONTROL_MAX_HEIGHT: f32 = 2.0;
 pub const MOVING_THRESHOLD: f32 = 3.0; // "standing" is below 3 m/s
 pub const DRIBBLE_OFFSET: f32 = 0.7; // TUNE: ball distance in front while carrying
 pub const NO_RECONTROL_TIME: f32 = 0.3; // TUNE: after kicking, you can't instantly re-control
+
+// Freeplay ball call
+pub const FEED_DISTANCE: f32 = 15.0; // TUNE
+pub const FEED_SPEED: f32 = 16.0; // TUNE
 
 // Camera (match-camera-network.md)
 pub const CAMERA_DISTANCE: f32 = 5.0;

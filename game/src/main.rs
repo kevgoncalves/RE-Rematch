@@ -50,6 +50,7 @@ fn main() {
                 player::camera_look,
                 player::player_move,
                 player::kicking,
+                player::ball_call,
                 player::ball_control,
                 ball::ball_physics,
                 on_goal,

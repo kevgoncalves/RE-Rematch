@@ -50,7 +50,10 @@ pub fn ball_physics(mut balls: Query<(&mut Transform, &mut Ball)>, time: Res<Tim
 /// One integration step. Returns the goal end if the ball crossed a goal line.
 pub fn step(pos: &mut Vec3, ball: &mut Ball, dt: f32) -> Option<f32> {
     let on_ground = pos.y <= BALL_RADIUS + 0.001 && ball.vel.y.abs() < 0.5;
-    let mut acc = Vec3::NEG_Y * GRAVITY - DRAG * ball.vel.length() * ball.vel + MAGNUS * ball.spin.cross(ball.vel);
+    // Spin around the vertical axis curves the ball sideways; spin around a horizontal axis lifts or dips it.
+    let side_spin = Vec3::Y * ball.spin.y;
+    let magnus = MAGNUS_SIDE * side_spin.cross(ball.vel) + MAGNUS_VERTICAL * (ball.spin - side_spin).cross(ball.vel);
+    let mut acc = Vec3::NEG_Y * GRAVITY - DRAG * ball.vel.length() * ball.vel + magnus;
     if on_ground {
         acc.y = acc.y.max(0.0);
         let flat = Vec3::new(ball.vel.x, 0.0, ball.vel.z);

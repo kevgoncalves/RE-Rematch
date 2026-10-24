@@ -339,9 +339,9 @@ pub fn kicking(
     if !k.released {
         if k.kind.charge_action().is_some_and(|a| actions.pressed(a)) {
             k.held = k.elapsed.min(MAX_HOLD);
-        } else {
-            k.released = true;
         }
+        // Release, or full power: a fully charged kick goes off by itself.
+        k.released = k.held >= MAX_HOLD || !k.kind.charge_action().is_some_and(|a| actions.pressed(a));
     }
     if k.kind == Kick::Shot {
         // The gamepad's right stick keeps aiming a charging shot; the mouse curves it instead.
@@ -394,6 +394,34 @@ pub fn kicking(
         p.stamina = (p.stamina - PUSH_BALL_COST).max(0.0);
         p.regen_wait = PUSH_BALL_REGEN_DELAY;
     }
+}
+
+/// Freeplay ball call: the ball is passed to you from in front of the camera.
+pub fn ball_call(
+    actions: Res<Actions>,
+    rig: Single<&CameraRig>,
+    mut player: Single<(&Transform, &mut Player), Without<Ball>>,
+    mut ball: Single<(&mut Transform, &mut Ball)>,
+) {
+    if !actions.just_pressed(Action::BallCall) {
+        return;
+    }
+    let (ptf, p) = &mut *player;
+    let (btf, b) = &mut *ball;
+    p.has_ball = false;
+    p.kick = None;
+    let from = ptf.translation + forward(rig.yaw.to_radians()) * FEED_DISTANCE;
+    let from = Vec3::new(
+        from.x.clamp(-HALF_WIDTH + 1.0, HALF_WIDTH - 1.0),
+        BALL_RADIUS,
+        from.z.clamp(-HALF_LENGTH + 1.0, HALF_LENGTH - 1.0),
+    );
+    let to = Vec3::new(ptf.translation.x, BALL_RADIUS, ptf.translation.z);
+    let flight = from.distance(to) / FEED_SPEED;
+    **b = Ball { friction: PASS_FRICTION, ..default() };
+    btf.translation = from;
+    // A low arc that lands at your feet: enough vertical speed to come back down after `flight`.
+    b.vel = (to - from).normalize_or_zero() * FEED_SPEED + Vec3::Y * GRAVITY * flight / 2.0;
 }
 
 pub fn camera_follow(

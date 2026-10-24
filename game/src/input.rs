@@ -46,11 +46,13 @@ pub enum Action {
     Dive,
     Ping,
     Modifier,
+    BallCall,
 }
 
 impl Action {
-    pub const ALL: [Action; 22] = [
+    pub const ALL: [Action; 23] = [
         Action::Modifier,
+        Action::BallCall,
         Action::MoveForward,
         Action::MoveBack,
         Action::MoveLeft,
@@ -124,6 +126,7 @@ impl Default for Bindings {
             (Dash, vec![K(KeyCode::ControlLeft), K(KeyCode::KeyC)]),
             (Dive, vec![K(KeyCode::KeyQ)]),
             (Ping, vec![M(MouseButton::Middle)]),
+            (BallCall, vec![K(KeyCode::KeyT)]), // provisional until read from Rematch's presets
         ];
         // Movement and camera stay on the sticks; the rest follows Rematch's gamepad preset.
         let gamepad = [
