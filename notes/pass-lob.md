@@ -9,7 +9,7 @@ What passes and lobs share with shots, and what differs. Force curves, launch an
   - Without a stick or drag direction, they call the same direction code as shots: the 150 m crosshair trace, then the level direction from the ball to the traced point (shot-aim.md, steps 1–2).
   - So a pass aimed "straight ahead" goes to the crosshair's point, not along the camera.
 - **With a direction input**, the aim mode decides (controls.md):
-  - directional aiming (keys or stick, camera-relative, dead zone 0.4);
+  - directional aiming (keys, camera-relative);
   - joystick emulation (mouse drag);
   - crosshair only.
   - Within **6°** of straight ahead the pass snaps to straight ahead; the other directions use a **22.5°** tolerance (Tap_OrientationDataTable_*).

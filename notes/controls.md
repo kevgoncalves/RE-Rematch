@@ -58,10 +58,12 @@ One key becomes a **modifier**: hold it to turn another button into a second act
 ## Pass aiming (keyboard and mouse)
 A setting picks how passes and lobs are aimed. On gamepad the left stick always aims them (dead zone 0.3).
 
+On keyboard and mouse all three modes share one dead zone curve: 0.4 up to 0.25, then down to 0.2 at 1. What the curve reads (time or charge) was not traced; the prototype uses 0.4.
+
 | Mode | The pass goes |
 |---|---|
 | Directional aiming | the way your WASD keys point, relative to the camera |
-| Joystick emulation | the way you drag the mouse while charging; the camera stays still, the drag builds up like a virtual stick (dead zone 0.4) and the last direction is kept |
+| Joystick emulation | the way you drag the mouse while charging; the camera stays still, the drag builds up like a virtual stick and the last direction is kept |
 | Crosshair only | where the crosshair aims |
 
 A pass aimed within **6°** of straight ahead goes straight ahead; the other directions use a wider **22.5°** tolerance.

@@ -44,7 +44,7 @@ The game ships two sets of camera settings: "default" and "Market". "Market" is 
 ### "Market" set
 - FOV 70–75°.
 - **Turns faster:** 300–360°/s horizontal.
-- Tighter pitch limits: 10° up, 13° down.
+- Tighter pitch limits: 10° down, 13° up.
 - Sits closer: 4.25–4.5 m behind.
 
 ## Network: who wins a simultaneous touch

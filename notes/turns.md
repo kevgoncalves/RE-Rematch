@@ -173,7 +173,7 @@ Running north at 5 m/s, no ball. You press D, then W again 0.1 s later, and so o
 The speed never drops below **4.25 m/s**. Extra presses during a brake don't start new turns, they only bend the exit. The zigzag costs a little ground per switch, never your momentum.
 
 ## Prototype differences
-The prototype is `game/src/player.rs` (player_move, `Turn`) and `game/src/tuning.rs` (`turn_data`, `turn_bucket`).
+The prototype is `game/src/player.rs` (player_move, `Turn`) and `game/src/tuning.rs` (`turn_data`, `turn_band`).
 
 | | Prototype | Game | Effect in play |
 |---|---|---|---|

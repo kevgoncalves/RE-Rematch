@@ -383,7 +383,10 @@ The game has two kinds of reception. Their timing:
 
 - The normal zones **refuse a ball heading away from you**: the angle between you-to-ball and the ball's velocity must be over 75°.
 - During a control you can only move, sprint, lock move, use extra effort and turn the camera; the ball becomes yours at **12 frames** and the rest opens at the control's action frame (14–22 frames by animation).
-- **You can't control your own kick for 0.5 s** after any kick (the "lost ball" effect), and most kicks stop anyone controlling them for 0.5 s (push balls 0.3 s for others).
+- **You can't control your own kick for 0.5 s** after any kick (the "lost ball" effect, GE_LostBall). Kicks also put a no-control status on the ball:
+  - push balls and extra-effort taps: 0.5 s for you, 0.3 s for others;
+  - lobbed push balls and volley push balls: 0.5 s for everyone;
+  - the shot status: 0.6 s for everyone (which shot abilities use it wasn't traced).
 
 ### First-time volley pass (volley tap)
 | Contact | Ball leaves | Can act |

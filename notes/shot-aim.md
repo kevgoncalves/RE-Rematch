@@ -87,14 +87,14 @@ The spin computation gives a spin vector in the flight frame (see ball-flight.md
   - The ball takes that value when the shot is built at contact.
   - The exact sync moment is the shot sync task's (not traced further).
 
-## Prototype check (game/prototype b74e576)
+## Prototype check (game/prototype a13dcd8)
 Everything above matches the prototype except:
 
 | # | Prototype | Game | In play |
 |---|---|---|---|
-| 1 | The mouse curve is clamped per axis (a square) | Clamped to a circle of radius 1 | **Curve and dip together are too strong in the prototype**: up to 825 side + 780 dip, where the game gives about 505 + 500. Pure curve or pure dip are the same |
-| 2 | Stick and mouse are added together; no stick dead zone | One device's computation; stick dead zone 0.2 | Gamepad only: small stick tilts curve a little in the prototype |
-| 3 | Spin ratio = max(held, build-up) ÷ 1 s, with a full charge at 1 s | Raw time held ÷ 1 s, with full force at ~0.37 s | Full-power curves are ~15% weaker in the prototype (×0.8 instead of ×0.9–0.94) |
+| 1 | Stick and mouse curve inputs are added together, then clamped to a circle | One device's computation | Only when the stick and the mouse are used at the same time |
+
+Fixed since b74e576: the mouse curve is clamped to a circle of radius 1, the stick has the 0.2 dead zone, and the spin ratio is the raw time held ÷ 1 s.
 
 Matching:
 - the spin curves, the charge ratio (with the build-up floor), the shot's built-in lift, the units;
