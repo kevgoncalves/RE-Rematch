@@ -1,5 +1,6 @@
 //! Ball flight and the arena it bounces around in. Rematch builds the trajectory from
-//! gravity + drag + Magnus + ground friction (mechanics.md §11); this does the same.
+//! gravity + drag + Magnus + ground friction (mechanics.md §11), each an acceleration from the
+//! game's native trajectory modifiers; this does the same.
 
 use bevy::prelude::*;
 
@@ -8,9 +9,15 @@ use crate::tuning::*;
 #[derive(Component)]
 pub struct Ball {
     pub vel: Vec3,
+    /// Spin in the flight frame (x along the path, y to its right, z up from both): z curves the
+    /// ball right, y dips it.
     pub spin: Vec3,
-    /// Ground-friction coefficient set by the last touch (pass 0.3, shot 0.8, push ball 2.24, ...).
+    /// Rolling friction coefficient set by the last touch (shot 0.8, pass 0.96, push ball 2.24, ...).
     pub friction: f32,
+    /// Air drag coefficient set by the last touch.
+    pub drag: f32,
+    /// Seconds spent falling since the last bounce or touch: gravity grows with it.
+    pub fall_time: f32,
     /// Carried by a player: physics is off and the player positions it.
     pub held: bool,
     /// Seconds before anyone may control the ball again after a kick.
@@ -19,7 +26,7 @@ pub struct Ball {
 
 impl Default for Ball {
     fn default() -> Self {
-        Self { vel: Vec3::ZERO, spin: Vec3::ZERO, friction: SHOT_FRICTION, held: false, no_control: 0.0 }
+        Self { vel: Vec3::ZERO, spin: Vec3::ZERO, friction: SHOT_FRICTION, drag: DRAG_FORCE, fall_time: 0.0, held: false, no_control: 0.0 }
     }
 }
 
@@ -50,24 +57,36 @@ pub fn ball_physics(mut balls: Query<(&mut Transform, &mut Ball)>, time: Res<Tim
 /// One integration step. Returns the goal end if the ball crossed a goal line.
 pub fn step(pos: &mut Vec3, ball: &mut Ball, dt: f32) -> Option<f32> {
     let on_ground = pos.y <= BALL_RADIUS + 0.001 && ball.vel.y.abs() < 0.5;
-    // Spin around the vertical axis curves the ball sideways; spin around a horizontal axis lifts or dips it.
-    let side_spin = Vec3::Y * ball.spin.y;
-    let magnus = MAGNUS_SIDE * side_spin.cross(ball.vel) + MAGNUS_VERTICAL * (ball.spin - side_spin).cross(ball.vel);
-    let mut acc = Vec3::NEG_Y * GRAVITY - DRAG * ball.vel.length() * ball.vel + magnus;
+    let speed = ball.vel.length();
+    // The spin's frame follows the path: forward, right (level) and up from both.
+    let fwd = ball.vel.normalize_or_zero();
+    let right = fwd.cross(Vec3::Y).normalize_or_zero();
+    let up = right.cross(fwd);
+    let dip = if on_ground { fwd } else { up };
+    let mut acc = MAGNUS_K * speed * (ball.spin.z * right - ball.spin.y * dip);
+    ball.spin *= 1.0 - SPIN_DECAY * dt;
     if on_ground {
+        ball.fall_time = 0.0;
+        acc -= ball.friction * Vec3::new(ball.vel.x, 0.0, ball.vel.z);
         acc.y = acc.y.max(0.0);
-        let flat = Vec3::new(ball.vel.x, 0.0, ball.vel.z);
-        let decel = ROLL_GRAVITY * ball.friction * dt;
-        let speed = flat.length();
-        let new_flat = if speed > decel { flat * (1.0 - decel / speed) } else { Vec3::ZERO };
-        ball.vel.x = new_flat.x;
-        ball.vel.z = new_flat.z;
+    } else {
+        if ball.vel.y <= 0.0 {
+            ball.fall_time += dt;
+        }
+        acc.y -= GRAVITY * (BALL_MASS + FREE_FALL_GROWTH * ball.fall_time);
+        acc -= ball.drag * DRAG_K * speed * (1.0 - fwd.y.abs()) * ball.vel;
     }
     ball.vel += acc * dt;
     ball.vel = ball.vel.clamp_length_max(BALL_MAX_SPEED);
-    ball.spin *= 1.0 - SPIN_DECAY * dt;
+    if on_ground && Vec2::new(ball.vel.x, ball.vel.z).length() < ROLL_STOP_SPEED {
+        ball.vel = Vec3::ZERO;
+    }
     *pos += ball.vel * dt;
+    let falling = ball.vel.y < 0.0;
     collide(pos, &mut ball.vel);
+    if falling && ball.vel.y >= 0.0 {
+        ball.fall_time = 0.0; // a bounce starts a new fall
+    }
 
     let past_line = pos.z.abs() - HALF_LENGTH;
     (past_line > GOAL_SCORE_DEPTH).then(|| pos.z.signum())
@@ -160,13 +179,50 @@ mod tests {
     }
 
     #[test]
-    fn push_ball_rolls_about_six_metres() {
+    fn rolls_speed_over_friction_metres() {
         let start = Vec3::new(0.0, BALL_RADIUS, 0.0);
         let mut pos = start;
         let mut ball = Ball { vel: Vec3::new(0.0, 0.0, PUSH_BALL_SPEED), friction: PUSH_BALL_FRICTION, ..default() };
-        run(&mut pos, &mut ball, 3.0);
+        run(&mut pos, &mut ball, 5.0);
         let d = pos.distance(start);
-        assert!((5.0..6.5).contains(&d), "push ball rolled {d} m");
+        assert!((d - PUSH_BALL_SPEED / PUSH_BALL_FRICTION).abs() < 0.1, "push ball rolled {d} m");
+    }
+
+    #[test]
+    fn spin_curves_dips_and_brakes() {
+        // Flying toward -z (right is +x): side spin curves right, dip spin pulls down.
+        let fly = |spin: Vec3| {
+            let mut pos = Vec3::new(0.0, 5.0, 0.0);
+            let mut ball = Ball { vel: Vec3::new(0.0, 0.0, -30.0), spin, ..default() };
+            run(&mut pos, &mut ball, 0.3);
+            pos
+        };
+        let plain = fly(Vec3::ZERO);
+        assert!(fly(Vec3::Z * 600.0).x > plain.x + 0.3, "side spin curves right");
+        assert!(fly(Vec3::Y * 600.0).y < plain.y - 0.3, "dip spin pulls down");
+        assert!(fly(Vec3::Y * -210.0).y > plain.y, "the shot's built-in spin lifts");
+        // Rolling, dip spin brakes the ball instead.
+        let roll = |spin: Vec3| {
+            let mut pos = Vec3::new(0.0, BALL_RADIUS, 0.0);
+            let mut ball = Ball { vel: Vec3::new(0.0, 0.0, -10.0), spin, ..default() };
+            run(&mut pos, &mut ball, 0.5);
+            -pos.z
+        };
+        assert!(roll(Vec3::Y * 600.0) < roll(Vec3::ZERO) - 0.3);
+    }
+
+    #[test]
+    fn gravity_grows_while_falling() {
+        // From rest, 5 m takes less than it would at a constant 1.625 g.
+        let mut pos = Vec3::new(0.0, 5.0, 0.0);
+        let mut ball = Ball::default();
+        let mut t = 0.0;
+        while pos.y > 1.0 {
+            step(&mut pos, &mut ball, 1.0 / 240.0);
+            t += 1.0 / 240.0;
+        }
+        let constant = (2.0 * 4.0 / (GRAVITY * BALL_MASS)).sqrt();
+        assert!(t < constant - 0.02, "fell 4 m in {t} s, constant gravity takes {constant} s");
     }
 
     #[test]

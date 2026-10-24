@@ -29,16 +29,28 @@ pub const POST_RADIUS: f32 = 0.08;
 // Ball (mechanics.md §11)
 pub const BALL_RADIUS: f32 = 0.11;
 pub const BALL_MAX_SPEED: f32 = 70.0;
-pub const GRAVITY: f32 = 9.81; // game: FreeFallMultiplier 0.5 on an unknown base force: TUNE
-pub const DRAG: f32 = 0.004; // quadratic air drag: TUNE (game: DragForce 0.45, modifier 2.54)
-/// Rolling ball: deceleration = friction coefficient x this (m/s²). The coefficient is the
-/// ball's base 0.8 times the last touch's multiplier, or a touch's own override.
-/// The ball's own gravity is 0.5x (BP_GravityTrajectoryModifier); friction uses it.
-pub const ROLL_GRAVITY: f32 = 9.81 * 0.5;
+// Flight (the ball's native trajectory modifiers). Each one gives an acceleration directly (no
+// division by mass) and applies in flight, rolling or both.
+/// Gravity, in flight: the world's g times (the ball's Mass attribute + 0.5 x seconds spent
+/// falling since the last bounce), so the longer it falls the faster it comes down.
+pub const GRAVITY: f32 = 9.8;
+pub const BALL_MASS: f32 = 1.625;
+pub const FREE_FALL_GROWTH: f32 = 0.5;
+/// Air drag, in flight: a = coefficient x DRAG_K x speed², less the more vertical the flight
+/// (x (1 - |vertical share of the velocity|)). DRAG_K is half the air density times the ball's
+/// cross-section; the coefficient is the ball's DragForce attribute.
+pub const DRAG_K: f32 = 0.022808;
+pub const DRAG_FORCE: f32 = 0.45;
+/// Magnus, flying and rolling: a = MAGNUS_K x speed x spin. Spin is kept in the flight frame
+/// (it turns with the ball's path): z curves the ball right, y dips it (negative lifts). Rolling,
+/// the dip part pushes along the path instead (a dipping ball brakes, a lifting one runs on).
+pub const MAGNUS_K: f32 = 7.986e-4;
+/// Spin fades by this share per second (flying and rolling alike).
+pub const SPIN_DECAY: f32 = 1.0;
+/// Rolling: a = -friction x velocity. The coefficient is the ball's Friction attribute times the
+/// last touch's multiplier and weight, so a roll goes speed / friction metres.
 pub const BASE_FRICTION: f32 = 0.8;
-pub const MAGNUS_SIDE: f32 = 0.0006; // side-spin to curve strength: TUNE
-pub const MAGNUS_VERTICAL: f32 = 0.0012; // top/back-spin to dip/lift strength: TUNE
-pub const SPIN_DECAY: f32 = 0.6; // per second: TUNE
+pub const ROLL_STOP_SPEED: f32 = 0.05; // TUNE: the decay never quite reaches zero
 pub const GRASS_BOUNCE: (f32, f32) = (0.475, 0.95); // (perpendicular, parallel)
 pub const WALL_BOUNCE: (f32, f32) = (0.675, 0.675);
 pub const NET_BOUNCE: (f32, f32) = (0.08, 0.15);
@@ -198,9 +210,16 @@ pub const SHOT_LOW_POWER_CONTACT: f32 = 20.0 / 60.0;
 /// Camera pitch (degrees, + is up) to launch elevation (degrees).
 pub const ELEVATION_BY_PITCH: [(f32, f32); 6] =
     [(-24.9, 2.93), (-14.6, 2.93), (-13.2, 3.99), (-7.6, 9.29), (0.7, 17.42), (4.0, 20.46)];
+/// Pulling the curve input down (dip) launches the shot higher, up to this many degrees at full input.
+pub const SHOT_DIP_PITCH_CORRECTION: f32 = 4.0;
+/// The shot flies from the ball toward where the crosshair meets the arena walls (traced 150 m
+/// from the camera, through the floor, which the trace ignores).
+pub const SHOT_TRACE_RANGE: f32 = 150.0;
 /// Passes leave flat; holding past the 0.6 s sweet spot lifts them (degrees by seconds held).
 pub const PASS_LIFT_BY_HOLD: [(f32, f32); 4] = [(0.0, 0.0), (0.6, 0.0), (0.601, 3.9), (1.0, 6.0)];
-pub const AIM_NUDGE: f32 = 3.0; // degrees of side nudge from the curve input
+/// The side curve input turns the shot this many degrees the other way, so the ball bends back
+/// toward the crosshair (Curve_TrajectoryYawByXAxis, applied against the input).
+pub const AIM_NUDGE: f32 = 3.0;
 pub const SIDE_SPIN: [(f32, f32); 8] = [(-1.0, -825.0), (-0.9, -650.0), (-0.5, -350.0), (-0.1, 0.0), (0.1, 0.0), (0.5, 350.0), (0.9, 650.0), (1.0, 825.0)];
 /// Spin scaling by charge (the game's external curves, which override the editor ones).
 pub const SIDE_SPIN_BY_CHARGE: [(f32, f32); 2] = [(0.0, 1.02), (1.0, 0.8)];
@@ -208,8 +227,9 @@ pub const SIDE_SPIN_BY_CHARGE: [(f32, f32); 2] = [(0.0, 1.02), (1.0, 0.8)];
 // while charging feeds a Magnus accumulator instead of the camera (BP_MK_InputRotationForceComputation).
 pub const MAGNUS_ACCUMULATOR_SENSITIVITY: f32 = 0.2;
 pub const MOUSE_AXIS_SCALE: f32 = 0.07; // Unreal's default MouseX/MouseY axis scale (unconfirmed for Rematch)
-pub const PASS_FRICTION: f32 = 1.2; // override for players' passes (analog power data)
-/// Forced spin per kick, in the shots' convention: passes like shots, lobs the other way.
+pub const PASS_FRICTION: f32 = BASE_FRICTION * 1.2; // players' passes (analog power data)
+/// Built-in spin per kick (the flight frame's y; + dips): passes lift a little, lobs dip.
+/// ponytail: the analog pass also switches to drag 0.75 x 1.25 after its first bounce; skipped.
 pub const PASS_FORCED_SPIN: f32 = -200.0;
 pub const LOB_FORCED_SPIN: f32 = 300.0;
 pub const SHORT_LOB_FORCED_SPIN: f32 = 420.0;
@@ -221,19 +241,20 @@ pub const SHOT_FRICTION: f32 = BASE_FRICTION;
 /// Stick/mouse forward-back to top/back spin; pulling back is much stronger (confirmed in-game).
 pub const TOP_SPIN: [(f32, f32); 8] = [(-1.0, 780.0), (-0.9, 660.0), (-0.5, 330.0), (-0.1, 0.0), (0.2, 0.0), (0.5, -40.0), (0.9, -80.0), (1.0, -120.0)];
 pub const TOP_SPIN_BY_CHARGE: [(f32, f32); 2] = [(0.0, 0.95), (1.0, 0.85)];
-pub const SHOT_BASE_SPIN: f32 = -210.0; // "forced Magnus" on every shot; sign (dip vs rise) unconfirmed
+/// Every shot's built-in spin: a small lift (the native code subtracts the forced axis).
+pub const SHOT_BASE_SPIN: f32 = -210.0;
 pub const FAKE_SHOT_COST: f32 = 1.5;
 
 // Fixed-force kicks (StaticShootForceComputation in each ability's data), m/s
 pub const SHORT_WINDUP: f32 = 16.0 / 60.0;
 pub const SHORT_PASS_SPEED: f32 = 24.25;
-pub const SHORT_PASS_FRICTION: f32 = BASE_FRICTION * 1.5;
+pub const SHORT_PASS_FRICTION: f32 = BASE_FRICTION * 1.5 * 1.675; // multiplier x the override's weight
 /// Lob launch angle by seconds held (overrides the aim): longer lobs are flatter and faster.
 pub const LOB_ANGLE_BY_HOLD: [(f32, f32); 2] = [(0.3, 44.0), (1.0, 30.26)];
 pub const SHORT_LOB_ANGLE: f32 = 52.0;
 pub const SHORT_LOB_SPEED: f32 = 13.2;
 pub const PUSH_BALL_SPEED: f32 = 11.5;
-pub const PUSH_BALL_FRICTION: f32 = BASE_FRICTION * 2.8; // about 5.5 m of roll at 11.5 m/s
+pub const PUSH_BALL_FRICTION: f32 = BASE_FRICTION * 2.8; // about 5.1 m of roll at 11.5 m/s
 pub const PUSH_BALL_WINDUP: f32 = 8.0 / 60.0;
 /// After any kick you can't control your own ball for 0.5 s (GE_LostBall).
 pub const PUSH_BALL_NO_CONTROL: f32 = 0.5;
@@ -277,7 +298,7 @@ pub const TURN_RATE_EXTRA_EFFORT: f32 = 150.0;
 /// ball taps it on again. Both use the extra effort friction override.
 pub const EXTRA_EFFORT_TAP_SPEED: f32 = 13.0;
 pub const EXTRA_EFFORT_KNOCK_SPEED: f32 = 12.0;
-pub const EXTRA_EFFORT_FRICTION: f32 = 1.5; // override
+pub const EXTRA_EFFORT_FRICTION: f32 = BASE_FRICTION * 1.5;
 /// Those speeds keep the ball within ~0.8 m of you, so you can cut it again quickly: a full
 /// gauge (one ~1.5 s hold) gives three cuts, as players report.
 /// The ability's cost effect takes a quarter of the gauge at activation, but players see no
