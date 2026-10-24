@@ -1,6 +1,7 @@
 //! RE Rematch prototype: one player, the ball and a 73 x 49 arena, tuned with Rematch's own values.
 
 mod ball;
+mod gauges;
 mod input;
 mod menu;
 mod player;
@@ -8,6 +9,7 @@ mod reticle;
 mod tuning;
 
 use bevy::prelude::*;
+use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
 use ball::{Ball, GoalScored};
 use input::{Actions, Axes, Bindings, InputBlocked};
@@ -28,6 +30,7 @@ fn main() {
                 // The Vulkan loader logs stale overlay layers some launchers leave registered; harmless noise.
                 .set(bevy::log::LogPlugin { filter: "wgpu=error,naga=warn,wgpu_hal::vulkan::instance=off".into(), ..default() }),
         )
+        .add_plugins((UiMaterialPlugin::<reticle::ReticleMaterial>::default(), UiMaterialPlugin::<gauges::GaugeMaterial>::default()))
         .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)))
         .init_resource::<Score>()
         .insert_resource(Bindings::load())
@@ -36,7 +39,7 @@ fn main() {
         .init_resource::<InputBlocked>()
         .init_resource::<menu::Menu>()
         .add_event::<GoalScored>()
-        .add_systems(Startup, (setup, menu::spawn_menu, reticle::spawn_reticle))
+        .add_systems(Startup, (setup, menu::spawn_menu, reticle::spawn_reticle, gauges::spawn_gauges))
         .add_systems(
             Update,
             (
@@ -58,10 +61,24 @@ fn main() {
                 update_hud,
                 reticle::update_reticle,
                 reticle::pass_line,
+                gauges::update_gauges,
+                auto_screenshot,
             )
                 .chain(),
         )
         .run();
+}
+
+/// For checking visuals: `RE_SCREENSHOT=out.png` saves a frame after 2 s, then quits.
+fn auto_screenshot(mut commands: Commands, time: Res<Time>, mut taken: Local<bool>, mut exit: EventWriter<AppExit>) {
+    let Ok(path) = std::env::var("RE_SCREENSHOT") else { return };
+    if !*taken && time.elapsed_secs() > 2.0 {
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+        *taken = true;
+    }
+    if time.elapsed_secs() > 3.0 {
+        exit.write(AppExit::Success);
+    }
 }
 
 fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {

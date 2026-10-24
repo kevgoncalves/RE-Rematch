@@ -92,7 +92,6 @@ pub const SHOT_FORCE: [(f32, f32); 3] = [(0.0, 24.0), (0.3, 24.0), (1.0, 38.0)];
 pub const PASS_FORCE: [(f32, f32); 5] = [(0.0, 20.0), (0.3, 20.0), (0.6, 32.0), (0.601, 25.6), (1.0, 30.65)];
 pub const LOB_FORCE: [(f32, f32); 3] = [(0.0, 16.0), (0.3, 16.0), (1.0, 27.0)];
 pub const MAX_HOLD: f32 = 1.0; // last key of the force curves
-pub const PASS_SWEET_SPOT: f32 = 0.6;
 pub const SHOT_BUILDUP: f32 = 32.0 / 60.0;
 pub const PASS_BUILDUP: f32 = 24.0 / 60.0;
 pub const LOB_BUILDUP: f32 = 24.0 / 60.0;

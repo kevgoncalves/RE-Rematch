@@ -1,43 +1,61 @@
-//! Aim aids, as in Rematch:
-//! - a reticle made of two arcs, left and right, that close into a full circle while a shot
-//!   charges or in lock move; it is faint and turns solid from the bottom up as the shot gets stronger;
-//! - a dot inside it pushed toward the curve you're putting on a shot;
-//! - a line on the ground in the pass direction, blue going green as the pass gets stronger;
-//! - a charge bar for passes, marked at the build-up end and the 0.6 s sweet spot.
+//! Aim aids, as in Rematch (values from its crosshair widget, notes/hud.md):
+//! - a reticle of two short arcs, white with a soft dark outline. Charging a shot closes them
+//!   into a faint circle that fills solid from the bottom with the shot's force, and shows a
+//!   Magnus point that follows the curve input. Lock move closes them too, at full opacity;
+//! - a line on the ground in the pass direction, blue going green as the pass gets stronger
+//!   (Rematch has no charge bar for passes).
 
 use bevy::prelude::*;
+use bevy::render::render_resource::{AsBindGroup, ShaderRef};
 
 use crate::input::{Axes, Bindings};
 use crate::player::{CameraRig, Kick, Player, forward, pass_yaw};
 use crate::tuning::*;
 
-const RING: f32 = 44.0; // px
-/// The ring is drawn as small round dots, close enough to read as a line.
-const RING_DOTS: usize = 72;
-const RING_DOT: f32 = 3.5;
-/// Gap between the arcs, in degrees either side of the top and bottom (TUNE: read off screenshots).
-const RING_GAP: f32 = 20.0;
-/// How fast the arcs close into a circle and open again, per second (TUNE).
-const RING_CLOSE_RATE: f32 = 25.0;
-const DOT: f32 = 8.0;
-const BAR_W: f32 = 120.0;
-const BAR_H: f32 = 6.0;
-const FAINT: Color = Color::srgba(1.0, 1.0, 1.0, 0.3);
-const SOLID: Color = Color::srgba(1.0, 1.0, 1.0, 0.95);
-const CHARGING: Color = Color::srgb(1.0, 0.6, 0.2);
-const SWEET: Color = Color::srgb(0.3, 1.0, 0.45);
+/// Reticle size at 1080p; scaled with the window height like the game's UI.
+const RETICLE_PX: f32 = 140.0;
+const IDLE_OPENING: f32 = 0.225;
+const AIM_ARC_OPACITY: f32 = 0.4;
+/// The force fill never shows less than this.
+const MIN_FORCE_FILL: f32 = 0.03;
+/// Transition times, in seconds.
+const AIM_IN: f32 = 0.2;
+const AIM_OUT: f32 = 0.3;
+const FORCE_IN: f32 = 0.083;
+const FORCE_OUT: f32 = 0.2;
+const DEFENSE: f32 = 0.214;
+
 const LINE_WEAK: Color = Color::srgb(0.2, 0.5, 1.0);
 const LINE_STRONG: Color = Color::srgb(0.2, 1.0, 0.35);
 
-/// One dot of the ring, at this angle (radians, 0 = right, counter-clockwise).
+#[derive(Asset, TypePath, AsBindGroup, Clone, Default)]
+pub struct ReticleMaterial {
+    /// Opening, arc opacity, force, force opacity.
+    #[uniform(0)]
+    shape: Vec4,
+    /// Curve x, curve y, Magnus point opacity.
+    #[uniform(1)]
+    magnus: Vec4,
+}
+
+impl UiMaterial for ReticleMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/reticle.wgsl".into()
+    }
+}
+
 #[derive(Component)]
-pub struct RingDot(f32);
-#[derive(Component)]
-pub struct CurveDot;
-#[derive(Component)]
-pub struct ChargeBar;
-#[derive(Component)]
-pub struct ChargeFill;
+pub struct Reticle;
+
+/// Where each reticle transition is, 0..1, plus the last force and curve so they fade out in place.
+#[derive(Default)]
+pub struct ReticleAnim {
+    aim: f32,
+    defense: f32,
+    force_shown: f32,
+    force: f32,
+    curve: Vec2,
+}
 
 fn centered(size: f32) -> Node {
     Node {
@@ -51,63 +69,13 @@ fn centered(size: f32) -> Node {
     }
 }
 
-pub fn spawn_reticle(mut commands: Commands) {
-    commands.spawn(centered(RING)).with_children(|root| {
-        let r = RING / 2.0 - RING_DOT / 2.0;
-        for i in 0..RING_DOTS {
-            let a = i as f32 / RING_DOTS as f32 * std::f32::consts::TAU;
-            root.spawn((
-                RingDot(a),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(RING / 2.0 + r * a.cos() - RING_DOT / 2.0),
-                    top: Val::Px(RING / 2.0 - r * a.sin() - RING_DOT / 2.0),
-                    width: Val::Px(RING_DOT),
-                    height: Val::Px(RING_DOT),
-                    ..default()
-                },
-                BackgroundColor(FAINT),
-                BorderRadius::MAX,
-            ));
-        }
-        root.spawn((
-            CurveDot,
-            Node { position_type: PositionType::Absolute, width: Val::Px(DOT), height: Val::Px(DOT), ..default() },
-            BackgroundColor(Color::WHITE),
-            BorderRadius::MAX,
-            Visibility::Hidden,
-        ));
-    });
+pub fn spawn_reticle(mut commands: Commands, mut materials: ResMut<Assets<ReticleMaterial>>) {
+    commands.spawn((
+        Reticle,
+        centered(RETICLE_PX),
+        MaterialNode(materials.add(ReticleMaterial { shape: Vec4::new(IDLE_OPENING, 1.0, 0.0, 0.0), ..default() })),
+    ));
 
-    commands
-        .spawn((
-            ChargeBar,
-            Node {
-                width: Val::Px(BAR_W),
-                height: Val::Px(BAR_H),
-                margin: UiRect { left: Val::Px(-BAR_W / 2.0), top: Val::Px(RING), ..default() },
-                ..centered(0.0)
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
-            Visibility::Hidden,
-        ))
-        .with_children(|bar| {
-            bar.spawn((ChargeFill, Node { height: Val::Percent(100.0), width: Val::Percent(0.0), ..default() }, BackgroundColor(CHARGING)));
-            for seconds in [PASS_BUILDUP, PASS_SWEET_SPOT] {
-                // Ticks at the build-up end and the sweet spot.
-                bar.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Percent(seconds / MAX_HOLD * 100.0),
-                        width: Val::Px(2.0),
-                        height: Val::Px(BAR_H + 6.0),
-                        top: Val::Px(-3.0),
-                        ..default()
-                    },
-                    BackgroundColor(Color::WHITE),
-                ));
-            }
-        });
 }
 
 /// Charge as a 0..1 share of the kick's own force range, for the reticle and the line colour.
@@ -121,46 +89,47 @@ fn power(kind: Kick, held: f32) -> f32 {
     ((curve(points, held) - min) / (max - min)).clamp(0.0, 1.0)
 }
 
+/// Moves `x` toward on/off at a rate that takes `time_in` / `time_out` seconds end to end.
+fn step(x: &mut f32, on: bool, time_in: f32, time_out: f32, dt: f32) {
+    *x = if on { (*x + dt / time_in).min(1.0) } else { (*x - dt / time_out).max(0.0) };
+}
+
+fn ease(x: f32) -> f32 {
+    x * x * (3.0 - 2.0 * x)
+}
+
 pub fn update_reticle(
     time: Res<Time>,
+    window: Single<&Window>,
     player: Single<&Player>,
     axes: Res<Axes>,
-    // 0 = two arcs, 1 = full circle.
-    mut closed: Local<f32>,
-    mut ring: Query<(&RingDot, &mut BackgroundColor, &mut Visibility), (Without<CurveDot>, Without<ChargeBar>, Without<ChargeFill>)>,
-    mut dot: Single<(&mut Node, &mut Visibility), (With<CurveDot>, Without<ChargeFill>)>,
-    mut bar: Single<&mut Visibility, (With<ChargeBar>, Without<CurveDot>)>,
-    mut bar_fill: Single<(&mut Node, &mut BackgroundColor), (With<ChargeFill>, Without<CurveDot>)>,
+    mut anim: Local<ReticleAnim>,
+    mut materials: ResMut<Assets<ReticleMaterial>>,
+    mut reticle: Single<(&mut Node, &MaterialNode<ReticleMaterial>), With<Reticle>>,
 ) {
+    let dt = time.delta_secs();
     let charging = player.kick.filter(|k| !k.released);
     let shot = charging.filter(|k| k.kind == Kick::Shot);
+    if let Some(k) = shot {
+        anim.force = power(k.kind, k.held).max(MIN_FORCE_FILL);
+        anim.curve = axes.curve.clamp_length_max(1.0);
+    }
+    let on = shot.is_some();
+    step(&mut anim.aim, on, AIM_IN, AIM_OUT, dt);
+    step(&mut anim.force_shown, on, FORCE_IN, FORCE_OUT, dt);
+    step(&mut anim.defense, player.locked, DEFENSE, DEFENSE, dt);
 
-    // Full circle while charging a shot or in lock move (defence stance).
-    let target = if shot.is_some() || player.locked { 1.0 } else { 0.0 };
-    *closed += (target - *closed) * (RING_CLOSE_RATE * time.delta_secs()).min(1.0);
-    let gap = (RING_GAP * (1.0 - *closed)).to_radians().sin();
-    let fill = shot.map_or(0.0, |k| power(k.kind, k.held));
-    for (RingDot(a), mut color, mut vis) in &mut ring {
-        // Hidden near the top and bottom while open; solid below the charge height.
-        *vis = if a.cos().abs() >= gap { Visibility::Inherited } else { Visibility::Hidden };
-        color.0 = if (a.sin() + 1.0) / 2.0 < fill { SOLID } else { FAINT };
+    let (node, handle) = &mut *reticle;
+    let size = RETICLE_PX * window.height() / 1080.0;
+    node.width = Val::Px(size);
+    node.height = Val::Px(size);
+    node.margin = UiRect { left: Val::Px(-size / 2.0), top: Val::Px(-size / 2.0), ..default() };
+    if let Some(m) = materials.get_mut(&handle.0) {
+        let (aim, closed) = (ease(anim.aim), ease(anim.aim.max(anim.defense)));
+        m.shape = Vec4::new(IDLE_OPENING.lerp(1.0, closed), 1.0.lerp(AIM_ARC_OPACITY, aim), anim.force, ease(anim.force_shown));
+        m.magnus = Vec4::new(anim.curve.x, anim.curve.y, aim, 0.0);
     }
 
-    // The dot sits inside the ring, pushed toward the curve: right/left for side spin, up/down for dip/lift.
-    let (dot_node, dot_vis) = &mut *dot;
-    **dot_vis = if shot.is_some() { Visibility::Inherited } else { Visibility::Hidden };
-    let r = RING / 2.0 - RING_DOT - DOT / 2.0 - 1.0;
-    let offset = axes.curve.clamp_length_max(1.0) * r;
-    dot_node.left = Val::Px(RING / 2.0 - DOT / 2.0 + offset.x);
-    dot_node.top = Val::Px(RING / 2.0 - DOT / 2.0 - offset.y);
-
-    let pass = charging.filter(|k| k.kind == Kick::Pass);
-    **bar = if pass.is_some() { Visibility::Inherited } else { Visibility::Hidden };
-    if let Some(k) = pass {
-        let (node, color) = &mut *bar_fill;
-        node.width = Val::Percent((k.held / MAX_HOLD).min(1.0) * 100.0);
-        color.0 = if (k.held - PASS_SWEET_SPOT).abs() < 0.05 { SWEET } else { CHARGING };
-    }
 }
 
 /// Ground line in the pass direction while a pass or lob charges.
