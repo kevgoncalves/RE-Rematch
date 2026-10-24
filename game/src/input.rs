@@ -390,6 +390,23 @@ pub fn read_input(
         .filter(|(_, chord)| !raw.iter().any(|(_, other)| other.len() > chord.len() && chord.iter().all(|i| other.contains(i))))
         .map(|(a, _)| *a)
         .collect();
+    // For screenshots: RE_ACT=Pass@1.6:0.3,Shoot@3:0.5 holds an action from a time for so long.
+    if let Ok(script) = std::env::var("RE_ACT") {
+        for step in script.split(',') {
+            let Some((name, rest)) = step.split_once('@') else { continue };
+            let Some((at, held)) = rest.split_once(':') else { continue };
+            let (Ok(at), Ok(held)) = (at.parse::<f32>(), held.parse::<f32>()) else { continue };
+            if let Some(a) = Action::ALL.into_iter().find(|a| format!("{a:?}") == name)
+                && t >= at
+                && t < at + held
+            {
+                now.insert(a);
+                if !actions.now.contains(&a) {
+                    actions.fresh.insert(a);
+                }
+            }
+        }
+    }
 
     // Double-tap-and-hold actions.
     let raw_now: HashSet<Action> = raw.iter().map(|(a, _)| *a).collect();

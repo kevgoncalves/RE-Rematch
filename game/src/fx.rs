@@ -90,39 +90,56 @@ pub fn ball_lines(cheats: Res<Cheats>, ball: Single<(&Transform, &Ball)>, mut tr
     }
 }
 
-/// Where a kick's marker goes and how long the ball takes to get there (BP_BallVFXComponent): a
-/// lob or a shot marks its first landing; a pass the point it reaches 2.5 s on (a short one 0.9
-/// s), or sooner where it first hits a wall or stops; a push ball has none.
-fn marker_for(kind: Kick, pos: Vec3, ball: &Ball) -> Option<(Vec3, f32)> {
+/// Where a kick's marker goes (BP_BallVFXComponent): the spot, how long the ball takes to get there,
+/// the surface's normal (up on the ground, out of a wall) and the ball's way on from it.
+#[derive(Clone, Copy, Debug)]
+struct Spot {
+    at: Vec3,
+    t: f32,
+    normal: Vec3,
+    way: Vec3,
+}
+
+/// A pass marks the point it reaches 2.5 s on (a short one 0.9 s), or sooner where it first hits a
+/// wall or stops; a lob or a shot marks its first touch of anything, ground, wall or post; a push
+/// ball has none. Only that first marker is shown.
+fn marker_for(kind: Kick, pos: Vec3, ball: &Ball) -> Option<Spot> {
     let ahead = match kind {
         Kick::Pass => 2.5,
         Kick::ShortPass => 0.9,
         Kick::Shot | Kick::Lob | Kick::ShortLob => 6.0,
         Kick::PushBall | Kick::DribblePushBall => return None,
     };
-    let landing = matches!(kind, Kick::Shot | Kick::Lob | Kick::ShortLob);
+    let aerial = matches!(kind, Kick::Shot | Kick::Lob | Kick::ShortLob);
     let (mut pos, mut ball) = (pos, ball.clone());
     let mut airborne = false;
     let dt = 1.0 / 240.0;
+    let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
+    let way = |v: Vec3| flat(v).normalize_or(Vec3::NEG_Z);
     for i in 1..=(ahead / dt) as usize {
-        let before = Vec2::new(ball.vel.x, ball.vel.z);
+        let before = flat(ball.vel);
         if step(&mut pos, &mut ball, dt).is_some() {
             return None;
         }
         let t = i as f32 * dt;
         let on_ground = pos.y <= BALL_RADIUS + 0.01;
         airborne |= !on_ground;
-        let now = Vec2::new(ball.vel.x, ball.vel.z);
-        let off_wall = before.length() > 1.0 && now.length() > 0.1 && before.normalize().dot(now.normalize()) < 0.5;
-        if landing && airborne && on_ground {
-            return Some((Vec3::new(pos.x, 0.0, pos.z), t));
+        let after = flat(ball.vel);
+        if before.length() > 1.0 && after.length() > 0.1 && before.normalize().dot(after.normalize()) < 0.5 {
+            // Off a wall or post: the marker stands on its face.
+            let normal = (after - before).normalize_or(Vec3::Y);
+            return Some(Spot { at: pos - normal * BALL_RADIUS, t, normal, way: way(after) });
         }
-        if !landing && (off_wall || ball.vel == Vec3::ZERO) {
-            return Some((Vec3::new(pos.x, 0.0, pos.z), t));
+        if (aerial && airborne && on_ground) || (!aerial && ball.vel == Vec3::ZERO) {
+            return Some(Spot { at: Vec3::new(pos.x, 0.0, pos.z), t, normal: Vec3::Y, way: way(before) });
         }
     }
     // A shot kept low marks like a pass; a pass marks where it is at 2.5 s.
-    if landing { marker_for(Kick::Pass, pos, &ball).map(|(p, t)| (p, t + ahead)).filter(|(_, t)| *t < ahead + 2.5) } else { Some((Vec3::new(pos.x, 0.0, pos.z), ahead)) }
+    if aerial {
+        marker_for(Kick::Pass, pos, &ball).map(|s| Spot { t: s.t + ahead, ..s }).filter(|s| s.t < ahead + 2.5)
+    } else {
+        Some(Spot { at: Vec3::new(pos.x, 0.0, pos.z), t: ahead, normal: Vec3::Y, way: way(ball.vel) })
+    }
 }
 
 #[derive(Component)]
@@ -132,14 +149,27 @@ pub struct Marker {
     left: f32,
 }
 
+/// The marker's arrow, hidden on walls.
+#[derive(Component)]
+pub struct MarkerArrow;
+
+/// The marker's glow facing the camera, so it reads from far away (NS_Bounce's camera sprite).
+#[derive(Component)]
+pub struct MarkerBeacon;
+
+/// The ball's shadow on the ground.
+#[derive(Component)]
+pub struct BallShadow;
+
 #[derive(Resource)]
 pub struct FxAssets {
     sphere: Handle<Mesh>,
 }
 
-const MARKER_RADII: (f32, f32) = (0.31, 0.375);
+/// The marker's ring, about 80 cm across (SM_Bounce_Circle, 75 x 86 cm).
+const MARKER_RADII: (f32, f32) = (0.36, 0.43);
 
-/// A ring on the ground, filled to `fill` of the way round.
+/// A flat ring (in the local XZ plane), filled to `fill` of the way round.
 fn ring(fill: f32) -> Mesh {
     let n = 48;
     let (inner, outer) = MARKER_RADII;
@@ -157,10 +187,61 @@ fn ring(fill: f32) -> Mesh {
         .with_inserted_indices(Indices::U32(indices))
 }
 
+/// A flat arrow along local -Z: a shaft from the ring out, and a head at 2.8 m (SM_Bounce_Arrow).
+fn arrow() -> Mesh {
+    let (w, head) = (0.05, 0.16);
+    let positions = vec![
+        [-w, 0.0, -0.55],
+        [w, 0.0, -0.55],
+        [-w, 0.0, -2.4],
+        [w, 0.0, -2.4],
+        [-head, 0.0, -2.4],
+        [head, 0.0, -2.4],
+        [0.0, 0.0, -2.8],
+    ];
+    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; positions.len()])
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_indices(Indices::U32(vec![0, 1, 2, 1, 3, 2, 4, 5, 6]))
+}
+
 pub fn spawn_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
+    // The marker: a ring that runs down as the ball comes, a soft glow under it and an arrow the way
+    // the ball goes on, all drawn over the pitch.
+    let flat = |c: Color, mode: AlphaMode| StandardMaterial { base_color: c, unlit: true, alpha_mode: mode, double_sided: true, cull_mode: None, depth_bias: 50.0, ..default() };
     let mesh = meshes.add(ring(1.0));
-    let white = materials.add(StandardMaterial { base_color: Color::srgba(1.0, 1.0, 1.0, 0.85), unlit: true, alpha_mode: AlphaMode::Blend, double_sided: true, cull_mode: None, ..default() });
-    commands.spawn((Marker { mesh: mesh.clone(), total: 1.0, left: 0.0 }, Mesh3d(mesh), MeshMaterial3d(white), Transform::default(), Visibility::Hidden));
+    commands
+        .spawn((Marker { mesh: mesh.clone(), total: 1.0, left: 0.0 }, Transform::default(), Visibility::Hidden))
+        .with_children(|m| {
+            m.spawn((Mesh3d(mesh), MeshMaterial3d(materials.add(flat(Color::srgba(1.0, 1.0, 1.0, 0.95), AlphaMode::Blend))), Transform::from_xyz(0.0, 0.02, 0.0)));
+            m.spawn((
+                Mesh3d(meshes.add(Circle::new(0.7))),
+                MeshMaterial3d(materials.add(flat(Color::srgb(0.25, 0.3, 0.35), AlphaMode::Add))),
+                Transform::from_xyz(0.0, 0.015, 0.0).with_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
+            ));
+            m.spawn((MarkerArrow, Mesh3d(meshes.add(arrow())), MeshMaterial3d(materials.add(flat(Color::srgba(1.0, 1.0, 1.0, 0.5), AlphaMode::Blend))), Transform::from_xyz(0.0, 0.02, 0.0)));
+        });
+    commands
+        .spawn((MarkerBeacon, Transform::default(), Visibility::Hidden))
+        .with_children(|b| {
+            b.spawn((Mesh3d(meshes.add(Annulus::new(0.2, 0.28))), MeshMaterial3d(materials.add(flat(Color::srgb(0.85, 0.95, 1.0), AlphaMode::Add))), Transform::default()));
+            b.spawn((Mesh3d(meshes.add(Circle::new(0.09))), MeshMaterial3d(materials.add(flat(Color::srgb(0.85, 0.95, 1.0), AlphaMode::Add))), Transform::default()));
+        });
+    // The ball's shadow, always on: a soft dark disc and a faint ring under it (NS_Shadow_Ball).
+    commands
+        .spawn((BallShadow, Transform::default(), Visibility::default()))
+        .with_children(|s| {
+            s.spawn((
+                Mesh3d(meshes.add(Circle::new(0.18))),
+                MeshMaterial3d(materials.add(flat(Color::srgba(0.0, 0.0, 0.0, 0.5), AlphaMode::Blend))),
+                Transform::from_xyz(0.0, 0.012, 0.0).with_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
+            ));
+            s.spawn((
+                Mesh3d(meshes.add(Annulus::new(0.34, 0.39))),
+                MeshMaterial3d(materials.add(flat(Color::srgba(1.0, 1.0, 1.0, 0.15), AlphaMode::Blend))),
+                Transform::from_xyz(0.0, 0.013, 0.0).with_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
+            ));
+        });
     commands.insert_resource(FxAssets { sphere: meshes.add(Sphere::new(BALL_RADIUS)) });
     // The trails: vertex-coloured ribbons added onto the scene.
     let glow = materials.add(StandardMaterial { base_color: Color::WHITE, unlit: true, alpha_mode: AlphaMode::Add, double_sided: true, cull_mode: None, ..default() });
@@ -168,6 +249,16 @@ pub fn spawn_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
         let mesh = meshes.add(ribbon(&[], Vec3::ZERO, 0.0, 1.0, Vec3::ZERO));
         commands.spawn((Trail { source, effect, points: Vec::new(), mesh: mesh.clone() }, Mesh3d(mesh), MeshMaterial3d(glow.clone()), Transform::default(), Visibility::default()));
     }
+}
+
+/// The ball's shadow follows it on the ground, growing with its height (x2.5) and fading out
+/// between 1.5 and 8 m up.
+pub fn ball_shadow(ball: Single<&Transform, With<Ball>>, mut shadow: Single<(&mut Transform, &mut Visibility), (With<BallShadow>, Without<Ball>)>) {
+    let height = (ball.translation.y - BALL_RADIUS).max(0.0);
+    let (tf, vis) = &mut *shadow;
+    tf.translation = Vec3::new(ball.translation.x, 0.0, ball.translation.z);
+    tf.scale = Vec3::splat(1.0 + 1.5 * (height / 8.0).min(1.0));
+    **vis = if height < 8.0 { Visibility::Inherited } else { Visibility::Hidden };
 }
 
 /// What a trail follows: the ball, or a foot (-1 left, +1 right).
@@ -271,13 +362,16 @@ pub fn trails(
     }
 }
 
-/// The kick marker: placed as a kick sends the ball, its ring emptying as the ball gets there; gone
-/// when it arrives, when someone gains the ball, or at the next kick.
+/// The kick marker: placed as a kick sends the ball, its ring running down as the ball gets there;
+/// gone when it arrives, when anyone gains the ball, or at the next kick.
 pub fn kick_marker(
     time: Res<Time>,
     player: Single<&Player>,
     ball: Single<(&Transform, &Ball)>,
-    mut marker: Single<(&mut Marker, &mut Transform, &mut Visibility), Without<Ball>>,
+    mut marker: Single<(&mut Marker, &mut Transform, &mut Visibility), (Without<Ball>, Without<MarkerBeacon>)>,
+    mut arrow: Single<&mut Visibility, (With<MarkerArrow>, Without<Marker>, Without<MarkerBeacon>)>,
+    mut beacon: Single<(&mut Transform, &mut Visibility), (With<MarkerBeacon>, Without<Marker>, Without<Ball>, Without<MarkerArrow>)>,
+    camera: Single<&GlobalTransform, With<Camera3d>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut last_kick: Local<Option<Kick>>,
 ) {
@@ -287,9 +381,12 @@ pub fn kick_marker(
     *last_kick = player.kick.map(|k| k.kind);
     if let Some(kind) = kicked {
         m.left = 0.0;
-        if let Some((at, t)) = marker_for(kind, btf.translation, b) {
-            tf.translation = at + Vec3::Y * 0.02;
-            (m.total, m.left) = (t, t);
+        if let Some(spot) = marker_for(kind, btf.translation, b) {
+            // On the ground the arrow points the way the ball goes on; on a wall it stands up.
+            tf.translation = spot.at;
+            tf.rotation = if spot.normal == Vec3::Y { Quat::from_rotation_y((-spot.way.x).atan2(-spot.way.z)) } else { Quat::from_rotation_arc(Vec3::Y, spot.normal) };
+            **arrow = if spot.normal == Vec3::Y { Visibility::Inherited } else { Visibility::Hidden };
+            (m.total, m.left) = (spot.t, spot.t);
         }
     }
     if b.held || player.kick.is_some() {
@@ -297,6 +394,12 @@ pub fn kick_marker(
     }
     m.left -= time.delta_secs();
     **vis = if m.left > 0.0 { Visibility::Inherited } else { Visibility::Hidden };
+    let (btf2, bvis) = &mut *beacon;
+    **bvis = **vis;
+    let above = tf.translation + tf.rotation * Vec3::Y * 0.45;
+    // It keeps a readable size on screen however far it is.
+    let far = (camera.translation().distance(above) / 12.0).max(1.0);
+    **btf2 = Transform::from_translation(above).looking_at(camera.translation(), Vec3::Y).with_scale(Vec3::splat(far));
     if m.left > 0.0
         && let Some(mesh) = meshes.get_mut(&m.mesh)
     {
@@ -373,12 +476,12 @@ mod tests {
         let at = Vec3::new(0.0, BALL_RADIUS, 0.0);
         // A lob comes down ahead of you.
         let lob = Ball { vel: Vec3::new(0.0, 12.0, -15.0), ..default() };
-        let (land, t) = marker_for(Kick::Lob, at, &lob).expect("a lob lands");
-        assert!(land.z < -10.0 && t > 1.0, "{land} at {t}");
+        let land = marker_for(Kick::Lob, at, &lob).expect("a lob lands");
+        assert!(land.at.z < -10.0 && land.t > 1.0 && land.normal == Vec3::Y, "{land:?}");
         // A slow pass stops before 2.5 s: the marker is where it stops.
         let pass = Ball { vel: Vec3::new(0.0, 0.0, -3.0), friction: PASS_FRICTION, ..default() };
-        let (stop, t) = marker_for(Kick::Pass, at, &pass).expect("a pass is marked");
-        assert!(t <= 2.5 && stop.z < -1.0, "{stop} at {t}");
+        let stop = marker_for(Kick::Pass, at, &pass).expect("a pass is marked");
+        assert!(stop.t <= 2.5 && stop.at.z < -1.0, "{stop:?}");
         assert!(marker_for(Kick::PushBall, at, &pass).is_none());
     }
 }
