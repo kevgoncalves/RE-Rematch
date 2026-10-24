@@ -404,11 +404,11 @@ pub const BALL_HIT_RADIUS: f32 = 0.12;
 pub const CONTROL_STANDING: (f32, f32, f32) = (0.10, 0.50, 1.85);
 pub const CONTROL_STANDING_GROUND: (f32, f32) = (0.10, 0.83);
 pub const CONTROL_MOVING: (f32, f32, f32) = (0.30, 0.90, 1.84);
-/// Running forward you can also take a ball rolling away from you: a ground zone 0.4 m behind
-/// you with no direction check, only while your velocity is within CONTROL_GROUND_SECTOR of your
-/// facing (the Season 1 ippy nerf; before it, a turned-round player took balls from 1.1 m).
+/// Running you can also take a ball rolling away from you: a ground zone 0.4 m behind you with no
+/// direction check. The game since Season 1 only allows it with your velocity within 22.5 deg of
+/// your facing (the ippy nerf); Kev wants the ippy as it was before, so the gate is open.
 pub const CONTROL_MOVING_GROUND: (f32, f32, f32) = (-0.40, 0.60, 1.80);
-pub const CONTROL_GROUND_SECTOR: f32 = 22.5;
+pub const CONTROL_GROUND_SECTOR: f32 = 180.0;
 /// Lock move without the ball catches from any direction. The game's radius is 0.675; Kev wants
 /// the stance to reach a little further than any zone without it (0.83 standing on the ground).
 pub const CONTROL_LOCK_MOVE: (f32, f32, f32) = (0.10, 0.95, 1.85);
@@ -432,13 +432,14 @@ pub const CONTROL_EXIT_ANGLE: f32 = 15.0;
 /// foot, settling there (m ahead, m to its side) instead of in front (the BfromS controls). TUNE.
 pub const CONTROL_BEHIND_ANGLE: f32 = 112.5;
 pub const CONTROL_REAR_SPOT: (f32, f32) = (-0.25, 0.15);
-/// A control taken with the stick more than this far off your facing (degrees) turns you to it
-/// (the game's lock-move control set): you slide on along your old line, slowing, the ball goes to
-/// the foot behind you (this far out the new way, m), and you leave the new way at the hand-back
-/// without a turn's brake (the ippy slide). TUNE.
+/// A control taken mid-turn, or with the stick more than this far off the way you move (degrees),
+/// turns you to the stick (the ippy slide, as Kev knew it before the nerf): the body turns by the
+/// snap as you slide on, slowing, the foot pulls the ball out the new way (this far, m), and you
+/// leave that way at 75% of your entry speed (at least 4, at most 6 m/s), with no turn's brake. TUNE.
 pub const CONTROL_TURN_ANGLE: f32 = 45.0;
 pub const CONTROL_TURN_SPOT: f32 = 0.45;
-pub const CONTROL_TURN_SLIDE: [(f32, f32); 3] = [(0.0, 1.0), (0.35, 0.6), (1.0, 0.1)];
+pub const CONTROL_TURN_SLIDE: [(f32, f32); 2] = [(0.0, 1.0), (1.0, 0.2)];
+pub const CONTROL_TURN_LEAVE: (f32, f32, f32) = (0.75, 4.0, 6.0);
 /// Touches come up to 20% more often as your way turns, from 20 to 180 deg/s.
 pub const TOUCH_TURN_RATES: (f32, f32) = (20.0, 180.0);
 pub const CONTROL_MAX_HEIGHT: f32 = 2.0;

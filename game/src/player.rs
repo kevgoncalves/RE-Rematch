@@ -292,7 +292,7 @@ pub struct Run {
     scale: f32,
     /// Steering within this many degrees of the way leaves it, once free.
     exit: f32,
-    /// At its end you leave this way at once instead of handing back (a turning control).
+    /// At its end you leave at this velocity at once instead of handing back (a turning control).
     leave: Option<Vec3>,
     /// Hand back softly at its end (soft_hand_back).
     soft: bool,
@@ -702,7 +702,7 @@ pub fn player_move(
         if p.run.is_none() {
             match r.leave {
                 Some(way) => {
-                    p.vel = way * CONTROL_V0_SPEED;
+                    p.vel = way;
                     p.facing = yaw_of(way);
                 }
                 None if r.soft => soft_hand_back(p, dir_now),
@@ -971,18 +971,24 @@ pub fn ball_control(
         p.receive_spot = if behind { Vec2::new(CONTROL_REAR_SPOT.0, CONTROL_REAR_SPOT.1.copysign(rel.z)) } else { Vec2::new(DRIBBLE_OFFSET, 0.0) };
         // The control interrupts a push ball's chase and any turn, and carries you on at your entry
         // speed (its montage's root motion) until its blend-out; a dash or lock move keeps its own.
+        let was_turning = p.turn.is_some();
         p.turn = None;
         p.run = None;
         let flat = Vec3::new(p.vel.x, 0.0, p.vel.z);
         let entry = flat.length();
-        // With the stick well off your facing it is a turning control: you slide on, slowing, and
-        // leave the stick's way at its hand-back (the ippy slide).
+        // Mid-turn, or with the stick well off the way you move, it is a turning control: you turn
+        // at once and leave the stick's way with the ball (the ippy slide).
         let wish = (axes.movement.length() > MOVE_DIRECTION_DEAD_ZONE).then(|| camera_relative(axes.movement.normalize(), rig.yaw).normalize());
-        p.receive_way = wish.filter(|w| !p.locked && p.dash.is_none() && fwd.angle_between(*w).to_degrees() > CONTROL_TURN_ANGLE);
+        let way_now = if entry > 0.5 { flat / entry } else { fwd };
+        p.receive_way = wish.filter(|w| !p.locked && p.dash.is_none() && (was_turning || way_now.angle_between(*w).to_degrees() > CONTROL_TURN_ANGLE));
         if entry > 0.1 && !p.locked && p.dash.is_none() {
             let dir = flat / entry;
             p.run = Some(match p.receive_way {
-                Some(way) => Run { t: 0.0, length: CONTROL_HAND_BACK.0, free_at: CONTROL_HAND_BACK.0, dir, speeds: &CONTROL_TURN_SLIDE, tables: None, scale: entry.min(CONTROL_CARRY_MAX), exit: 0.0, leave: Some(way), soft: false },
+                Some(way) => {
+                    let (share, low, high) = CONTROL_TURN_LEAVE;
+                    let leave = way * (entry * share).clamp(low, high);
+                    Run { t: 0.0, length: CONTROL_SNAP, free_at: CONTROL_SNAP, dir, speeds: &CONTROL_TURN_SLIDE, tables: None, scale: entry.min(CONTROL_CARRY_MAX), exit: 0.0, leave: Some(leave), soft: false }
+                }
                 None => {
                     let length = if entry <= CONTROL_V0_SPEED { CONTROL_HAND_BACK.0 } else { CONTROL_HAND_BACK.1 };
                     Run { t: 0.0, length, free_at: CONTROL_EXIT_FROM, dir, speeds: &CONTROL_CARRY, tables: None, scale: entry.min(CONTROL_CARRY_MAX), exit: CONTROL_EXIT_ANGLE, leave: None, soft: false }
@@ -1006,10 +1012,13 @@ fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3
         return ball.lerp(Vec3::new(spot.x, BALL_RADIUS, spot.z), 1.0 - (-dt / STANCE_BALL_TIME).exp());
     }
     // A push ball's touch draws the ball onto the way you push by its contact frame, so it leaves
-    // from your foot and you chase it in line, even flicked a new way out of a control.
+    // in line with you and you chase it straight, even flicked a new way out of a control. It isn't
+    // pulled back: a ball already further out the way you push stays that far.
     if let Some(k) = p.kick.filter(|k| matches!(k.kind, Kick::PushBall | Kick::DribblePushBall)) {
         let way = if k.steer == Vec3::ZERO { forward(p.facing) } else { k.steer };
-        let spot = root + way * PUSH_TOUCH_REACH;
+        // It moves on with you meanwhile, so it doesn't stall in front of you.
+        let ball = ball + Vec3::new(p.vel.x, 0.0, p.vel.z) * dt;
+        let spot = root + way * (ball - root).dot(way).max(PUSH_TOUCH_REACH);
         let left = (contact_time(&k) - k.elapsed).max(dt);
         return ball.lerp(Vec3::new(spot.x, BALL_RADIUS, spot.z), (dt / left).min(1.0));
     }
