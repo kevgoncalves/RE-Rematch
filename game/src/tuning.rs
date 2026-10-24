@@ -219,6 +219,17 @@ pub const EXTRA_EFFORT_FRICTION: f32 = 1.5; // override
 /// Those speeds barely beat your own 8.75 m/s, so the ball only got ~0.7 m ahead; players say it
 /// goes much further. A touch now leaves at least this much faster than you (TUNE).
 pub const EXTRA_EFFORT_TOUCH_LEAD: f32 = 5.0;
+/// Each activation costs a quarter of the gauge (GE_Cost_ExtraEffort) on top of the hold drain,
+/// and needs that much to start: a full gauge gives three direction cuts (players confirm).
+pub const EXTRA_EFFORT_START_COST: f32 = 0.25;
+/// A fresh activation near the ball cuts it the way you're going: within this reach, for this long (TUNE).
+pub const EXTRA_EFFORT_CUT_REACH: f32 = 1.2;
+pub const EXTRA_EFFORT_CUT_WINDOW: f32 = 0.3;
+/// Touch force by how hard you turn against your run: x0.8 at 135 deg, x0.5 at 180 deg
+/// (BP_ExtraEffortAutoTap_FastTurnModifier).
+pub const EXTRA_EFFORT_TURN_FORCE: [(f32, f32); 4] = [(0.0, 1.0), (112.5, 1.0), (135.0, 0.8), (180.0, 0.5)];
+/// Running into the ball during a dash takes it along the dash, this much faster than you (TUNE).
+pub const DASH_TOUCH_LEAD: f32 = 2.0;
 /// Ball centre distance at which the body touches it (capsule 0.35 m + ball).
 pub const EXTRA_EFFORT_KNOCK_REACH: f32 = 0.35 + BALL_RADIUS + 0.05;
 

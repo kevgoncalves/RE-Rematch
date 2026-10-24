@@ -20,6 +20,8 @@ pub struct Player {
     pub sprint_running: bool,
     pub extra_effort: f32, // gauge 0..1
     pub extra_active: bool,
+    /// A fresh extra effort activation's direction, waiting to cut the ball that way (time left).
+    pub extra_cut: Option<(Vec3, f32)>,
     pub has_ball: bool,
     pub kick: Option<KickState>,
     pub locked: bool,
@@ -139,6 +141,7 @@ impl Default for Player {
             sprint_running: false,
             extra_effort: MAX_EXTRA_EFFORT,
             extra_active: false,
+            extra_cut: None,
             has_ball: false,
             kick: None,
             locked: false,
@@ -351,9 +354,14 @@ pub fn player_move(
     }
 
     // Extra effort: its own gauge, instant acceleration (mechanics.md §10)
-    if actions.just_pressed(Action::ExtraEffort) && p.extra_effort > 0.05 {
+    // Each activation costs a quarter of the gauge and needs it: a full gauge gives three cuts.
+    if actions.just_pressed(Action::ExtraEffort) && p.extra_effort >= EXTRA_EFFORT_START_COST {
+        p.extra_effort -= EXTRA_EFFORT_START_COST;
         p.extra_active = true;
+        let dir = if wish != Vec3::ZERO { wish.normalize() } else { forward(p.facing) };
+        p.extra_cut = Some((dir, EXTRA_EFFORT_CUT_WINDOW));
     }
+    p.extra_cut = p.extra_cut.map(|(d, t)| (d, t - dt)).filter(|(_, t)| *t > 0.0 && p.extra_active);
     if p.extra_active {
         p.extra_effort -= EXTRA_EFFORT_DRAIN * dt;
         if !actions.pressed(Action::ExtraEffort) || p.extra_effort <= 0.0 {
@@ -490,7 +498,30 @@ pub fn ball_control(mut player: Single<(&Transform, &mut Player), Without<Ball>>
     let moving = p.vel.length() > MOVING_THRESHOLD;
     let radius = if moving { CONTROL_RADIUS_MOVING } else { CONTROL_RADIUS_STANDING } + BALL_RADIUS;
     let in_reach = b.no_control <= 0.0 && flat.length() < radius && btf.translation.y < CONTROL_MAX_HEIGHT;
+    let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
+    // A dash can't keep the ball: running into it takes it along the dash's direction.
+    if let Some(d) = p.dash {
+        let touching = flat.length() < EXTRA_EFFORT_KNOCK_REACH && btf.translation.y < CONTROL_MAX_HEIGHT;
+        if b.no_control <= 0.0 && touching && b.vel.dot(d.dir) < speed {
+            b.vel = d.dir * (speed + DASH_TOUCH_LEAD) + Vec3::Y * b.vel.y.max(0.0);
+            b.friction = PUSH_BALL_FRICTION;
+        }
+        return;
+    }
     if p.extra_active {
+        // A fresh activation near the ball cuts it the new way, weaker on a sharp turn.
+        if let Some((dir, _)) = p.extra_cut
+            && b.no_control <= 0.0
+            && flat.length() < EXTRA_EFFORT_CUT_REACH
+            && btf.translation.y < CONTROL_MAX_HEIGHT
+        {
+            let turn = if b.vel.length() > 0.5 { b.vel.angle_between(dir).to_degrees() } else { 0.0 };
+            let force = EXTRA_EFFORT_KNOCK_SPEED.max(speed + EXTRA_EFFORT_TOUCH_LEAD) * curve(&EXTRA_EFFORT_TURN_FORCE, turn);
+            b.vel = dir * force + Vec3::Y * b.vel.y.max(0.0);
+            b.friction = EXTRA_EFFORT_FRICTION;
+            p.extra_cut = None;
+            return;
+        }
         // Extra effort can't control the ball: running into it taps it on the way you're running,
         // from any side, so turning on the ball takes it with you (players confirm).
         let moving = Vec3::new(p.vel.x, 0.0, p.vel.z);
@@ -770,6 +801,26 @@ mod tests {
         frames(&mut app, lock, 6, 0.04);
         frames(&mut app, press, 1, 0.016);
         assert!(dribble(&mut app).is_some_and(|d| d.feint && d.t > 0.2));
+    }
+
+    #[test]
+    fn full_extra_effort_gives_three_cuts() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+        app.world_mut().spawn((Transform::default(), Player::default()));
+        app.world_mut().spawn(CameraRig::default());
+        let gauge = |app: &mut App| app.world_mut().query::<&Player>().single(app.world()).unwrap().extra_effort;
+        let mut cuts = 0;
+        for _ in 0..4 {
+            let before = gauge(&mut app);
+            frames(&mut app, &[Action::ExtraEffort], 1, 0.016);
+            if gauge(&mut app) < before - 0.2 {
+                cuts += 1;
+            }
+            frames(&mut app, &[Action::ExtraEffort], 10, 0.016); // a short cut, ~0.17 s held
+            frames(&mut app, &[], 1, 0.016);
+        }
+        assert_eq!(cuts, 3, "a full gauge gives three cuts, gauge left {}", gauge(&mut app));
     }
 
     #[test]
