@@ -135,6 +135,8 @@ What this means in practice:
 | Outfield with ball | 1.75 m/s | 3.5 m/s | |
 | **Goalkeeper** | 2 m/s | **5 m/s** | **900°/s** |
 
+Players find the outfield turn to face the front in lock move much quicker than 400°/s; the table has no value with the ball.
+
 **Direction penalty:**
 
 | Moving | Outfield | With ball | Goalkeeper |
@@ -220,6 +222,13 @@ What this means in practice:
 - **The pass has a sweet spot at 0.6 s.** That is the strongest pass in the game. Holding a moment longer drops it to 25.6 m/s, and even a full 1 s hold only reaches 30.65 m/s.
 - **The quickest possible shot is already 28.7 m/s.** The flat 0–0.3 s part of the curve is never reached, because the 0.53 s build-up comes first.
 - The power-shot animation plays above 34.8 m/s, which is a hold of ~0.84 s (unconfirmed).
+
+### Moving while you shoot
+A shot keeps your run-up instead of stopping you:
+- **Through the build-up** you keep moving in the direction you were going, at a share of your speed at the press that shrinks over the build-up: to **75%** normally, **60%** when sprinting at 4 m/s or more, **50%** for a shot straight out of a dribble.
+- **After the touch** that speed is kept until the move ends.
+- Passes keep 100% of your speed after the touch (below 2 m/s they use a fixed speed).
+- **Running adds shot speed:** +1.25 m/s at 6 m/s, **+4 m/s at 9.5 m/s**.
 
 ### Fixed-force kicks
 These ignore how long you hold:
