@@ -459,11 +459,11 @@ pub fn ball_control(mut player: Single<(&Transform, &mut Player), Without<Ball>>
     if p.extra_active {
         // Extra effort can't control the ball: running into it knocks it on ahead.
         let ahead = forward(p.facing);
-        let knock = Vec3::new(p.vel.x, 0.0, p.vel.z).length() * EXTRA_EFFORT_KNOCK;
+        let catching_up = b.vel.dot(ahead) < Vec3::new(p.vel.x, 0.0, p.vel.z).length();
         let touching = flat.length() < EXTRA_EFFORT_KNOCK_REACH && btf.translation.y < CONTROL_MAX_HEIGHT;
-        if b.no_control <= 0.0 && touching && Vec3::new(flat.x, 0.0, flat.y).dot(ahead) > 0.0 && b.vel.dot(ahead) < knock {
-            b.vel = ahead * knock + Vec3::Y * b.vel.y.max(0.0);
-            b.friction = PUSH_BALL_FRICTION;
+        if b.no_control <= 0.0 && touching && Vec3::new(flat.x, 0.0, flat.y).dot(ahead) > 0.0 && catching_up {
+            b.vel = ahead * EXTRA_EFFORT_KNOCK_SPEED + Vec3::Y * b.vel.y.max(0.0);
+            b.friction = EXTRA_EFFORT_FRICTION;
         }
         return;
     }
@@ -563,7 +563,7 @@ pub fn kicking(
         Kick::ShortPass => (SHORT_PASS_SPEED, PASS_ELEVATION, SHORT_PASS_FRICTION, NO_RECONTROL_TIME),
         Kick::Lob => (curve(&LOB_FORCE, t), LOB_ELEVATION, SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::ShortLob => (SHORT_LOB_SPEED, LOB_ELEVATION, SHOT_FRICTION, NO_RECONTROL_TIME),
-        Kick::PushBall if p.extra_active => (PUSH_BALL_SPEED, 0.0, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL_EXTRA_EFFORT),
+        Kick::PushBall if p.extra_active => (EXTRA_EFFORT_TAP_SPEED, 0.0, EXTRA_EFFORT_FRICTION, PUSH_BALL_NO_CONTROL_EXTRA_EFFORT),
         // Tired push balls ignore sprinting and pop up a little.
         Kick::PushBall if p.exhausted => (EXHAUSTED_PUSH_BALL_SPEED * push_factor, EXHAUSTED_PUSH_BALL_LIFT, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
         Kick::DribblePushBall if p.exhausted => (EXHAUSTED_PUSH_BALL_SPEED, EXHAUSTED_PUSH_BALL_LIFT, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),

@@ -31,7 +31,10 @@ pub const BALL_RADIUS: f32 = 0.11;
 pub const BALL_MAX_SPEED: f32 = 70.0;
 pub const GRAVITY: f32 = 9.81; // game: FreeFallMultiplier 0.5 on an unknown base force: TUNE
 pub const DRAG: f32 = 0.004; // quadratic air drag: TUNE (game: DragForce 0.45, modifier 2.54)
-pub const ROLL_DECEL: f32 = 0.8 * 2.5; // base friction 0.8 x TUNE scale, m/s², times the touch multiplier
+/// Rolling ball: deceleration = friction coefficient x this (m/s²). The coefficient is the
+/// ball's base 0.8 times the last touch's multiplier, or a touch's own override.
+pub const ROLL_GRAVITY: f32 = 9.81;
+pub const BASE_FRICTION: f32 = 0.8;
 pub const MAGNUS_SIDE: f32 = 0.0006; // side-spin to curve strength: TUNE
 pub const MAGNUS_VERTICAL: f32 = 0.0012; // top/back-spin to dip/lift strength: TUNE
 pub const SPIN_DECAY: f32 = 0.6; // per second: TUNE
@@ -138,12 +141,12 @@ pub const SIDE_SPIN_BY_CHARGE: [(f32, f32); 2] = [(0.1, 0.5), (1.0, 0.9)];
 // while charging feeds a Magnus accumulator instead of the camera (BP_MK_InputRotationForceComputation).
 pub const MAGNUS_ACCUMULATOR_SENSITIVITY: f32 = 0.2;
 pub const MOUSE_AXIS_SCALE: f32 = 0.07; // Unreal's default MouseX/MouseY axis scale (unconfirmed for Rematch)
-pub const PASS_FRICTION: f32 = 0.3;
+pub const PASS_FRICTION: f32 = 0.3; // override, not a multiplier
 // Pass aiming (Tap_OrientationDataTable_*, BP_*_Tap_FilteredInputDirectionComputation)
 pub const PASS_STICK_DEAD_ZONE: f32 = 0.3;
 pub const PASS_MOUSE_DEAD_ZONE: f32 = 0.4;
 pub const PASS_FORWARD_SNAP: f32 = 6.0; // degrees
-pub const SHOT_FRICTION: f32 = 1.0;
+pub const SHOT_FRICTION: f32 = BASE_FRICTION;
 /// Stick/mouse forward-back to top/back spin; one direction is much stronger (which one is unconfirmed).
 pub const TOP_SPIN: [(f32, f32); 6] = [(-1.0, 780.0), (-0.5, 330.0), (-0.1, 0.0), (0.2, 0.0), (0.5, -40.0), (1.0, -120.0)];
 pub const TOP_SPIN_BY_CHARGE: [(f32, f32); 2] = [(0.1, 0.35), (1.0, 0.5)];
@@ -153,11 +156,11 @@ pub const FAKE_SHOT_COST: f32 = 1.5;
 // Fixed-force kicks (StaticShootForceComputation in each ability's data), m/s
 pub const SHORT_WINDUP: f32 = 16.0 / 60.0;
 pub const SHORT_PASS_SPEED: f32 = 24.25;
-pub const SHORT_PASS_FRICTION: f32 = 1.5;
+pub const SHORT_PASS_FRICTION: f32 = BASE_FRICTION * 1.5;
 pub const LOB_ELEVATION: f32 = 35.0; // TUNE
 pub const SHORT_LOB_SPEED: f32 = 13.2;
 pub const PUSH_BALL_SPEED: f32 = 11.5;
-pub const PUSH_BALL_FRICTION: f32 = 2.8;
+pub const PUSH_BALL_FRICTION: f32 = BASE_FRICTION * 2.8; // about 3 m of roll at 11.5 m/s
 pub const PUSH_BALL_WINDUP: f32 = 8.0 / 60.0;
 pub const PUSH_BALL_NO_CONTROL: f32 = 23.0 / 60.0;
 pub const PUSH_BALL_NO_CONTROL_EXTRA_EFFORT: f32 = 12.0 / 60.0;
@@ -194,9 +197,11 @@ pub const EXTRA_EFFORT_REGEN: f32 = 0.0625;
 pub const EXTRA_EFFORT_SPEED: f32 = 8.75;
 pub const EXTRA_EFFORT_ACCEL: f32 = 100.0;
 pub const TURN_RATE_EXTRA_EFFORT: f32 = 150.0;
-/// Extra effort can't control the ball: starting it touches the ball forward, and running into
-/// the ball knocks it on ahead of you at this share of your speed (TUNE).
-pub const EXTRA_EFFORT_KNOCK: f32 = 1.3;
+/// Extra effort can't control the ball: starting it taps the ball on, and running into the
+/// ball taps it on again. Both use the extra effort friction override.
+pub const EXTRA_EFFORT_TAP_SPEED: f32 = 13.0;
+pub const EXTRA_EFFORT_KNOCK_SPEED: f32 = 12.0;
+pub const EXTRA_EFFORT_FRICTION: f32 = 1.5; // override
 /// Ball centre distance at which the body touches it (capsule 0.35 m + ball).
 pub const EXTRA_EFFORT_KNOCK_REACH: f32 = 0.35 + BALL_RADIUS + 0.05;
 

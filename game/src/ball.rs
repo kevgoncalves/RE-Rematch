@@ -9,7 +9,7 @@ use crate::tuning::*;
 pub struct Ball {
     pub vel: Vec3,
     pub spin: Vec3,
-    /// Ground-friction multiplier set by the last touch (pass 0.3, shot 1.0, ...).
+    /// Ground-friction coefficient set by the last touch (pass 0.3, shot 0.8, push ball 2.24, ...).
     pub friction: f32,
     /// Carried by a player: physics is off and the player positions it.
     pub held: bool,
@@ -57,7 +57,7 @@ pub fn step(pos: &mut Vec3, ball: &mut Ball, dt: f32) -> Option<f32> {
     if on_ground {
         acc.y = acc.y.max(0.0);
         let flat = Vec3::new(ball.vel.x, 0.0, ball.vel.z);
-        let decel = ROLL_DECEL * ball.friction * dt;
+        let decel = ROLL_GRAVITY * ball.friction * dt;
         let speed = flat.length();
         let new_flat = if speed > decel { flat * (1.0 - decel / speed) } else { Vec3::ZERO };
         ball.vel.x = new_flat.x;
@@ -157,6 +157,16 @@ mod tests {
             }
         }
         None
+    }
+
+    #[test]
+    fn push_ball_rolls_about_three_metres() {
+        let start = Vec3::new(0.0, BALL_RADIUS, 0.0);
+        let mut pos = start;
+        let mut ball = Ball { vel: Vec3::new(0.0, 0.0, PUSH_BALL_SPEED), friction: PUSH_BALL_FRICTION, ..default() };
+        run(&mut pos, &mut ball, 2.0);
+        let d = pos.distance(start);
+        assert!((2.5..3.5).contains(&d), "push ball rolled {d} m");
     }
 
     #[test]
