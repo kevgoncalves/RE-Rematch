@@ -61,13 +61,13 @@ pub fn spawn_gauges(mut commands: Commands, mut materials: ResMut<Assets<GaugeMa
 }
 
 pub fn update_gauges(
-    window: Single<&Window>,
+    window: Option<Single<&Window>>,
     player: Single<&Player>,
     mut row: Single<&mut Node, (With<GaugeRow>, Without<Gauge>)>,
     mut gauges: Query<(&Gauge, &mut Node, &MaterialNode<GaugeMaterial>)>,
     mut materials: ResMut<Assets<GaugeMaterial>>,
 ) {
-    let s = window.height() / 1080.0;
+    let s = window.map_or(720.0, |w| w.height()) / 1080.0;
     row.bottom = Val::Px(FROM_BOTTOM * s);
     row.column_gap = Val::Px(GAP * s);
     let p = *player;

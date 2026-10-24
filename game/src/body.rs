@@ -15,7 +15,7 @@ use std::sync::LazyLock;
 use bevy::prelude::*;
 
 use crate::fx::TrailPoint;
-use crate::player::{Heading, Kick, KickState, Player, contact_time, dribble_contact, yaw_of};
+use crate::player::{Heading, Kick, KickState, Player, charge, contact_time, dribble_contact, yaw_of};
 use crate::tuning::*;
 
 // Rematch's player (notes/animation.md §1), metres. The root entity is the capsule's centre.
@@ -227,6 +227,9 @@ struct Clips {
     /// Kicks (the right foot): wind-up, contact, follow-through, for a shot, a pass (the inside of
     /// the foot) and a lob (under the ball, leaning back).
     kicks: [[Pose; 3]; 3],
+    shot_side: [Pose; 3],
+    shot_back: [Pose; 3],
+    heel: [Pose; 3],
     start: OneShot,
     stop: OneShot,
     turn: OneShot,
@@ -608,6 +611,146 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
             (FORE_L, [40.0, 0.0, 0.0]),
             (UPPER_R, [-35.0, 0.0, 30.0]),
             (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+    ];
+
+    // A shot across the body to the left (the right foot; mirrored, it is the left foot to the
+    // right, as the game mirrors its side clip): the leg cocks back and out with the hips open to
+    // the right, swings across turning the hips through, and follows on high across to the left.
+    let shot_side = [
+        stand.with(&[
+            (PELVIS, [0.0, -25.0, -4.0]),
+            (SPINE_J, [10.0, 0.0, -6.0]),
+            (CHEST_J, [4.0, 10.0, -4.0]),
+            (NECK_J, [-6.0, 10.0, 0.0]),
+            (THIGH_L, [18.0, 0.0, -8.0]),
+            (SHIN_L, [42.0, 0.0, 0.0]),
+            (FOOT_L, [-24.0, 0.0, 8.0]),
+            (THIGH_R, [-35.0, -10.0, 18.0]),
+            (SHIN_R, [95.0, 0.0, 0.0]),
+            (FOOT_R, [-70.0, 0.0, -10.0]),
+            (UPPER_L, [40.0, 0.0, -70.0]),
+            (FORE_L, [25.0, 0.0, 0.0]),
+            (UPPER_R, [-30.0, 0.0, 35.0]),
+            (FORE_R, [35.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [0.0, 20.0, 2.0]),
+            (SPINE_J, [14.0, 0.0, -4.0]),
+            (CHEST_J, [4.0, 10.0, 0.0]),
+            (NECK_J, [-4.0, 8.0, 0.0]),
+            (THIGH_L, [20.0, 0.0, -6.0]),
+            (SHIN_L, [38.0, 0.0, 0.0]),
+            (FOOT_L, [-20.0, 0.0, 6.0]),
+            (THIGH_R, [26.0, 25.0, -6.0]),
+            (SHIN_R, [18.0, 0.0, 0.0]),
+            (FOOT_R, [50.0, 0.0, 10.0]),
+            (UPPER_L, [30.0, 0.0, -80.0]),
+            (FORE_L, [20.0, 0.0, 0.0]),
+            (UPPER_R, [-40.0, 0.0, 40.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [0.0, 40.0, 4.0]),
+            (SPINE_J, [-2.0, 0.0, -2.0]),
+            (CHEST_J, [0.0, 12.0, 0.0]),
+            (THIGH_L, [4.0, 0.0, -4.0]),
+            (SHIN_L, [12.0, 0.0, 0.0]),
+            (FOOT_L, [30.0, 0.0, 4.0]),
+            (THIGH_R, [70.0, 30.0, -25.0]),
+            (SHIN_R, [25.0, 0.0, 0.0]),
+            (FOOT_R, [55.0, 0.0, 15.0]),
+            (UPPER_L, [50.0, 0.0, -40.0]),
+            (FORE_L, [40.0, 0.0, 0.0]),
+            (UPPER_R, [-25.0, 0.0, 35.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+    ];
+    // A shot back over the left shoulder: the body winds round on the left foot and turns most of
+    // the way back through the strike (the game's back clip carries its own turn).
+    let shot_back = [
+        stand.with(&[
+            (PELVIS, [0.0, 35.0, 0.0]),
+            (SPINE_J, [10.0, 0.0, -6.0]),
+            (CHEST_J, [4.0, 15.0, 0.0]),
+            (THIGH_L, [18.0, 0.0, -8.0]),
+            (SHIN_L, [44.0, 0.0, 0.0]),
+            (FOOT_L, [-26.0, 0.0, 8.0]),
+            (THIGH_R, [-30.0, 0.0, 10.0]),
+            (SHIN_R, [100.0, 0.0, 0.0]),
+            (FOOT_R, [-75.0, 0.0, 0.0]),
+            (UPPER_L, [30.0, 0.0, -70.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [-20.0, 0.0, 40.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [0.0, 100.0, 0.0]),
+            (SPINE_J, [14.0, 0.0, -4.0]),
+            (CHEST_J, [4.0, 10.0, 0.0]),
+            (NECK_J, [-4.0, 20.0, 0.0]),
+            (THIGH_L, [18.0, 0.0, -6.0]),
+            (SHIN_L, [38.0, 0.0, 0.0]),
+            (FOOT_L, [-20.0, 0.0, 6.0]),
+            (THIGH_R, [30.0, 10.0, 0.0]),
+            (SHIN_R, [16.0, 0.0, 0.0]),
+            (FOOT_R, [50.0, 0.0, 0.0]),
+            (UPPER_L, [35.0, 0.0, -80.0]),
+            (FORE_L, [20.0, 0.0, 0.0]),
+            (UPPER_R, [-40.0, 0.0, 40.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [0.0, 130.0, 4.0]),
+            (SPINE_J, [-4.0, 0.0, -2.0]),
+            (CHEST_J, [0.0, 10.0, 0.0]),
+            (THIGH_L, [4.0, 0.0, -4.0]),
+            (SHIN_L, [12.0, 0.0, 0.0]),
+            (FOOT_L, [30.0, 0.0, 4.0]),
+            (THIGH_R, [75.0, 10.0, -10.0]),
+            (SHIN_R, [22.0, 0.0, 0.0]),
+            (FOOT_R, [55.0, 0.0, 0.0]),
+            (UPPER_L, [50.0, 0.0, -40.0]),
+            (FORE_L, [40.0, 0.0, 0.0]),
+            (UPPER_R, [-30.0, 0.0, 35.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+    ];
+    // A heel flick back (passes and lobs going behind you): the right foot steps over the ball
+    // and flicks it back with the heel, the body upright and the arms out.
+    let heel = [
+        stand.with(&[
+            (SPINE_J, [6.0, 0.0, 0.0]),
+            (THIGH_L, [12.0, 0.0, -6.0]),
+            (SHIN_L, [30.0, 0.0, 0.0]),
+            (FOOT_L, [-18.0, 0.0, 6.0]),
+            (THIGH_R, [30.0, 0.0, 4.0]),
+            (SHIN_R, [40.0, 0.0, 0.0]),
+            (FOOT_R, [-10.0, 0.0, -4.0]),
+            (UPPER_L, [10.0, 0.0, -45.0]),
+            (UPPER_R, [10.0, 0.0, 45.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [12.0, 0.0, 0.0]),
+            (THIGH_L, [14.0, 0.0, -6.0]),
+            (SHIN_L, [34.0, 0.0, 0.0]),
+            (FOOT_L, [-20.0, 0.0, 6.0]),
+            (THIGH_R, [-25.0, 0.0, 4.0]),
+            (SHIN_R, [45.0, 0.0, 0.0]),
+            (FOOT_R, [-30.0, 0.0, -4.0]),
+            (UPPER_L, [15.0, 0.0, -55.0]),
+            (UPPER_R, [15.0, 0.0, 55.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [10.0, 0.0, 0.0]),
+            (THIGH_L, [10.0, 0.0, -6.0]),
+            (SHIN_L, [26.0, 0.0, 0.0]),
+            (FOOT_L, [-16.0, 0.0, 6.0]),
+            (THIGH_R, [-32.0, 0.0, 4.0]),
+            (SHIN_R, [75.0, 0.0, 0.0]),
+            (FOOT_R, [-45.0, 0.0, -4.0]),
+            (UPPER_L, [10.0, 0.0, -50.0]),
+            (UPPER_R, [10.0, 0.0, 50.0]),
         ]),
     ];
 
@@ -1082,6 +1225,9 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
     Clips {
         stand,
         kicks: [shot_kick, pass_kick, lob_kick],
+        shot_side,
+        shot_back,
+        heel,
         start,
         stop,
         turn,
@@ -1177,8 +1323,10 @@ pub struct Animator {
     kick: Option<KickState>,
     follow: Option<(f32, Kick)>,
     action: f32,
-    /// The kick's sector against the body (degrees, left +): it picks its turn.
+    /// The kick's sector against the body (degrees, left +) and its charge (0..1): they pick its
+    /// clip, its turn and the size of its backswing.
     kick_turn: f32,
+    kick_power: f32,
     trans: Option<Transition>,
     turn_u: f32,
     /// The pose a transition fades from, and the fade (1 → 0) and its length.
@@ -1504,10 +1652,21 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             anim.follow = None;
         }
     }
-    let keys = |kind: Kick| match kind {
-        Kick::Pass | Kick::ShortPass => &clips.kicks[1],
-        Kick::Lob | Kick::ShortLob => &clips.kicks[2],
-        _ => &clips.kicks[0],
+    // The kick's clip by its sector (the game has one per sector, the right side its left one
+    // mirrored onto the other foot): shots forward, across the body or turning back; passes and
+    // lobs open toward their target, a heel flick going back. With it, how much of the sector's
+    // turn the body adds on top (the side and back clips carry their own).
+    let keys = |kind: Kick, turn: f32| -> ([Pose; 3], f32) {
+        let side = |set: &[Pose; 3]| if turn < 0.0 { set.map(|p| p.mirror()) } else { *set };
+        match kind {
+            Kick::Shot if turn.abs() > 120.0 => (side(&clips.shot_back), 0.0),
+            Kick::Shot if turn.abs() > 30.0 => (side(&clips.shot_side), 0.3),
+            Kick::Shot => (clips.kicks[0], 1.0),
+            _ if turn.abs() > 135.0 => (clips.heel, 0.0),
+            Kick::Pass | Kick::ShortPass => (clips.kicks[1], 1.0),
+            Kick::Lob | Kick::ShortLob => (clips.kicks[2], 1.0),
+            _ => (clips.kicks[0], 1.0),
+        }
     };
     // Push balls are a touch on top of the run (below), not a kick pose.
     let push = |kind: Kick| matches!(kind, Kick::PushBall | Kick::DribblePushBall);
@@ -1517,6 +1676,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     if let Some(k) = p.kick {
         let aim = if k.kind != Kick::Shot && k.steer != Vec3::ZERO { yaw_of(k.steer) } else { k.aim.x.to_radians() };
         anim.kick_turn = wrap(aim - p.facing).to_degrees().clamp(-150.0, 150.0);
+        anim.kick_power = charge(k.kind, k.held);
     }
     // Wind up to the strike, which always takes the last 8 frames before contact (the game never
     // stretches them: power only lengthens the backswing); a long charge holds the backswing and
@@ -1524,30 +1684,30 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     // most of it by the hit.
     const STRIKE: f32 = 8.0 / 60.0;
     let kick_pose = if let Some(k) = p.kick.filter(|k| !push(k.kind)) {
-        let [windup, hit, _] = keys(k.kind);
+        let ([windup, hit, _], _) = keys(k.kind, anim.kick_turn);
         let first = contact_time(&k);
         let up = |t: f32, end: f32| (t / end.max(1.0 / 60.0)).min(1.0);
         let (key, turn) = if !k.released {
             let w = up(k.elapsed, first - STRIKE);
-            (clips.stand.lerp(windup, w), 0.3 * w)
+            (clips.stand.lerp(&windup, w), 0.3 * w)
         } else {
             let release = (k.held - k.pre).max(0.0);
             let strike_at = (first - STRIKE).max(release);
             if k.elapsed < strike_at {
                 let w = up(k.elapsed, strike_at);
-                (clips.stand.lerp(windup, w), 0.3 * w)
+                (clips.stand.lerp(&windup, w), 0.3 * w)
             } else {
                 let s = ((k.elapsed - strike_at) / (first.max(release) - strike_at).max(4.0 / 60.0)).clamp(0.0, 1.0);
                 let s = s * s * (3.0 - 2.0 * s);
-                (windup.lerp(hit, s), 0.3 + 0.4 * s)
+                (windup.lerp(&hit, s), 0.3 + 0.4 * s)
             }
         };
         Some((key, k.kind, 1.0, turn))
     } else {
         anim.follow.filter(|(_, kind)| !push(*kind)).map(|(t, kind)| {
-            let [_, hit, through] = keys(kind);
+            let ([_, hit, through], _) = keys(kind, anim.kick_turn);
             let u = t / follow_time(kind);
-            (hit.lerp(through, (u / 0.4).min(1.0)), kind, 1.0 - ((u - 0.4) / 0.6).clamp(0.0, 1.0), 0.7 + 0.15 * (u / 0.4).min(1.0))
+            (hit.lerp(&through, (u / 0.4).min(1.0)), kind, 1.0 - ((u - 0.4) / 0.6).clamp(0.0, 1.0), 0.7 + 0.15 * (u / 0.4).min(1.0))
         })
     };
     // A push ball: the right foot reaches through the ball by its touch (8f) and back, the legs
@@ -1564,8 +1724,10 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     let target = kick_pose.map_or(0.0, |(_, _, w, _)| w);
     anim.action += (target - anim.action).clamp(-dt / 0.25, dt / 0.08);
     if let Some((key, kind, _, turn)) = kick_pose {
-        pose = pose.lerp(&clips.stand.lerp(&key, kick_size(kind)), anim.action);
-        pose.0[PELVIS].y += anim.kick_turn * turn * anim.action;
+        // Power shows in the swing's size: three quarters for a tap, all of it fully charged.
+        let size = kick_size(kind) * (0.75 + 0.25 * anim.kick_power);
+        pose = pose.lerp(&clips.stand.lerp(&key, size), anim.action);
+        pose.0[PELVIS].y += anim.kick_turn * turn * keys(kind, anim.kick_turn).1 * anim.action;
     }
     // Dribbles and dashes on top (the game's move montages): in over 0.05 s (dashes 0.1 s), out over
     // BLEND_OUT from when you get the stick back (the montage's blend-out, not its end), faster

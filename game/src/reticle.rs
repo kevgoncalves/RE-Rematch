@@ -100,7 +100,7 @@ fn ease(x: f32) -> f32 {
 
 pub fn update_reticle(
     time: Res<Time>,
-    window: Single<&Window>,
+    window: Option<Single<&Window>>,
     player: Single<&Player>,
     axes: Res<Axes>,
     mut anim: Local<ReticleAnim>,
@@ -129,7 +129,7 @@ pub fn update_reticle(
     step(&mut anim.defense, player.locked, DEFENSE, DEFENSE, dt);
 
     let (node, handle) = &mut *reticle;
-    let size = RETICLE_PX * window.height() / 1080.0;
+    let size = RETICLE_PX * window.map_or(720.0, |w| w.height()) / 1080.0;
     node.width = Val::Px(size);
     node.height = Val::Px(size);
     node.margin = UiRect { left: Val::Px(-size / 2.0), top: Val::Px(-size / 2.0), ..default() };

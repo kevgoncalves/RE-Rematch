@@ -358,7 +358,7 @@ pub fn read_input(
     mouse: Res<ButtonInput<MouseButton>>,
     pads: Query<&Gamepad>,
     motion: Res<AccumulatedMouseMotion>,
-    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    window: Option<Single<&Window, With<bevy::window::PrimaryWindow>>>,
     time: Res<Time>,
     mut actions: ResMut<Actions>,
     mut axes: ResMut<Axes>,
@@ -443,7 +443,7 @@ pub fn read_input(
             }
             look_pad += pad.right_stick();
         }
-        if window.cursor_options.grab_mode != bevy::window::CursorGrabMode::None {
+        if window.is_some_and(|w| w.cursor_options.grab_mode != bevy::window::CursorGrabMode::None) {
             let delta = Vec2::new(motion.delta.x, -motion.delta.y);
             look_mouse = delta;
             // The accumulator is held inside a circle: full curve and full dip can't both max out.

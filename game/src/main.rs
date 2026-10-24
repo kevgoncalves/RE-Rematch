@@ -13,8 +13,14 @@ mod player;
 mod reticle;
 mod tuning;
 
+use bevy::app::ScheduleRunnerPlugin;
+use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
+use bevy::render::camera::RenderTarget;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use bevy::window::ExitCondition;
+use bevy::winit::WinitPlugin;
 
 use ball::{Ball, GoalScored};
 use input::{Actions, Axes, Bindings, InputBlocked};
@@ -27,24 +33,32 @@ struct Score([u32; 2]);
 #[derive(Component)]
 struct Hud;
 
-/// The window; a scripted test run (RE_SCREENSHOT) opens behind everything, unfocused and off the
-/// taskbar, so it doesn't get in the way of a game being played.
-fn test_window() -> Window {
-    let window = Window { title: "RE Rematch (prototype)".into(), ..default() };
-    if std::env::var("RE_SCREENSHOT").is_err() {
-        return window;
-    }
-    Window { focused: false, skip_taskbar: true, window_level: bevy::window::WindowLevel::AlwaysOnBottom, ..window }
+/// A scripted test run (RE_SCREENSHOT) is headless: no window, the camera renders into an image
+/// that the screenshot is taken from, and the app ticks at 60 Hz on its own.
+fn headless() -> bool {
+    std::env::var("RE_SCREENSHOT").is_ok()
 }
 
+/// The image a headless run renders into.
+#[derive(Resource)]
+struct HeadlessTarget(Handle<Image>);
+
 fn main() {
-    App::new()
-        .add_plugins(
+    let mut app = App::new();
+    // The Vulkan loader logs stale overlay layers some launchers leave registered; harmless noise.
+    let log = bevy::log::LogPlugin { filter: "wgpu=error,naga=warn,wgpu_hal::vulkan::instance=off".into(), ..default() };
+    if headless() {
+        app.add_plugins((
             DefaultPlugins
-                .set(WindowPlugin { primary_window: Some(test_window()), ..default() })
-                // The Vulkan loader logs stale overlay layers some launchers leave registered; harmless noise.
-                .set(bevy::log::LogPlugin { filter: "wgpu=error,naga=warn,wgpu_hal::vulkan::instance=off".into(), ..default() }),
-        )
+                .set(WindowPlugin { primary_window: None, exit_condition: ExitCondition::DontExit, close_when_requested: false })
+                .set(log)
+                .disable::<WinitPlugin>(),
+            ScheduleRunnerPlugin::run_loop(std::time::Duration::from_secs_f64(1.0 / 60.0)),
+        ));
+    } else {
+        app.add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(Window { title: "RE Rematch (prototype)".into(), ..default() }), ..default() }).set(log));
+    }
+    app
         .add_plugins((UiMaterialPlugin::<reticle::ReticleMaterial>::default(), UiMaterialPlugin::<gauges::GaugeMaterial>::default(), MaterialPlugin::<pass_line::PassLineMaterial>::default()))
         .insert_resource(ClearColor(Color::srgb(0.56, 0.68, 0.8)))
         .init_resource::<Score>()
@@ -100,6 +114,7 @@ fn auto_screenshot(
     player: Single<&Transform, (With<Player>, Without<Camera3d>)>,
     mut menu: ResMut<menu::Menu>,
     mut menu_root: Single<&mut Node, With<menu::MenuRoot>>,
+    target: Option<Res<HeadlessTarget>>,
 ) {
     let Ok(path) = std::env::var("RE_SCREENSHOT") else { return };
     let at = std::env::var("RE_SHOT_AT").ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
@@ -118,7 +133,8 @@ fn auto_screenshot(
         }
     }
     if !*taken && time.elapsed_secs() > at {
-        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+        let shot = target.map_or_else(Screenshot::primary_window, |t| Screenshot::image(t.0.clone()));
+        commands.spawn(shot).observe(save_to_disk(path));
         *taken = true;
     }
     if time.elapsed_secs() > at + 1.0 {
@@ -126,7 +142,7 @@ fn auto_screenshot(
     }
 }
 
-fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
+fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>, mut images: ResMut<Assets<Image>>) {
     let player = commands.spawn((Player::default(), Transform::from_xyz(0.0, 0.9, 6.0), Visibility::default())).id();
     body::spawn_body(&mut commands, player, &mut meshes, &mut materials);
     commands.spawn((
@@ -135,13 +151,23 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials
         MeshMaterial3d(materials.add(Color::srgb(0.95, 0.95, 0.9))),
         Transform::from_xyz(0.0, BALL_RADIUS, 0.0),
     ));
-    commands.spawn((
-        Camera3d::default(),
-        Projection::from(PerspectiveProjection { fov: FOV.to_radians(), ..default() }),
-        CameraRig::default(),
-        camera::CameraState::default(),
-        Transform::default(),
-    ));
+    let camera = commands
+        .spawn((
+            Camera3d::default(),
+            Projection::from(PerspectiveProjection { fov: FOV.to_radians(), ..default() }),
+            CameraRig::default(),
+            camera::CameraState::default(),
+            Transform::default(),
+        ))
+        .id();
+    if headless() {
+        let size = Extent3d { width: 1280, height: 720, depth_or_array_layers: 1 };
+        let mut image = Image::new_fill(size, TextureDimension::D2, &[0, 0, 0, 255], TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default());
+        image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT;
+        let handle = images.add(image);
+        commands.entity(camera).insert(Camera { target: RenderTarget::Image(handle.clone().into()), ..default() });
+        commands.insert_resource(HeadlessTarget(handle));
+    }
     commands.spawn((
         Hud,
         Text::new(""),
