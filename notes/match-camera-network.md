@@ -39,6 +39,7 @@ The game ships two sets of camera settings: "default" and "Market". "Market" is 
 
 - **Position:** 5 m behind the player, 0.6 m to the right, framed 2 m above.
 - **Pitch limits:** 22° up, 15° down. Since shot height comes from camera pitch, these limits cap how high and low you can aim.
+- **Options:** the field of view can be changed in the settings, **up to 90°** (players confirm; the minimum and how it shifts the per-state FOVs are unread). "Magnus sensitivity" scales the mouse curve (default 1).
 
 ### "Market" set
 - FOV 70–75°.

@@ -115,7 +115,7 @@ Matching:
 | Built-in spin | −210 on spin.y (lift) | BP_Shot_MagnusDefault |
 
 ## Open questions
-1. Is the 2° pitch cap in effect? If raising the camera makes shots fly higher in Rematch, it is not.
+1. ~~Is the 2° pitch cap in effect?~~ No: Kev confirms raising the camera makes shots fly higher, up to a cap. That cap matches the launch angle curve going flat at 20.46° (camera pitch +4° and above) together with the camera's own pitch limit, so the Blueprints' 2° upper bound isn't what applies.
 2. The Magnus sensitivity option's default, and the value Kev plays with: it scales the mouse curve directly (at 2.0 a full curve takes 36 pixels instead of 71).
 3. The engine mouse axis sensitivity, assumed to be the default 0.07 per pixel (the game's input config wasn't read).
 4. Whether the accumulator is fed more than once per frame (it adds on every call). If two systems ask for the spin each frame, the effective mouse sensitivity would double.
