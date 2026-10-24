@@ -45,6 +45,8 @@ pub struct Player {
     /// the current one: a sharp change against them starts a turn.
     pub recent_input: Vec<(f32, Vec3)>,
     pub last_input: Vec3,
+    /// A kick's freeze at the touch: you hold still this long (hitstop).
+    pub freeze: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -246,6 +248,7 @@ impl Default for Player {
             turn: None,
             recent_input: Vec::new(),
             last_input: Vec3::ZERO,
+            freeze: 0.0,
         }
     }
 }
@@ -287,6 +290,17 @@ impl Kick {
 
 impl Kick {
     /// Passes and lobs follow the pass-aim option; shots and push balls don't.
+    /// Frames the kicker and the ball freeze at the touch (ShootDataTable's freeze frames): the
+    /// power shot 5, quick shots, passes and lobs 3, low-power ones 2; push balls none.
+    fn freeze_frames(self, speed: f32) -> f32 {
+        match self {
+            Kick::Shot if speed >= SHOT_HIGH_POWER_SPEED => 5.0,
+            Kick::Shot | Kick::Pass | Kick::Lob => 3.0,
+            Kick::ShortPass | Kick::ShortLob => 2.0,
+            Kick::PushBall | Kick::DribblePushBall => 0.0,
+        }
+    }
+
     pub fn is_pass(self) -> bool {
         matches!(self, Kick::Pass | Kick::ShortPass | Kick::Lob | Kick::ShortLob)
     }
@@ -392,6 +406,11 @@ pub fn player_move(
 ) {
     let dt = time.delta_secs().min(0.05);
     let (tf, p) = &mut *player;
+    // A kick's freeze holds you (and your timers) still for a few frames at the touch.
+    if p.freeze > 0.0 {
+        p.freeze -= dt;
+        return;
+    }
     let input = axes.movement;
     let wish = camera_relative(input, rig.yaw);
 
@@ -976,6 +995,8 @@ pub fn kicking(
     ball.drag = DRAG_FORCE;
     ball.friction = friction;
     ball.no_control = no_control;
+    ball.freeze = k.kind.freeze_frames(speed) / 60.0;
+    p.freeze = ball.freeze;
     if k.kind == Kick::Shot {
         let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
         p.run = Some(Run { t: 0.0, length: SHOT_FOLLOW_THROUGH, free_at: SHOT_FOLLOW_THROUGH, dir: k.entry.normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], scale: speed });

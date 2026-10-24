@@ -107,6 +107,10 @@ pub fn animate_body(
         return;
     }
     let (p, root) = *player;
+    // The kick's freeze holds the pose too.
+    if p.freeze > 0.0 {
+        return;
+    }
     let to_local = root.rotation.inverse();
     let local = to_local * p.vel;
     let (fwd, side, speed) = (-local.z, local.x, local.length());

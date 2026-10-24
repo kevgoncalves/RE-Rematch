@@ -22,11 +22,13 @@ pub struct Ball {
     pub held: bool,
     /// Seconds before anyone may control the ball again after a kick.
     pub no_control: f32,
+    /// The kick's freeze: the ball waits at the foot this long before it flies.
+    pub freeze: f32,
 }
 
 impl Default for Ball {
     fn default() -> Self {
-        Self { vel: Vec3::ZERO, spin: Vec3::ZERO, friction: SHOT_FRICTION, drag: DRAG_FORCE, fall_time: 0.0, held: false, no_control: 0.0 }
+        Self { vel: Vec3::ZERO, spin: Vec3::ZERO, friction: SHOT_FRICTION, drag: DRAG_FORCE, fall_time: 0.0, held: false, no_control: 0.0, freeze: 0.0 }
     }
 }
 
@@ -41,6 +43,10 @@ pub fn ball_physics(mut balls: Query<(&mut Transform, &mut Ball)>, time: Res<Tim
     for (mut tf, mut ball) in &mut balls {
         ball.no_control = (ball.no_control - dt).max(0.0);
         if ball.held {
+            continue;
+        }
+        if ball.freeze > 0.0 {
+            ball.freeze -= dt;
             continue;
         }
         for _ in 0..steps {
