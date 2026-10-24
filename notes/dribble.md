@@ -83,6 +83,9 @@ The roulette covers about the same ground as the fast cut (average 4.8 against 4
 - A forward push ball at **6 m/s or more** (in practice, sprinting) uses a different animation.
 - **You can't push the ball from lock move.** There the same button dribbles.
 
+### Control push ball (a loved bug)
+Players describe a bug the community loves: a push ball pressed **the instant you control the ball**, after flicking the camera to another direction, **snaps the player instantly** to face that side and does a **very short** push ball. The game's stats track a separate "control push ball", so it has its own ability path; the ball control itself is native code (not in the Blueprints). Timing window and ball speed are not in the exported data.
+
 ### Push ball during a dribble
 - **When:** from 12f (0.2 s) into any dribble (dribble 1, the feint or the tired dribble) until it ends.
 - **How:** the push ball button while **not** in lock move. In lock move the same button is the feint, which needs lock move, while the push ball is blocked by it (*unconfirmed* that this is how players switch between them).
