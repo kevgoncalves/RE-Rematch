@@ -918,9 +918,8 @@ fn in_control_zone(rel: Vec3, vel: Vec3, speed: f32, locked: bool, turning: bool
     if locked {
         return capsule(CONTROL_LOCK_MOVE);
     }
-    // A ball heading away from you is refused; a ball almost at rest always passes (Kev: the
-    // game only lets a ball at rest pass, which felt like no magnet).
-    let coming = vel.length() < 0.5 || rel.angle_between(vel).to_degrees() > CONTROL_AWAY_ANGLE;
+    // A ball heading away from you is refused; a slow ball always passes (CONTROL_SLOW_BALL).
+    let coming = vel.length() < CONTROL_SLOW_BALL || rel.angle_between(vel).to_degrees() > CONTROL_AWAY_ANGLE;
     // Running, the ground zone takes any ball about under you.
     let ground = speed > CONTROL_SWITCH_SPEED && capsule(CONTROL_MOVING_GROUND);
     // Starting or turning uses the moving zones even when slow.
@@ -990,20 +989,43 @@ pub fn ball_control(
     if p.own_push < IPPY_WINDOW
         && !p.locked
         && p.dash.is_none()
-        && b.no_control <= 0.0
+        && b.no_control <= IPPY_TURN_LEAD
         && btf.translation.y < CONTROL_MAX_HEIGHT
-        && flat.length() < IPPY_REACH
+        && flat.length() < IPPY_REACH + if p.pivot > 0.0 { IPPY_REACH_TURNING } else { 0.0 }
         && let Some(w) = wish.filter(|w| p.push_way.angle_between(*w).to_degrees() > IPPY_ANGLE)
     {
-        p.run = None;
-        p.turn = None;
-        p.pivot = PIVOT_TIME;
-        p.recent_input.clear();
+        // The swing starts a little before the ball may be taken...
+        if p.pivot <= 0.0 {
+            p.run = None;
+            p.turn = None;
+            p.pivot = PIVOT_TIME;
+            p.recent_input.clear();
+        }
+        // ...and it is taken as soon as it may be.
+        if b.no_control > 0.0 {
+            return;
+        }
         p.receiving = Some(0.0);
         p.receive_from = btf.translation;
         p.receive_way = Some(w);
         p.receive_act = CONTROL_ACT_BY_HEIGHT[0].1;
         p.own_push = f32::INFINITY;
+        b.spin = Vec3::ZERO;
+        return;
+    }
+    // A dash pressed almost on top of a loose ball is a dribble at once (DASH_DRIBBLE_REACH).
+    if let Some(d) = p.dash
+        && d.t <= 2.0 / 60.0
+        && b.no_control <= 0.0
+        && btf.translation.y < CONTROL_MAX_HEIGHT
+        && flat.length() < DASH_DRIBBLE_REACH
+    {
+        p.dribble = Some(DribbleState { t: d.t, feint: false, exhausted: p.exhausted, heading: d.heading, dir: d.dir, facing: d.facing });
+        p.dribble_lock = p.locked;
+        p.dash = None;
+        p.has_ball = true;
+        p.carry = None;
+        b.held = true;
         b.spin = Vec3::ZERO;
         return;
     }

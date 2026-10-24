@@ -358,7 +358,7 @@ pub const RUN_TURN_LIMIT: f32 = 30.0; // degrees
 /// Kev's softer hand-back (out of dribbles, passes, lobs, shots) and the ippy's turn: a pivot where
 /// your heading and body swing round together at this rate (deg/s) for up to this long (s), your
 /// speed dipping to this share while more than 90 deg off. TUNE.
-pub const PIVOT_RATE: f32 = 720.0;
+pub const PIVOT_RATE: f32 = 900.0;
 pub const PIVOT_TIME: f32 = 0.35;
 pub const PIVOT_SPEED: f32 = 0.6;
 /// Kev: a push ball just after a dribble ends still counts as the dribble's (no direction
@@ -422,8 +422,14 @@ pub const CONTROL_MOVING_GROUND: (f32, f32, f32) = (-0.10, 0.70, 1.80);
 /// Lock move without the ball catches from any direction. The game's radius is 0.675; Kev wants
 /// the stance to reach a little further than any zone without it.
 pub const CONTROL_LOCK_MOVE: (f32, f32, f32) = (0.10, 1.1, 1.85);
-/// The normal zones refuse a ball heading away from you: this close to "away" (degrees).
+/// The normal zones refuse a ball heading away from you: this close to "away" (degrees). A ball
+/// slower than CONTROL_SLOW_BALL is taken whichever way it rolls (Kev: on top of a slow ball it
+/// must be yours; the game only lets a ball at rest through).
 pub const CONTROL_AWAY_ANGLE: f32 = 75.0;
+pub const CONTROL_SLOW_BALL: f32 = 3.0;
+/// A dash pressed almost on top of a loose ball (this close, m) is a dribble at once (Kev: from
+/// further off it is a dash, and the ball is controlled the normal way).
+pub const DASH_DRIBBLE_REACH: f32 = 1.2;
 /// The ball becomes yours 12 frames into the control (it settles at your feet), and you can act
 /// from the control's action frame, by the height you take it at: feet and thighs 14f, stomach
 /// 16f, chest 20f, head 22f.
@@ -435,7 +441,12 @@ pub const CONTROL_ACT_BY_HEIGHT: [(f32, f32); 4] = [(0.6, 14.0 / 60.0), (1.1, 16
 /// take it, the foot pulling it round in front of you as you swing (CONTROL_TURN_SPOT out).
 pub const IPPY_ANGLE: f32 = 120.0;
 pub const IPPY_WINDOW: f32 = 1.0;
-pub const IPPY_REACH: f32 = 1.6;
+pub const IPPY_REACH: f32 = 2.0;
+/// Once the ippy's turn has started the ball is still taken this much further off.
+pub const IPPY_REACH_TURNING: f32 = 0.5;
+/// The ippy's turn starts this long before you may take the ball again, so you are already
+/// swinging round as you take it (Kev: the turn came late).
+pub const IPPY_TURN_LEAD: f32 = 0.15;
 pub const CONTROL_TURN_SPOT: f32 = 0.45;
 /// Touches come up to 20% more often as your way turns, from 20 to 180 deg/s.
 pub const TOUCH_TURN_RATES: (f32, f32) = (20.0, 180.0);
