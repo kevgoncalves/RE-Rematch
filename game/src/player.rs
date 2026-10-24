@@ -39,6 +39,9 @@ pub struct Player {
     pub run: Option<Run>,
     /// Seconds into receiving the ball (the ball becomes yours at CONTROL_SNAP; you act from CONTROL_ACT).
     pub receiving: Option<f32>,
+    /// A kick pressed during a control, and how long it has been held: it waits for the control's
+    /// action frame instead of being lost.
+    pub queued: Option<(Action, f32)>,
     /// A turn transition in progress.
     pub turn: Option<Turn>,
     /// Movement input directions that stopped being current in the last 50 ms (time left), and
@@ -273,6 +276,8 @@ pub struct KickState {
     pub kind: Kick,
     pub elapsed: f32, // since the press
     pub held: f32,    // how long the button stayed down
+    /// Held during the control before the kick could start: it counts toward the charge.
+    pub pre: f32,
     pub released: bool,
     /// Shot aim (yaw, pitch in degrees), locked at the press so the mouse can curve the ball.
     pub aim: Vec2,
@@ -314,6 +319,7 @@ impl Default for Player {
             push_buffered: false,
             run: None,
             receiving: None,
+            queued: None,
             turn: None,
             recent_input: Vec::new(),
             last_input: Vec3::ZERO,
@@ -1016,7 +1022,21 @@ pub fn kicking(
     }
     let buffered_push = p.push_buffered && dribble_open;
     // A dash that picked up the ball doesn't block kicks (players confirm). A control does until
-    // its action frame.
+    // its action frame, but from its effect on the ball a kick's press counts (players confirm):
+    // it waits for the action frame, and a held one charges meanwhile, like a pre-charge.
+    if p.receiving.is_some() {
+        let kicks = [Action::LowPowerPass, Action::LowPowerLob, Action::PushBall, Action::Shoot, Action::Pass, Action::Lob];
+        if let Some(a) = kicks.into_iter().find(|a| actions.just_pressed(*a)) {
+            p.queued = Some((a, 0.0));
+        } else if p.queued.is_none() {
+            p.queued = kicks.into_iter().find(|a| actions.pending(*a)).map(|a| (a, 0.0));
+        }
+        if let Some((a, held)) = p.queued.as_mut()
+            && actions.pressed(*a)
+        {
+            *held += dt;
+        }
+    }
     if p.has_ball && p.kick.is_none() && p.receiving.is_none() {
         let charged = [(Action::Shoot, Kick::Shot), (Action::Pass, Kick::Pass), (Action::Lob, Kick::Lob)];
         // In lock move the push ball button dribbles instead (player_move); inside a dribble,
@@ -1028,11 +1048,12 @@ pub fn kicking(
             .chain(charged)
             .filter(|(a, _)| *a != Action::PushBall || !p.locked)
             .filter(|(a, _)| dribble_open || *a != Action::PushBall)
-            .find(|(a, _)| actions.pending(*a) || (*a == Action::PushBall && buffered_push));
+            .find(|(a, _)| actions.pending(*a) || (*a == Action::PushBall && buffered_push) || p.queued.is_some_and(|(q, _)| q == *a));
         // Extra effort can't keep the ball: starting it touches the ball on ahead.
         let pressed = pressed.or((p.extra_active && dribble_open).then_some((Action::ExtraEffort, Kick::PushBall)));
         if let Some((action, kind)) = pressed {
             actions.consume(action);
+            let pre = p.queued.filter(|(q, _)| *q == action).map_or(0.0, |(_, held)| held);
             axes.reset_curve();
             let from_dribble = p.dribble.is_some();
             // Shots and push balls take over from the dribble. A pass or lob keeps the dribble's
@@ -1052,8 +1073,11 @@ pub fn kicking(
             } else {
                 camera_relative(axes.movement.normalize(), rig.yaw).normalize()
             };
-            p.kick = Some(KickState { kind, elapsed: 0.0, held: 0.0, released, aim: Vec2::new(rig.yaw, rig.pitch), eye: camera.translation, entry: p.vel, from_dribble, steer });
+            p.kick = Some(KickState { kind, elapsed: 0.0, held: pre, pre, released, aim: Vec2::new(rig.yaw, rig.pitch), eye: camera.translation, entry: p.vel, from_dribble, steer });
         }
+    }
+    if p.receiving.is_none() {
+        p.queued = None;
     }
     // For 0.1 s after a push ball or pass starts, the longer chord can still take over, so a
     // slightly staggered chord gives the kick you meant (the abilities' "buffer" layers).
@@ -1081,7 +1105,7 @@ pub fn kicking(
     }
     if !k.released {
         if k.kind.charge_action().is_some_and(|a| actions.pressed(a)) {
-            k.held = k.elapsed.min(MAX_HOLD);
+            k.held = (k.pre + k.elapsed).min(MAX_HOLD);
         }
         // Held to a full gauge, the kick goes off by itself (players confirm: the ball leaves as
         // the gauge fills).
@@ -1290,6 +1314,37 @@ mod tests {
 
     fn dribble(app: &mut App) -> Option<DribbleState> {
         app.world_mut().query::<&Player>().single(app.world()).unwrap().dribble
+    }
+
+    #[test]
+    fn kicks_pressed_during_a_control_wait_for_it_and_precharge() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Bindings>().init_resource::<Time>().add_systems(Update, kicking);
+        app.world_mut().spawn(Player { has_ball: true, receiving: Some(0.0), ..default() });
+        app.world_mut().spawn((Transform::default(), Ball::default()));
+        app.world_mut().spawn((Camera3d::default(), Transform::default()));
+        app.world_mut().spawn(CameraRig::default());
+        fn kick(app: &mut App) -> Option<(Kick, f32)> {
+            app.world_mut().query::<&Player>().single(app.world()).unwrap().kick.map(|k| (k.kind, k.held))
+        }
+        fn controlled(app: &mut App) {
+            app.world_mut().query::<&mut Player>().single_mut(app.world_mut()).unwrap().receiving = None;
+        }
+        // A shot held through the control starts at its action frame, already charging.
+        frames(&mut app, &[Action::Shoot], 10, 1.0 / 60.0);
+        assert!(kick(&mut app).is_none());
+        controlled(&mut app);
+        frames(&mut app, &[Action::Shoot], 1, 1.0 / 60.0);
+        assert!(kick(&mut app).is_some_and(|(kind, held)| kind == Kick::Shot && held > 0.15), "pre-charged shot");
+        // A push ball tapped during a control isn't lost.
+        let mut p = app.world_mut().query::<&mut Player>().single_mut(app.world_mut()).unwrap();
+        (p.kick, p.receiving) = (None, Some(0.0));
+        frames(&mut app, &[], 1, 1.0 / 60.0);
+        frames(&mut app, &[Action::PushBall], 2, 1.0 / 60.0);
+        frames(&mut app, &[], 5, 1.0 / 60.0);
+        controlled(&mut app);
+        frames(&mut app, &[], 1, 1.0 / 60.0);
+        assert!(kick(&mut app).is_some_and(|(kind, _)| kind == Kick::PushBall), "queued push ball");
     }
 
     #[test]
