@@ -1539,7 +1539,9 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     }
     pose.0[PELVIS].y += anim.spin;
 
-    anim.drop += (ground_drop(&pose) - anim.drop) * (6.0 * dt).min(1.0);
+    // The feet stay on the ground: the pelvis follows the pose's drop closely (a slow follow left
+    // deep moves like the fast cut floating, then sinking).
+    anim.drop += (ground_drop(&pose) - anim.drop) * (30.0 * dt).min(1.0);
     let drop = anim.drop;
     for (j, mut tf) in &mut joints {
         tf.rotation = joint_rotation(j.0, pose.0[j.0]);
