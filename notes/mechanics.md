@@ -412,6 +412,7 @@ It stays live for **1.5 s**, the same in the centre and on the sides. Unconfirme
 - **Speed:** peaks at 8.5 m/s (goalkeeper 9.5 m/s), then ends at 4.5 m/s.
 - **Second dash in a row:** it can cut into the first from 0.24 s while the first one's cooldown runs. It peaks at only 7.2 m/s and ends at 2 m/s.
 - **Not with the ball:** with the ball the same press is a dribble ([dribble.md](dribble.md)).
+- **Dashing onto a loose ball controls it** (no deflect) and carries it on in front, the way you dash, like a fast cut (players confirm).
 - **Cost:** 0.75 stamina. **Cooldown:** 0.8 s.
 - What you can do during a dash, and when, is in [frame-data.md](frame-data.md).
 
