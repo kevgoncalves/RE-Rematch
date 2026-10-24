@@ -61,6 +61,7 @@ fn main() {
                 player::ball_control,
                 ball::ball_physics,
                 (fx::apply_cheats, fx::kick_marker, fx::dribble_fx, fx::fade_glows, fx::ball_lines).chain(),
+                fx::trails,
                 on_goal,
                 body::animate_body,
                 camera::camera_follow,

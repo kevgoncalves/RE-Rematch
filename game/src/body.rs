@@ -14,6 +14,7 @@ use std::sync::LazyLock;
 
 use bevy::prelude::*;
 
+use crate::fx::TrailPoint;
 use crate::player::{Heading, Kick, KickState, Player, contact_time, dribble_contact};
 use crate::tuning::*;
 
@@ -1057,7 +1058,7 @@ pub fn spawn_body(commands: &mut Commands, player: Entity, meshes: &mut Assets<M
                     hip.spawn(joint(s, Vec3::NEG_Y * THIGH)).with_children(|knee| {
                         knee.spawn((shin.0.clone(), MeshMaterial3d(socks.clone()), shin.1));
                         knee.spawn(joint(f, Vec3::NEG_Y * SHIN)).with_children(|ankle| {
-                            ankle.spawn((foot.clone(), MeshMaterial3d(boots.clone()), Transform::from_xyz(0.0, -ANKLE_HEIGHT + 0.0425, -0.07)));
+                            ankle.spawn((foot.clone(), MeshMaterial3d(boots.clone()), Transform::from_xyz(0.0, -ANKLE_HEIGHT + 0.0425, -0.07), TrailPoint(side)));
                         });
                     });
                 });

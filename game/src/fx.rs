@@ -162,6 +162,113 @@ pub fn spawn_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
     let white = materials.add(StandardMaterial { base_color: Color::srgba(1.0, 1.0, 1.0, 0.85), unlit: true, alpha_mode: AlphaMode::Blend, double_sided: true, cull_mode: None, ..default() });
     commands.spawn((Marker { mesh: mesh.clone(), total: 1.0, left: 0.0 }, Mesh3d(mesh), MeshMaterial3d(white), Transform::default(), Visibility::Hidden));
     commands.insert_resource(FxAssets { sphere: meshes.add(Sphere::new(BALL_RADIUS)) });
+    // The trails: vertex-coloured ribbons added onto the scene.
+    let glow = materials.add(StandardMaterial { base_color: Color::WHITE, unlit: true, alpha_mode: AlphaMode::Add, double_sided: true, cull_mode: None, ..default() });
+    for (source, effect) in [(Source::Ball, Effect::Dribble), (Source::Foot(1.0), Effect::Dribble), (Source::Foot(-1.0), Effect::ExtraEffort), (Source::Foot(1.0), Effect::ExtraEffort)] {
+        let mesh = meshes.add(ribbon(&[], Vec3::ZERO, 0.0, 1.0, Vec3::ZERO));
+        commands.spawn((Trail { source, effect, points: Vec::new(), mesh: mesh.clone() }, Mesh3d(mesh), MeshMaterial3d(glow.clone()), Transform::default(), Visibility::default()));
+    }
+}
+
+/// What a trail follows: the ball, or a foot (-1 left, +1 right).
+#[derive(Clone, Copy, PartialEq)]
+pub enum Source {
+    Ball,
+    Foot(f32),
+}
+
+/// A foot's trail point, on the boot (set by the body).
+#[derive(Component)]
+pub struct TrailPoint(pub f32);
+
+/// Which move a trail belongs to.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Effect {
+    Dribble,
+    ExtraEffort,
+}
+
+impl Effect {
+    /// Colour (linear), how long a point lives and the trail's width.
+    fn look(self) -> (Vec3, f32, f32) {
+        match self {
+            // The dribble's blue (NS_Dribble's colour, 0.3 / 1.05 / 5.0, scaled down to display).
+            Effect::Dribble => (Vec3::new(0.06, 0.21, 1.0), 0.25, 0.16),
+            // ponytail: extra effort's colour and size until its effect data is read.
+            Effect::ExtraEffort => (Vec3::new(1.0, 0.55, 0.12), 0.18, 0.1),
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct Trail {
+    source: Source,
+    effect: Effect,
+    /// Positions, newest last, with their age.
+    points: Vec<(Vec3, f32)>,
+    mesh: Handle<Mesh>,
+}
+
+/// A ribbon through `points` (newest last), facing `eye`, tapering and fading with age.
+fn ribbon(points: &[(Vec3, f32)], eye: Vec3, width: f32, life: f32, colour: Vec3) -> Mesh {
+    let mut positions = Vec::new();
+    let mut colours = Vec::new();
+    for (i, &(p, age)) in points.iter().enumerate() {
+        let prev = points[i.saturating_sub(1)].0;
+        let next = points[(i + 1).min(points.len() - 1)].0;
+        let fresh = (1.0 - age / life).clamp(0.0, 1.0);
+        let side = (next - prev).cross(eye - p).normalize_or_zero() * width * 0.5 * fresh;
+        positions.push((p + side).to_array());
+        positions.push((p - side).to_array());
+        let c = (colour * fresh * fresh).extend(1.0).to_array();
+        colours.push(c);
+        colours.push(c);
+    }
+    let n = points.len().saturating_sub(1) as u32;
+    let indices = (0..n).flat_map(|i| [2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 1, 2 * i + 3, 2 * i + 2]).collect();
+    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; positions.len()])
+        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colours)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_indices(Indices::U32(indices))
+}
+
+/// The moves' trails: a dribble streaks blue behind the ball and the touching foot (players
+/// confirm the look), extra effort behind both feet. Points age out after the effect's life.
+pub fn trails(
+    time: Res<Time>,
+    player: Single<&Player>,
+    ball: Single<&GlobalTransform, With<Ball>>,
+    feet: Query<(&TrailPoint, &GlobalTransform)>,
+    camera: Single<&GlobalTransform, With<Camera3d>>,
+    mut trails: Query<&mut Trail>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    let dt = time.delta_secs();
+    let eye = camera.translation();
+    for mut trail in &mut trails {
+        let (colour, life, width) = trail.effect.look();
+        let on = match trail.effect {
+            Effect::Dribble => player.dribble.is_some_and(|d| d.t < 0.45),
+            Effect::ExtraEffort => player.extra_active,
+        };
+        for point in &mut trail.points {
+            point.1 += dt;
+        }
+        trail.points.retain(|(_, age)| *age < life);
+        if on {
+            let at = match trail.source {
+                Source::Ball => Some(ball.translation()),
+                Source::Foot(side) => feet.iter().find(|(f, _)| f.0 == side).map(|(_, g)| g.translation()),
+            };
+            if let Some(at) = at {
+                trail.points.push((at, 0.0));
+            }
+        }
+        if let Some(mesh) = meshes.get_mut(&trail.mesh) {
+            *mesh = ribbon(&trail.points, eye, width, life, colour);
+        }
+    }
 }
 
 /// The kick marker: placed as a kick sends the ball, its ring emptying as the ball gets there; gone
@@ -197,7 +304,7 @@ pub fn kick_marker(
     }
 }
 
-/// A fading glow: the dribble's shell, flash and ghosts.
+/// A fading glow: the dribble's shell on the ball.
 #[derive(Component)]
 pub struct Glow {
     age: f32,
@@ -208,32 +315,21 @@ pub struct Glow {
     follow: bool,
 }
 
-/// The dribble's blue on the ball (GC_Dribble, NS_Dribble): a glowing shell that rides the ball for
-/// 0.25 s, a 0.2 s flash, and ghosts of the ball left behind for 0.4 s, each fading in 0.2 s.
+/// The dribble's glow on the ball (GC_Dribble, NS_Dribble): a blue shell riding the ball through
+/// the move; the trails do the rest.
 pub fn dribble_fx(
     mut commands: Commands,
-    time: Res<Time>,
     player: Single<&Player>,
     ball: Single<&Transform, With<Ball>>,
     fx: Res<FxAssets>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut last: Local<Option<f32>>,
-    mut ghosting: Local<f32>,
 ) {
     let started = player.dribble.is_some_and(|d| last.is_none_or(|t| d.t < t));
     *last = player.dribble.map(|d| d.t);
-    let mut glow = |commands: &mut Commands, at: Vec3, scale: f32, life: f32, alpha: f32, grow: f32, follow: bool| {
-        let material = materials.add(StandardMaterial { base_color: blue(alpha), unlit: true, alpha_mode: AlphaMode::Add, ..default() });
-        commands.spawn((Glow { age: 0.0, life, alpha, grow, follow }, Mesh3d(fx.sphere.clone()), MeshMaterial3d(material), Transform::from_translation(at).with_scale(Vec3::splat(scale))));
-    };
     if started {
-        glow(&mut commands, ball.translation, 1.21, 0.25, 0.9, 1.21, true);
-        glow(&mut commands, ball.translation, 1.6, 0.2, 0.7, 2.6, true);
-        *ghosting = 0.4;
-    }
-    if *ghosting > 0.0 {
-        *ghosting -= time.delta_secs();
-        glow(&mut commands, ball.translation, 1.0, 0.2, 0.5, 1.0, false);
+        let material = materials.add(StandardMaterial { base_color: blue(0.9), unlit: true, alpha_mode: AlphaMode::Add, ..default() });
+        commands.spawn((Glow { age: 0.0, life: 0.5, alpha: 0.9, grow: 1.25, follow: true }, Mesh3d(fx.sphere.clone()), MeshMaterial3d(material), Transform::from_translation(ball.translation).with_scale(Vec3::splat(1.25))));
     }
 }
 
