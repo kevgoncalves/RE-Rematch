@@ -519,27 +519,44 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         0.58,
         0.0,
     );
-    // Strafing right: the right foot steps out, the left one follows, twice a cycle.
-    let apart = stance.with(&[
+    // Strafing right (the game's side cycle runs 44f; Kev found four scissor steps in it too
+    // busy): one stride per cycle. The right foot lifts and reaches out with the weight on the left,
+    // lands wide, the left lifts and comes in, and you land again shoulder-width, never feet together.
+    let reach = stance.with(&[
+        (PELVIS, [0.0, 0.0, 3.0]),
+        (THIGH_L, [16.0, 0.0, -6.0]),
+        (SHIN_L, [40.0, 0.0, 0.0]),
+        (FOOT_L, [-24.0, 0.0, 6.0]),
+        (THIGH_R, [24.0, 0.0, 22.0]),
+        (SHIN_R, [45.0, 0.0, 0.0]),
+        (FOOT_R, [-22.0, 0.0, -22.0]),
+    ]);
+    let wide = stance.with(&[
+        (THIGH_L, [14.0, 0.0, -14.0]),
+        (SHIN_L, [34.0, 0.0, 0.0]),
+        (FOOT_L, [-20.0, 0.0, 14.0]),
+        (THIGH_R, [14.0, 0.0, 16.0]),
+        (SHIN_R, [34.0, 0.0, 0.0]),
+        (FOOT_R, [-20.0, 0.0, -16.0]),
+    ]);
+    let gather = stance.with(&[
         (PELVIS, [0.0, 0.0, -3.0]),
-        (THIGH_L, [14.0, 0.0, -12.0]),
-        (SHIN_L, [30.0, 0.0, 0.0]),
-        (FOOT_L, [-16.0, 0.0, 12.0]),
-        (THIGH_R, [14.0, 0.0, 18.0]),
-        (SHIN_R, [24.0, 0.0, 0.0]),
-        (FOOT_R, [-10.0, 0.0, -18.0]),
+        (THIGH_L, [22.0, 0.0, 2.0]),
+        (SHIN_L, [48.0, 0.0, 0.0]),
+        (FOOT_L, [-26.0, 0.0, -2.0]),
+        (THIGH_R, [16.0, 0.0, 8.0]),
+        (SHIN_R, [38.0, 0.0, 0.0]),
+        (FOOT_R, [-22.0, 0.0, -8.0]),
     ]);
-    let together = stance.with(&[
-        (PELVIS, [0.0, 0.0, 2.0]),
-        (THIGH_L, [16.0, 0.0, 4.0]),
-        (SHIN_L, [46.0, 0.0, 0.0]),
-        (FOOT_L, [-24.0, 0.0, -4.0]),
-        (THIGH_R, [14.0, 0.0, 4.0]),
-        (SHIN_R, [30.0, 0.0, 0.0]),
-        (FOOT_R, [-16.0, 0.0, -4.0]),
+    let narrow = stance.with(&[
+        (THIGH_L, [15.0, 0.0, -6.0]),
+        (SHIN_L, [36.0, 0.0, 0.0]),
+        (FOOT_L, [-21.0, 0.0, 6.0]),
+        (THIGH_R, [15.0, 0.0, 6.0]),
+        (SHIN_R, [36.0, 0.0, 0.0]),
+        (FOOT_R, [-21.0, 0.0, -6.0]),
     ]);
-    // Two strides over the game's 44f side cycle (it ran four steps in 0.5 s: Kev saw the legs fly).
-    let lock_right = Clip { keys: [apart, together, apart, together], speed: 4.0, duration: 44.0 / 60.0, flight: 0.0 };
+    let lock_right = Clip { keys: [reach, wide, gather, narrow], speed: 4.0, duration: 44.0 / 60.0, flight: 0.015 };
 
     // A shot (the right foot): the leg cocks far back with the hips turned away and the left arm
     // thrown out; the hips whip round through the ball with the body over it; the leg swings on up
@@ -927,39 +944,65 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
     // short gather, the big push-off around 6-15f where the speed peaks (after the 0.1 s blend-in),
     // then the strides out. The side dash is authored to the right.
     let dash_front = OneShot(vec![
-        (0.0, stand.with(&[
-            (SPINE_J, [16.0, 0.0, 0.0]),
-            (NECK_J, [-10.0, 0.0, 0.0]),
-            (THIGH_L, [20.0, 0.0, -6.0]),
-            (SHIN_L, [55.0, 0.0, 0.0]),
-            (FOOT_L, [-35.0, 0.0, 6.0]),
-            (THIGH_R, [10.0, 0.0, 6.0]),
-            (SHIN_R, [45.0, 0.0, 0.0]),
+        (0.0, stance.with(&[
+            (SPINE_J, [22.0, 0.0, 0.0]),
+            (NECK_J, [-14.0, 0.0, 0.0]),
+            (THIGH_L, [26.0, 0.0, -6.0]),
+            (SHIN_L, [60.0, 0.0, 0.0]),
+            (FOOT_L, [-34.0, 0.0, 6.0]),
+            (THIGH_R, [20.0, 0.0, 6.0]),
+            (SHIN_R, [55.0, 0.0, 0.0]),
             (FOOT_R, [-35.0, 0.0, -6.0]),
-            (UPPER_L, [-20.0, 0.0, -15.0]),
-            (FORE_L, [70.0, 0.0, 0.0]),
-            (UPPER_R, [25.0, 0.0, 15.0]),
-            (FORE_R, [70.0, 0.0, 0.0]),
+            (UPPER_L, [-25.0, 0.0, -20.0]),
+            (FORE_L, [60.0, 0.0, 0.0]),
+            (UPPER_R, [20.0, 0.0, 20.0]),
+            (FORE_R, [60.0, 0.0, 0.0]),
         ])),
-        (0.18, stand.with(&[
+        // The burst: low and driving, the left knee up, the right leg straight out behind.
+        (0.15, stand.with(&[
             (PELVIS, [0.0, -10.0, 0.0]),
-            (SPINE_J, [30.0, 0.0, 0.0]),
-            (CHEST_J, [4.0, 10.0, 0.0]),
-            (NECK_J, [-22.0, 0.0, 0.0]),
-            (THIGH_L, [70.0, 0.0, -4.0]),
-            (SHIN_L, [95.0, 0.0, 0.0]),
-            (FOOT_L, [-20.0, 0.0, 4.0]),
-            (THIGH_R, [-30.0, 0.0, 4.0]),
-            (SHIN_R, [15.0, 0.0, 0.0]),
-            (FOOT_R, [40.0, 0.0, -4.0]),
+            (SPINE_J, [38.0, 0.0, 0.0]),
+            (CHEST_J, [6.0, 10.0, 0.0]),
+            (NECK_J, [-28.0, 0.0, 0.0]),
+            (THIGH_L, [75.0, 0.0, -4.0]),
+            (SHIN_L, [100.0, 0.0, 0.0]),
+            (FOOT_L, [-25.0, 0.0, 4.0]),
+            (THIGH_R, [-35.0, 0.0, 4.0]),
+            (SHIN_R, [10.0, 0.0, 0.0]),
+            (FOOT_R, [45.0, 0.0, -4.0]),
             (UPPER_L, [-60.0, 0.0, -10.0]),
-            (FORE_L, [85.0, 0.0, 0.0]),
-            (UPPER_R, [65.0, 0.0, 10.0]),
-            (FORE_R, [95.0, 0.0, 0.0]),
+            (FORE_L, [90.0, 0.0, 0.0]),
+            (UPPER_R, [70.0, 0.0, 10.0]),
+            (FORE_R, [90.0, 0.0, 0.0]),
         ])),
-        (0.38, sprint_contact.mirror()),
-        (0.64, run_contact),
-        (1.0, run_stance),
+        // The long lunge: the left foot lands well out in front, the right trails far back.
+        (0.35, stand.with(&[
+            (PELVIS, [0.0, -6.0, 0.0]),
+            (SPINE_J, [30.0, 0.0, 0.0]),
+            (CHEST_J, [4.0, 6.0, 0.0]),
+            (NECK_J, [-22.0, 0.0, 0.0]),
+            (THIGH_L, [45.0, 0.0, -4.0]),
+            (SHIN_L, [30.0, 0.0, 0.0]),
+            (FOOT_L, [-15.0, 0.0, 4.0]),
+            (THIGH_R, [-40.0, 0.0, 4.0]),
+            (SHIN_R, [60.0, 0.0, 0.0]),
+            (FOOT_R, [25.0, 0.0, -4.0]),
+            (UPPER_L, [45.0, 0.0, -15.0]),
+            (FORE_L, [80.0, 0.0, 0.0]),
+            (UPPER_R, [-40.0, 0.0, 15.0]),
+            (FORE_R, [80.0, 0.0, 0.0]),
+        ])),
+        // Gathering back into a low stance as it slows.
+        (0.62, stance.with(&[
+            (SPINE_J, [20.0, 0.0, 0.0]),
+            (THIGH_L, [28.0, 0.0, -6.0]),
+            (SHIN_L, [55.0, 0.0, 0.0]),
+            (FOOT_L, [-27.0, 0.0, 6.0]),
+            (THIGH_R, [6.0, 0.0, 6.0]),
+            (SHIN_R, [50.0, 0.0, 0.0]),
+            (FOOT_R, [-40.0, 0.0, -6.0]),
+        ])),
+        (1.0, stance),
     ]);
     let dash_side = OneShot(vec![
         (0.0, stance.with(&[
@@ -1203,17 +1246,17 @@ pub fn spawn_body(commands: &mut Commands, player: Entity, meshes: &mut Assets<M
     // A capsule of radius r along a bone of length len, hanging down from its joint.
     let mut limb = |r: f32, len: f32| (Mesh3d(meshes.add(Capsule3d::new(r, (len - r).max(0.01)))), Transform::from_xyz(0.0, -len / 2.0, 0.0));
     // Sturdy limbs (Kev wants a more robust player than the bare physics radii).
-    let thigh = limb(0.105, THIGH);
-    let shin = limb(0.075, SHIN);
-    let upper = limb(0.062, UPPER_ARM);
-    let fore = limb(0.052, FOREARM);
+    let thigh = limb(0.094, THIGH);
+    let shin = limb(0.068, SHIN);
+    let upper = limb(0.054, UPPER_ARM);
+    let fore = limb(0.046, FOREARM);
     // The trunk is one smooth shape, wider than deep, from the hips to the base of the neck; the
     // shorts sit over the pelvis and the shoulders are rounded off.
     let mut trunk = |r: f32, len: f32, at: Vec3, scale: Vec3| (Mesh3d(meshes.add(Capsule3d::new(r, len))), Transform::from_translation(at).with_scale(scale));
-    let pelvis_mesh = trunk(0.125, 0.08, Vec3::new(0.0, -0.03, 0.0), Vec3::new(1.35, 1.0, 0.9));
-    let chest_mesh = trunk(0.145, 0.2, Vec3::new(0.0, -0.02, -0.005), Vec3::new(1.38, 1.0, 0.84));
-    let shoulder_mesh = Mesh3d(meshes.add(Sphere::new(0.078)));
-    let neck_mesh = Mesh3d(meshes.add(Capsule3d::new(0.07, 0.05)));
+    let pelvis_mesh = trunk(0.118, 0.08, Vec3::new(0.0, -0.03, 0.0), Vec3::new(1.3, 1.0, 0.84));
+    let chest_mesh = trunk(0.132, 0.2, Vec3::new(0.0, -0.02, -0.005), Vec3::new(1.36, 1.0, 0.76));
+    let shoulder_mesh = Mesh3d(meshes.add(Sphere::new(0.07)));
+    let neck_mesh = Mesh3d(meshes.add(Capsule3d::new(0.065, 0.05)));
     let head_mesh = Mesh3d(meshes.add(Sphere::new(0.108)));
     let hand = Mesh3d(meshes.add(Capsule3d::new(0.04, 0.08)));
     let foot = Mesh3d(meshes.add(Cuboid::new(0.11, 0.09, 0.28)));

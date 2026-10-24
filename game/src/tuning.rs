@@ -264,8 +264,8 @@ pub const WINDUP_SPEED_SCALE: f32 = 0.5; // TUNE: how much you slow down winding
 pub const SHOT_SLIDE: f32 = 0.75;
 /// ...sprinting at 4 m/s or more...
 pub const SHOT_SLIDE_SPRINT: f32 = 0.6;
-/// ...or shooting out of a dribble.
-pub const SHOT_SLIDE_FROM_DRIBBLE: f32 = 0.5;
+/// ...or shooting out of a dribble (the game's 0.5; Kev wants a bigger slide).
+pub const SHOT_SLIDE_FROM_DRIBBLE: f32 = 0.7;
 /// Passes and lobs keep all of your speed at the press, in that direction, through the build-up
 /// and after the touch (BeforeTapScaleSpeedData, TapAfterShootSpeedData). Under 2 m/s the
 /// animation's own motion plays instead.
@@ -357,14 +357,9 @@ pub const PUSH_BALL_LENGTH: [f32; 3] = [55.0 / 60.0, 55.0 / 60.0, 53.0 / 60.0];
 /// You're free to act again this long after the press.
 pub const PUSH_BALL_FREE: f32 = 23.0 / 60.0;
 pub const RUN_TURN_LIMIT: f32 = 30.0; // degrees
-/// Kev's quick turn, for the ippy (as before the Season 1 fix to turning quickly after a push
-/// ball: once its chase is free, a stick turned back starts it) and for controls taken with the
-/// stick well off your way: you slide on along your way down to a stop, the body swinging round
-/// smoothly, then run off the new way. Brake and re-acceleration (s), and the body's swing (s). TUNE.
-pub const QUICK_TURN: (f32, f32, f32) = (0.18, 0.25, 0.16);
-/// Kev's softer hand-back (out of dribbles, passes, lobs, shots): a pivot where your heading and
-/// body swing round together at this rate (deg/s) for up to this long (s), your speed dipping to
-/// this share while more than 90 deg off. TUNE.
+/// Kev's softer hand-back (out of dribbles, passes, lobs, shots) and the ippy's turn: a pivot where
+/// your heading and body swing round together at this rate (deg/s) for up to this long (s), your
+/// speed dipping to this share while more than 90 deg off. TUNE.
 pub const PIVOT_RATE: f32 = 720.0;
 pub const PIVOT_TIME: f32 = 0.35;
 pub const PIVOT_SPEED: f32 = 0.6;
@@ -438,8 +433,8 @@ pub const CONTROL_SNAP: f32 = 12.0 / 60.0;
 pub const CONTROL_ACT_BY_HEIGHT: [(f32, f32); 4] = [(0.6, 14.0 / 60.0), (1.1, 16.0 / 60.0), (1.5, 20.0 / 60.0), (f32::INFINITY, 22.0 / 60.0)];
 /// Kev's ippy (as before Season 1, which he says was 100% consistent, sprint or not): after your
 /// own push ball, with the stick turned back past IPPY_ANGLE, as soon as you may take the ball
-/// again (within IPPY_WINDOW of the touch), if it is within IPPY_REACH you turn over it (a quick
-/// turn) and take it with the back foot, the foot pulling it out the new way (CONTROL_TURN_SPOT).
+/// again (within IPPY_WINDOW of the touch), if it is within IPPY_REACH you pivot round over it and
+/// take it, the foot pulling it round in front of you as you swing (CONTROL_TURN_SPOT out).
 pub const IPPY_ANGLE: f32 = 120.0;
 pub const IPPY_WINDOW: f32 = 1.0;
 pub const IPPY_REACH: f32 = 1.6;

@@ -237,29 +237,6 @@ fn soft_hand_back(p: &mut Player, dir_now: Vec3) {
     p.recent_input.clear();
 }
 
-/// Kev's quick turn toward `dir`: you slide on along your way down to a stop as the body swings
-/// round, then run off the new way (QUICK_TURN).
-fn quick_turn(p: &Player, dir: Vec3) -> Turn {
-    let (brake, accel, face) = QUICK_TURN;
-    let flat = Vec3::new(p.vel.x, 0.0, p.vel.z);
-    Turn {
-        t: 0.0,
-        from: flat.normalize_or(dir),
-        cur: dir,
-        entry: flat.length(),
-        share: 0.0,
-        brake: (brake, LIN_DOWN),
-        accel: (accel, LIN_UP),
-        big: true,
-        ball: p.has_ball,
-        sprint: p.sprint_running,
-        face_from: p.facing,
-        face_t: 0.0,
-        face_time: face,
-        side: swing_side(p.facing, dir),
-    }
-}
-
 /// Which way the body swings from `facing` to `dir`: the shorter way, or left for an exact reversal.
 fn swing_side(facing: f32, dir: Vec3) -> f32 {
     let d = angle_diff(yaw_of(dir), facing);
@@ -968,8 +945,8 @@ pub fn ball_control(
             // by the control's touch frame (TouchBallComponent); only within 10 cm does it snap.
             let fwd = forward(p.facing);
             let target = match p.receive_way {
-                // A turning control: the foot pulls the ball out the turn's way.
-                Some(way) => ptf.translation + way * CONTROL_TURN_SPOT,
+                // The ippy: the foot pulls the ball round in front of you as you swing.
+                Some(_) => ptf.translation + fwd * CONTROL_TURN_SPOT,
                 None => ptf.translation + fwd * DRIBBLE_OFFSET,
             };
             let target = Vec3::new(target.x, BALL_RADIUS, target.z);
@@ -1014,7 +991,9 @@ pub fn ball_control(
         && let Some(w) = wish.filter(|w| p.push_way.angle_between(*w).to_degrees() > IPPY_ANGLE)
     {
         p.run = None;
-        p.turn = Some(quick_turn(p, w));
+        p.turn = None;
+        p.pivot = PIVOT_TIME;
+        p.recent_input.clear();
         p.receiving = Some(0.0);
         p.receive_from = btf.translation;
         p.receive_way = Some(w);
