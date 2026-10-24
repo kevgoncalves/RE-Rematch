@@ -114,7 +114,11 @@ The push ball's ground friction isn't exported, so these are estimates from our 
 | Dribble push ball, sprinting | 14.85 | ~5–6.6 m |
 
 ## Extra effort and the ball
-Players confirm that **extra effort can't control the ball**. Starting it with the ball touches the ball on ahead (at 8f), and running into the ball during extra effort knocks it forward again instead of trapping it.
+Players confirm that **extra effort can't control the ball**:
+- Starting it with the ball touches the ball on ahead (at 8f).
+- Running into the ball during extra effort taps it on again, **in the direction you're running, from any side**. So changing direction on the ball takes it with you.
+- Each touch sends the ball several metres ahead. The game's touch speeds (13 m/s at the start, 12 m/s after) barely beat your 8.75 m/s, so with the 1.5 friction override they would only lead by under a metre; something else must add to them (unconfirmed).
+- **Changing direction in extra effort is snappy**: its near-instant acceleration (100 m/s²) turns your run; the 150°/s turn rate seems to apply to the body only (our reading of the players' description).
 
 ## The dash (without the ball)
 - Only without the ball, from lock move.
