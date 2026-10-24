@@ -123,5 +123,11 @@ Players confirm that **extra effort can't control the ball**:
 
 ## The dash (without the ball)
 - Only without the ball, from lock move.
+- **Direction and facing follow the dribble's sectors** (players confirm), read from the input relative to the camera:
+  - forward, including the W+A and W+D diagonals: you turn and dash that way;
+  - sideways (A or D): you keep facing forward and step to the side;
+  - back: you keep facing forward and move back.
+
+  The game plays a different animation per sector. Its picker splits the input angle (relative to the camera, not the body) into front (±45°, with mirrored variants), left and right (45–135°) and back (135–225°).
 - **A second dash can cut into the first** from **0.24 s** into it, while the first dash's cooldown (0.8 s) is running. It is weaker: 6 → 7.2 → 2 m/s against 6 → 8.5 → 4.5.
 - After the second dash, both wait for its own cooldown. So at most two in a row.
