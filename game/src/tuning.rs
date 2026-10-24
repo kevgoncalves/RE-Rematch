@@ -141,33 +141,40 @@ pub const SHOT_SLIDE_SPRINT: f32 = 0.6;
 pub const SHOT_SLIDE_FROM_DRIBBLE: f32 = 0.5;
 /// After the touch you keep that speed until the move ends (can act moving at 0.75 s, standing 0.67 s).
 pub const SHOT_FOLLOW_THROUGH: f32 = 13.0 / 60.0;
-/// Extra shot speed from your own speed (ShootForceByCharaSpeed, m/s).
+/// Extra shot speed from your own speed (ShootForceByCharaSpeed, m/s), scaled by how strong the
+/// shot is: none up to 27.85 m/s, all of it from 38 m/s (ModifierRatioFromShootForce).
 pub const SHOT_FORCE_BY_RUN_SPEED: [(f32, f32); 3] = [(0.0, 0.0), (6.0, 1.25), (9.5, 4.0)];
-/// Earliest ball contact for a quick tap, from the press. Players say taps go off much sooner
-/// than the build-up, which then only sets the minimum force (TUNE until the code confirms it).
-pub const SHOT_TAP_CONTACT: f32 = 15.0 / 60.0;
-pub const PASS_TAP_CONTACT: f32 = 10.0 / 60.0;
-pub const LOB_TAP_CONTACT: f32 = 12.0 / 60.0;
+pub const SHOT_RUN_BONUS_BY_FORCE: [(f32, f32); 3] = [(0.0, 0.0), (0.275, 0.0), (1.0, 1.0)];
+/// A shot slower than this uses the low-power kick, struck at 20 frames instead of 32
+/// (GA_Shoot shot types, ShootDataTable): quick shots go off sooner.
+pub const SHOT_HIGH_POWER_SPEED: f32 = 29.41;
+pub const SHOT_LOW_POWER_CONTACT: f32 = 20.0 / 60.0;
 /// Camera pitch (degrees, + is up) to launch elevation (degrees).
 pub const ELEVATION_BY_PITCH: [(f32, f32); 6] =
     [(-24.9, 2.93), (-14.6, 2.93), (-13.2, 3.99), (-7.6, 9.29), (0.7, 17.42), (4.0, 20.46)];
-pub const PASS_ELEVATION: f32 = 2.0; // TUNE: passes stay low
+/// Passes leave flat; holding past the 0.6 s sweet spot lifts them (degrees by seconds held).
+pub const PASS_LIFT_BY_HOLD: [(f32, f32); 4] = [(0.0, 0.0), (0.6, 0.0), (0.601, 3.9), (1.0, 6.0)];
 pub const AIM_NUDGE: f32 = 3.0; // degrees of side nudge from the curve input
-pub const SIDE_SPIN: [(f32, f32); 5] = [(-1.0, -825.0), (-0.5, -350.0), (0.0, 0.0), (0.5, 350.0), (1.0, 825.0)];
-pub const SIDE_SPIN_BY_CHARGE: [(f32, f32); 2] = [(0.1, 0.5), (1.0, 0.9)];
+pub const SIDE_SPIN: [(f32, f32); 8] = [(-1.0, -825.0), (-0.9, -650.0), (-0.5, -350.0), (-0.1, 0.0), (0.1, 0.0), (0.5, 350.0), (0.9, 650.0), (1.0, 825.0)];
+/// Spin scaling by charge (the game's external curves, which override the editor ones).
+pub const SIDE_SPIN_BY_CHARGE: [(f32, f32); 2] = [(0.0, 1.02), (1.0, 0.8)];
 // Keyboard and mouse: the shot direction locks when you start charging, and mouse movement
 // while charging feeds a Magnus accumulator instead of the camera (BP_MK_InputRotationForceComputation).
 pub const MAGNUS_ACCUMULATOR_SENSITIVITY: f32 = 0.2;
 pub const MOUSE_AXIS_SCALE: f32 = 0.07; // Unreal's default MouseX/MouseY axis scale (unconfirmed for Rematch)
-pub const PASS_FRICTION: f32 = 0.3; // override, not a multiplier
+pub const PASS_FRICTION: f32 = 1.2; // override for players' passes (analog power data)
+/// Forced spin per kick, in the shots' convention: passes like shots, lobs the other way.
+pub const PASS_FORCED_SPIN: f32 = -200.0;
+pub const LOB_FORCED_SPIN: f32 = 300.0;
+pub const SHORT_LOB_FORCED_SPIN: f32 = 420.0;
 // Pass aiming (Tap_OrientationDataTable_*, BP_*_Tap_FilteredInputDirectionComputation)
 pub const PASS_STICK_DEAD_ZONE: f32 = 0.3;
 pub const PASS_MOUSE_DEAD_ZONE: f32 = 0.4;
 pub const PASS_FORWARD_SNAP: f32 = 6.0; // degrees
 pub const SHOT_FRICTION: f32 = BASE_FRICTION;
-/// Stick/mouse forward-back to top/back spin; one direction is much stronger (which one is unconfirmed).
-pub const TOP_SPIN: [(f32, f32); 6] = [(-1.0, 780.0), (-0.5, 330.0), (-0.1, 0.0), (0.2, 0.0), (0.5, -40.0), (1.0, -120.0)];
-pub const TOP_SPIN_BY_CHARGE: [(f32, f32); 2] = [(0.1, 0.35), (1.0, 0.5)];
+/// Stick/mouse forward-back to top/back spin; pulling back is much stronger (confirmed in-game).
+pub const TOP_SPIN: [(f32, f32); 8] = [(-1.0, 780.0), (-0.9, 660.0), (-0.5, 330.0), (-0.1, 0.0), (0.2, 0.0), (0.5, -40.0), (0.9, -80.0), (1.0, -120.0)];
+pub const TOP_SPIN_BY_CHARGE: [(f32, f32); 2] = [(0.0, 0.95), (1.0, 0.85)];
 pub const SHOT_BASE_SPIN: f32 = -210.0; // "forced Magnus" on every shot; sign (dip vs rise) unconfirmed
 pub const FAKE_SHOT_COST: f32 = 1.5;
 
@@ -175,7 +182,9 @@ pub const FAKE_SHOT_COST: f32 = 1.5;
 pub const SHORT_WINDUP: f32 = 16.0 / 60.0;
 pub const SHORT_PASS_SPEED: f32 = 24.25;
 pub const SHORT_PASS_FRICTION: f32 = BASE_FRICTION * 1.5;
-pub const LOB_ELEVATION: f32 = 35.0; // TUNE
+/// Lob launch angle by seconds held (overrides the aim): longer lobs are flatter and faster.
+pub const LOB_ANGLE_BY_HOLD: [(f32, f32); 2] = [(0.3, 44.0), (1.0, 30.26)];
+pub const SHORT_LOB_ANGLE: f32 = 52.0;
 pub const SHORT_LOB_SPEED: f32 = 13.2;
 pub const PUSH_BALL_SPEED: f32 = 11.5;
 pub const PUSH_BALL_FRICTION: f32 = BASE_FRICTION * 2.8; // about 5.5 m of roll at 11.5 m/s

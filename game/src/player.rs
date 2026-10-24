@@ -179,16 +179,6 @@ impl Kick {
         }
     }
 
-    /// Earliest ball contact from the press: a quick tap goes off this soon.
-    fn contact(self) -> f32 {
-        match self {
-            Kick::Shot => SHOT_TAP_CONTACT,
-            Kick::Pass => PASS_TAP_CONTACT,
-            Kick::Lob => LOB_TAP_CONTACT,
-            _ => self.buildup(),
-        }
-    }
-
     /// The force uses at least this much hold time.
     fn buildup(self) -> f32 {
         match self {
@@ -633,8 +623,10 @@ pub fn kicking(
         k.aim.x -= axes.look_pad.x;
         k.aim.y = (k.aim.y + axes.look_pad.y).clamp(-PITCH_DOWN_LIMIT, PITCH_UP_LIMIT);
     }
-    // The ball leaves on release, or soon after the press for a quick tap.
-    if !k.released || k.elapsed < k.kind.contact() {
+    // The ball leaves on release, but never before the kick's contact frame (ShootDataTable):
+    // a shot under 29.41 m/s uses the quicker low-power kick (20 frames, not 32).
+    let contact = if k.kind == Kick::Shot && shot_speed(&k) < SHOT_HIGH_POWER_SPEED { SHOT_LOW_POWER_CONTACT } else { k.kind.buildup() };
+    if !k.released || k.elapsed < contact {
         return;
     }
     let k = p.kick.take().expect("checked above");
@@ -656,16 +648,11 @@ pub fn kicking(
     };
     let sprint = |factor: f32| if p.sprinting { factor } else { 1.0 };
     let (speed, elevation, friction, no_control) = match k.kind {
-        Kick::Shot => (
-            curve(&SHOT_FORCE, t) + curve(&SHOT_FORCE_BY_RUN_SPEED, k.entry.length()),
-            curve(&ELEVATION_BY_PITCH, k.aim.y),
-            SHOT_FRICTION,
-            NO_RECONTROL_TIME,
-        ),
-        Kick::Pass => (curve(&PASS_FORCE, t), PASS_ELEVATION, PASS_FRICTION, NO_RECONTROL_TIME),
-        Kick::ShortPass => (SHORT_PASS_SPEED, PASS_ELEVATION, SHORT_PASS_FRICTION, NO_RECONTROL_TIME),
-        Kick::Lob => (curve(&LOB_FORCE, t), LOB_ELEVATION, SHOT_FRICTION, NO_RECONTROL_TIME),
-        Kick::ShortLob => (SHORT_LOB_SPEED, LOB_ELEVATION, SHOT_FRICTION, NO_RECONTROL_TIME),
+        Kick::Shot => (shot_speed(&k), curve(&ELEVATION_BY_PITCH, k.aim.y), SHOT_FRICTION, NO_RECONTROL_TIME),
+        Kick::Pass => (curve(&PASS_FORCE, t), curve(&PASS_LIFT_BY_HOLD, t), PASS_FRICTION, NO_RECONTROL_TIME),
+        Kick::ShortPass => (SHORT_PASS_SPEED, 0.0, SHORT_PASS_FRICTION, NO_RECONTROL_TIME),
+        Kick::Lob => (curve(&LOB_FORCE, t), curve(&LOB_ANGLE_BY_HOLD, t), SHOT_FRICTION, NO_RECONTROL_TIME),
+        Kick::ShortLob => (SHORT_LOB_SPEED, SHORT_LOB_ANGLE, SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::PushBall if p.extra_active => (
             EXTRA_EFFORT_TAP_SPEED,
             0.0,
@@ -696,7 +683,14 @@ pub fn kicking(
         let lift = -curve(&TOP_SPIN, axes.curve.y) * curve(&TOP_SPIN_BY_CHARGE, ratio) + SHOT_BASE_SPIN;
         Vec3::NEG_Y * curve(&SIDE_SPIN, side) * curve(&SIDE_SPIN_BY_CHARGE, ratio) + right * lift
     } else {
-        Vec3::ZERO // ponytail: curve only on shots for now
+        // Passes and lobs carry the game's forced spin; low-power passes and push balls none.
+        right
+            * match k.kind {
+                Kick::Pass => PASS_FORCED_SPIN,
+                Kick::Lob => LOB_FORCED_SPIN,
+                Kick::ShortLob => SHORT_LOB_FORCED_SPIN,
+                _ => 0.0,
+            }
     };
     ball.friction = friction;
     ball.no_control = no_control;
@@ -719,6 +713,14 @@ pub fn kicking(
         };
         p.run = Some(Run { t: 0.0, length: length - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, dir: flat, speeds, scale: 1.0 });
     }
+}
+
+/// A shot's ball speed: the force curve by seconds held (at least the build-up), plus your run-up
+/// speed's bonus, which only counts for stronger shots.
+fn shot_speed(k: &KickState) -> f32 {
+    let force = curve(&SHOT_FORCE, k.held.max(SHOT_BUILDUP).min(MAX_HOLD));
+    let strength = (force - SHOT_FORCE[0].1) / (SHOT_FORCE[2].1 - SHOT_FORCE[0].1);
+    force + curve(&SHOT_FORCE_BY_RUN_SPEED, k.entry.length()) * curve(&SHOT_RUN_BONUS_BY_FORCE, strength)
 }
 
 /// Freeplay ball call: the ball is passed to you from in front of the camera.
