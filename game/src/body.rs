@@ -242,8 +242,7 @@ struct Clips {
     /// Lock move with the ball: the right sole on it.
     sole: Pose,
     dash_front: OneShot,
-    push_side: Pose,
-    push_back: Pose,
+
     dash_side: OneShot,
     dash_back: OneShot,
     cycles: Vec<(Cycle, Clip)>,
@@ -539,7 +538,8 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         (SHIN_R, [30.0, 0.0, 0.0]),
         (FOOT_R, [-16.0, 0.0, -4.0]),
     ]);
-    let lock_right = Clip { keys: [apart, together, apart, together], speed: 4.5, duration: 0.5, flight: 0.0 };
+    // Two strides over the game's 44f side cycle (it ran four steps in 0.5 s: Kev saw the legs fly).
+    let lock_right = Clip { keys: [apart, together, apart, together], speed: 4.0, duration: 44.0 / 60.0, flight: 0.0 };
 
     // A shot (the right foot): the leg cocks far back with the hips turned away and the left arm
     // thrown out; the hips whip round through the ball with the body over it; the leg swings on up
@@ -1036,27 +1036,6 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         (0.64, stance),
         (1.0, stance),
     ]);
-    // Push balls by direction (the right foot; mirrored to the left), added on top of the run: to
-    // the side the foot sweeps out and the body leans into it; back, the sole goes on the ball and
-    // drags it as you lean back.
-    let push_side = Pose::default().with(&[
-        (PELVIS, [0.0, 0.0, 6.0]),
-        (SPINE_J, [4.0, 0.0, 8.0]),
-        (THIGH_R, [10.0, 0.0, 32.0]),
-        (SHIN_R, [20.0, 0.0, 0.0]),
-        (FOOT_R, [-6.0, 0.0, -32.0]),
-        (UPPER_L, [0.0, 0.0, -20.0]),
-        (UPPER_R, [0.0, 0.0, 25.0]),
-    ]);
-    let push_back = Pose::default().with(&[
-        (SPINE_J, [-8.0, 0.0, 0.0]),
-        (THIGH_R, [35.0, 0.0, 4.0]),
-        (SHIN_R, [50.0, 0.0, 0.0]),
-        (FOOT_R, [-14.0, 0.0, -4.0]),
-        (UPPER_L, [15.0, 0.0, -25.0]),
-        (UPPER_R, [15.0, 0.0, 25.0]),
-    ]);
-
     Clips {
         stand,
         kicks: [shot_kick, pass_kick, lob_kick],
@@ -1071,8 +1050,7 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         roulette,
         sole,
         dash_front,
-        push_side,
-        push_back,
+
         dash_side,
         dash_back,
         cycles: vec![
@@ -1156,10 +1134,8 @@ pub struct Animator {
     kick: Option<KickState>,
     follow: Option<(f32, Kick)>,
     action: f32,
-    /// The kick's sector against the body (degrees, left +), and a push's direction in the body's
-    /// frame: they pick its turn and its pose.
+    /// The kick's sector against the body (degrees, left +): it picks its turn.
     kick_turn: f32,
-    push_local: Vec3,
     trans: Option<Transition>,
     turn_u: f32,
     /// The pose a transition fades from, and the fade (1 → 0) and its length.
@@ -1496,9 +1472,6 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     if let Some(k) = p.kick {
         let aim = if k.kind != Kick::Shot && k.steer != Vec3::ZERO { yaw_of(k.steer) } else { k.aim.x.to_radians() };
         anim.kick_turn = wrap(aim - p.facing).to_degrees().clamp(-150.0, 150.0);
-        if push(k.kind) {
-            anim.push_local = root.rotation.inverse() * if k.steer == Vec3::ZERO { root.rotation * Vec3::NEG_Z } else { k.steer };
-        }
     }
     // Wind up to the strike, which always takes the last 8 frames before contact (the game never
     // stretches them: power only lengthens the backswing); a long charge holds the backswing and
@@ -1540,12 +1513,8 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         _ => 0.0,
     };
     if push_touch > 0.0 {
-        // Forward the foot reaches through the ball; to the side it sweeps out; back it drags it.
         let w = push_touch * push_touch * (3.0 - 2.0 * push_touch) * 1.2;
-        let angle = anim.push_local.angle_between(Vec3::NEG_Z).to_degrees();
-        let shape = if angle <= 60.0 { clips.control } else if angle <= 120.0 { clips.push_side } else { clips.push_back };
-        let shape = if anim.push_local.x < -0.1 { shape.mirror() } else { shape };
-        pose = pose.plus(&Pose(shape.0.map(|a| a * w)));
+        pose = pose.plus(&Pose(clips.control.0.map(|a| a * w)));
     }
     let target = kick_pose.map_or(0.0, |(_, _, w, _)| w);
     anim.action += (target - anim.action).clamp(-dt / 0.25, dt / 0.08);

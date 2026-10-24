@@ -368,9 +368,6 @@ pub const QUICK_TURN: (f32, f32, f32) = (0.18, 0.25, 0.16);
 pub const PIVOT_RATE: f32 = 720.0;
 pub const PIVOT_TIME: f32 = 0.35;
 pub const PIVOT_SPEED: f32 = 0.6;
-/// The ippy's quick turn starts when your push ball is this close ahead (m) with the stick turned
-/// back, so you slide into it mid-turn. TUNE.
-pub const IPPY_TURN_GAP: f32 = 0.9;
 /// Kev: a push ball just after a dribble ends still counts as the dribble's (no direction
 /// falloff), for this long (s).
 pub const DRIBBLE_PUSH_GRACE: f32 = 0.3;
@@ -421,17 +418,17 @@ pub const EXTRA_EFFORT_KNOCK_REACH: f32 = 0.35 + BALL_RADIUS + 0.05;
 pub const CONTROL_SWITCH_SPEED: f32 = 2.5;
 pub const BALL_HIT_RADIUS: f32 = 0.12;
 /// (forward offset, radius, half height) of the capsules; the standing ground zone is a sphere.
-pub const CONTROL_STANDING: (f32, f32, f32) = (0.10, 0.50, 1.85);
-pub const CONTROL_STANDING_GROUND: (f32, f32) = (0.10, 0.83);
-pub const CONTROL_MOVING: (f32, f32, f32) = (0.30, 0.90, 1.84);
-/// Running you can also take a ball rolling away from you: a ground zone 0.4 m behind you with no
-/// direction check. The game since Season 1 only allows it with your velocity within 22.5 deg of
-/// your facing (the ippy nerf); Kev wants the ippy as it was before, so the gate is open.
-pub const CONTROL_MOVING_GROUND: (f32, f32, f32) = (-0.40, 0.60, 1.80);
-pub const CONTROL_GROUND_SECTOR: f32 = 180.0;
+/// Kev wants a bigger magnet than the game's (0.50 / 0.83 standing, 0.90 moving, 0.60 on the
+/// ground): almost on the ball, it must be taken.
+pub const CONTROL_STANDING: (f32, f32, f32) = (0.10, 0.65, 1.85);
+pub const CONTROL_STANDING_GROUND: (f32, f32) = (0.10, 0.95);
+pub const CONTROL_MOVING: (f32, f32, f32) = (0.30, 1.0, 1.84);
+/// Running you can also take a ball rolling away from you, once it is about under you: a ground
+/// zone with no direction check (the game's sits 0.4 m behind you, r 0.6; Kev wants it closer in).
+pub const CONTROL_MOVING_GROUND: (f32, f32, f32) = (-0.10, 0.70, 1.80);
 /// Lock move without the ball catches from any direction. The game's radius is 0.675; Kev wants
-/// the stance to reach a little further than any zone without it (0.83 standing on the ground).
-pub const CONTROL_LOCK_MOVE: (f32, f32, f32) = (0.10, 0.95, 1.85);
+/// the stance to reach a little further than any zone without it.
+pub const CONTROL_LOCK_MOVE: (f32, f32, f32) = (0.10, 1.1, 1.85);
 /// The normal zones refuse a ball heading away from you: this close to "away" (degrees).
 pub const CONTROL_AWAY_ANGLE: f32 = 75.0;
 /// The ball becomes yours 12 frames into the control (it settles at your feet), and you can act
@@ -439,24 +436,17 @@ pub const CONTROL_AWAY_ANGLE: f32 = 75.0;
 /// 16f, chest 20f, head 22f.
 pub const CONTROL_SNAP: f32 = 12.0 / 60.0;
 pub const CONTROL_ACT_BY_HEIGHT: [(f32, f32); 4] = [(0.6, 14.0 / 60.0), (1.1, 16.0 / 60.0), (1.5, 20.0 / 60.0), (f32::INFINITY, 22.0 / 60.0)];
-/// A control carries you on at your entry speed (up to 8 m/s), dipping to 90% (the control's
-/// speed scale), with no turn, until its blend-out: 30f from a walk (up to 3 m/s), 42f faster. From
-/// 14f the stick within 15 deg of the way you go leaves it.
-pub const CONTROL_CARRY: [(f32, f32); 4] = [(0.0, 1.0), (0.34, 0.9), (0.73, 1.0), (1.0, 1.0)];
-pub const CONTROL_CARRY_MAX: f32 = 8.0;
-pub const CONTROL_V0_SPEED: f32 = 3.0;
-pub const CONTROL_HAND_BACK: (f32, f32) = (30.0 / 60.0, 42.0 / 60.0);
-pub const CONTROL_EXIT_FROM: f32 = 14.0 / 60.0;
-pub const CONTROL_EXIT_ANGLE: f32 = 15.0;
 /// A ball more than this far round behind you (degrees from your facing) is taken on the back
 /// foot, settling there (m ahead, m to its side) instead of in front (the BfromS controls). TUNE.
 pub const CONTROL_BEHIND_ANGLE: f32 = 112.5;
 pub const CONTROL_REAR_SPOT: (f32, f32) = (-0.25, 0.15);
-/// A control taken mid-turn, or with the stick more than this far off the way you move (degrees),
-/// takes the ball out the turn's way (the ippy slide, as Kev knew it before the nerf): the turn
-/// goes on (a quick turn if none was running) and the foot pulls the ball out the new way (this
-/// far, m). TUNE.
-pub const CONTROL_TURN_ANGLE: f32 = 45.0;
+/// Kev's ippy (as before Season 1, which he says was 100% consistent, sprint or not): after your
+/// own push ball, with the stick turned back past IPPY_ANGLE, as soon as you may take the ball
+/// again (within IPPY_WINDOW of the touch), if it is within IPPY_REACH you turn over it (a quick
+/// turn) and take it with the back foot, the foot pulling it out the new way (CONTROL_TURN_SPOT).
+pub const IPPY_ANGLE: f32 = 120.0;
+pub const IPPY_WINDOW: f32 = 1.0;
+pub const IPPY_REACH: f32 = 1.6;
 pub const CONTROL_TURN_SPOT: f32 = 0.45;
 /// Touches come up to 20% more often as your way turns, from 20 to 180 deg/s.
 pub const TOUCH_TURN_RATES: (f32, f32) = (20.0, 180.0);
