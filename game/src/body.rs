@@ -1099,6 +1099,9 @@ pub struct Animator {
     move_w: f32,
     move_mirror: bool,
     move_t: f32,
+    /// A chained move crossfades from the last one's pose.
+    move_prev: Pose,
+    move_fade: f32,
 }
 
 impl Animator {
@@ -1439,11 +1442,16 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         pose = pose.lerp(&clips.stand.lerp(&key, kick_size(kind)), anim.action);
     }
     // Dribbles and dashes on top (the game's move montages): in over 0.05 s (dashes 0.1 s), out over
-    // 0.25 s. A dribble's touch lands on its contact frame; the side is picked as the move starts.
+    // BLEND_OUT from when you get the stick back (the montage's blend-out, not its end), faster
+    // under a kick. A chained move crossfades from the last one over 0.1 s (the feint's blend-in).
+    // A dribble's touch lands on its contact frame and its keys finish by the hand-back; the side is
+    // picked as the move starts.
     let local_dir = |d: Vec3| root.rotation.inverse() * d;
     let mut moving = None;
-    if let Some(d) = p.dribble {
-        if d.t < anim.move_t || anim.move_w <= 0.0 {
+    let mut started = false;
+    if let Some(d) = p.dribble.filter(|d| d.moving()) {
+        started = d.t < anim.move_t || anim.move_w <= 0.0;
+        if started {
             anim.move_mirror = local_dir(d.dir).x < 0.0;
         }
         anim.move_t = d.t;
@@ -1458,7 +1466,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         let u = if d.t < contact {
             contact_at * d.t / contact
         } else {
-            contact_at + (1.0 - contact_at) * ((d.t - contact) / (DRIBBLE_SPEED_TIME - contact).max(0.05)).min(1.0)
+            contact_at + (1.0 - contact_at) * ((d.t - contact) / (d.free() - contact).max(0.05)).min(1.0)
         };
         moving = Some((shot.sample(u), 0.05));
         // The roulette turns you half round over the ball as it rolls past, then back to face on
@@ -1471,7 +1479,8 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             anim.spin = 180.0 * (ease(*contact_at, 0.45) - ease(0.5, 0.85)) * if anim.move_mirror { 1.0 } else { -1.0 };
         }
     } else if let Some(d) = p.dash {
-        if d.t < anim.move_t || anim.move_w <= 0.0 {
+        started = d.t < anim.move_t || anim.move_w <= 0.0;
+        if started {
             anim.move_mirror = local_dir(d.dir).x < 0.0;
         }
         anim.move_t = d.t;
@@ -1482,13 +1491,21 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         };
         moving = Some((shot.sample((d.t / d.free()).min(1.0)), 0.1));
     } else {
-        anim.move_t = 0.0;
+        anim.move_t = f32::INFINITY;
     }
     if let Some((target, blend_in)) = moving {
-        anim.move_pose = if anim.move_mirror { target.mirror() } else { target };
+        if started {
+            anim.move_prev = anim.move_pose;
+            anim.move_fade = if anim.move_w > 0.0 { 0.0 } else { 1.0 };
+        }
+        let target = if anim.move_mirror { target.mirror() } else { target };
+        anim.move_fade = (anim.move_fade + dt / 0.1).min(1.0);
+        let f = anim.move_fade;
+        anim.move_pose = anim.move_prev.lerp(&target, f * f * (3.0 - 2.0 * f));
         anim.move_w = (anim.move_w + dt / blend_in).min(1.0);
     } else {
-        anim.move_w = (anim.move_w - dt / 0.25).max(0.0);
+        let out = if p.kick.is_some() { 0.1 } else { BLEND_OUT };
+        anim.move_w = (anim.move_w - dt / out).max(0.0);
     }
     if anim.move_w > 0.0 {
         let w = anim.move_w;
