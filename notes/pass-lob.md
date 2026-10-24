@@ -30,6 +30,12 @@ What passes and lobs share with shots, and what differs. Force curves, launch an
 - **A tap** gives 20 m/s (pass) and 16 m/s (lob). Full lob: 27 m/s.
 - **No analog fill curve:** a half-pressed trigger charges at full speed.
 
+## Moving while you pass or lob
+- **You keep all of your speed at the press,** in that direction and without steering, through the build-up and after the touch (the pass and lob animations' speed tracks: 100% of the entry velocity, kept to the animation's end).
+- So a pass or lob out of a dribble **drags you on the dribble's way**, like a shot (players confirm). A shot instead shrinks to 75% (50% out of a dribble).
+- Under 2 m/s the animation's own motion plays instead.
+- After the touch the drag lasts to the animation's move interrupt (frames 18 to 63 of its track); steering the same way leaves it earlier.
+
 ## Flight
 | Kick | Friction μ | Drag Cd | Forced spin (spin.y) | Rolls (at speed v) |
 |---|---|---|---|---|
