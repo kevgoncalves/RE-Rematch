@@ -239,6 +239,9 @@ pub struct Actions {
     raw_prev: HashSet<Action>,
     released_at: HashMap<Action, f32>,
     doubled: HashSet<Action>,
+    /// Actions with an input of their chord pressed this frame. Only these count as just pressed,
+    /// so letting go of a longer chord (LT + A) doesn't fire the shorter one it hid (A).
+    fresh: HashSet<Action>,
 }
 
 impl Actions {
@@ -246,7 +249,7 @@ impl Actions {
         self.now.contains(&a)
     }
     pub fn just_pressed(&self, a: Action) -> bool {
-        self.now.contains(&a) && !self.prev.contains(&a)
+        self.now.contains(&a) && !self.prev.contains(&a) && self.fresh.contains(&a)
     }
     /// Held, even while a longer chord containing it wins: lock move (Ctrl) stays on during the
     /// dash chord (Ctrl + C), which is how a dash or dribble from lock move is pressed.
@@ -259,6 +262,7 @@ impl Actions {
     pub fn hold(&mut self, held: &[Action]) {
         self.prev = std::mem::replace(&mut self.now, held.iter().copied().collect());
         self.raw_prev = self.now.clone();
+        self.fresh = self.now.difference(&self.prev).copied().collect();
     }
 }
 
@@ -285,6 +289,16 @@ impl Axes {
 #[derive(Resource, Default)]
 pub struct InputBlocked(pub bool);
 
+/// Pressed this very frame (`modifier`: the modifier's own key was).
+fn pressed_now(input: &Input, modifier: bool, keys: &ButtonInput<KeyCode>, mouse: &ButtonInput<MouseButton>, pads: &Query<&Gamepad>) -> bool {
+    match input {
+        Input::Key(k) => keys.just_pressed(*k),
+        Input::Mouse(m) => mouse.just_pressed(*m),
+        Input::Pad(b) => pads.iter().any(|g| g.just_pressed(*b)),
+        Input::Modifier => modifier,
+    }
+}
+
 fn held(input: &Input, modifier: bool, keys: &ButtonInput<KeyCode>, mouse: &ButtonInput<MouseButton>, pads: &Query<&Gamepad>) -> bool {
     match input {
         Input::Key(k) => keys.pressed(*k),
@@ -310,16 +324,24 @@ pub fn read_input(
     let modifier = [&bindings.keyboard, &bindings.gamepad].iter().any(|chords| {
         chords.get(&Action::Modifier).is_some_and(|c| !c.is_empty() && c.iter().all(|i| held(i, false, &keys, &mouse, &pads)))
     });
+    let modifier_pressed = [&bindings.keyboard, &bindings.gamepad]
+        .iter()
+        .any(|chords| chords.get(&Action::Modifier).is_some_and(|c| c.iter().any(|i| pressed_now(i, false, &keys, &mouse, &pads))));
     let mut raw: Vec<(Action, &Vec<Input>)> = Vec::new();
+    let mut fresh = HashSet::new();
     if !blocked.0 {
         for chords in [&bindings.keyboard, &bindings.gamepad] {
             for (action, chord) in chords {
                 if !chord.is_empty() && chord.iter().all(|i| held(i, modifier, &keys, &mouse, &pads)) {
                     raw.push((*action, chord));
+                    if chord.iter().any(|i| pressed_now(i, modifier_pressed, &keys, &mouse, &pads)) {
+                        fresh.insert(*action);
+                    }
                 }
             }
         }
     }
+    actions.fresh = fresh;
     let mut now: HashSet<Action> = raw
         .iter()
         .filter(|(_, chord)| !raw.iter().any(|(_, other)| other.len() > chord.len() && chord.iter().all(|i| other.contains(i))))

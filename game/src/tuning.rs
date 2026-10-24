@@ -205,7 +205,7 @@ pub const EXTRA_EFFORT_KNOCK_SPEED: f32 = 12.0;
 pub const EXTRA_EFFORT_FRICTION: f32 = 1.5; // override
 /// Those speeds barely beat your own 8.75 m/s, so the ball only got ~0.7 m ahead; players say it
 /// goes much further. A touch now leaves at least this much faster than you (TUNE).
-pub const EXTRA_EFFORT_TOUCH_LEAD: f32 = 6.5;
+pub const EXTRA_EFFORT_TOUCH_LEAD: f32 = 5.0;
 /// Ball centre distance at which the body touches it (capsule 0.35 m + ball).
 pub const EXTRA_EFFORT_KNOCK_REACH: f32 = 0.35 + BALL_RADIUS + 0.05;
 
