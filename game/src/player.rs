@@ -984,7 +984,13 @@ pub fn ball_control(
             let cap = if p.receive_way.is_some() { CONTROL_PULL_SPEED.1 } else { CONTROL_PULL_SPEED.0 } * dt;
             let step = if to.length() < CONTROL_SNAP_NEAR { to } else { (to * (dt / left).min(1.0)).clamp_length_max(cap) };
             let before = btf.translation;
-            btf.translation += Vec3::new(p.vel.x, 0.0, p.vel.z) * dt + step;
+            let mut moved = Vec3::new(p.vel.x, 0.0, p.vel.z) * dt + step;
+            // The ippy's ball keeps its momentum and eases into the pull.
+            if p.receive_way.is_some() {
+                let own = Vec3::new(b.vel.x, 0.0, b.vel.z) * dt;
+                moved = own + (moved - own) * (dt / IPPY_BALL_BLEND).min(1.0);
+            }
+            btf.translation += moved;
             btf.translation.y += (BALL_RADIUS - btf.translation.y) * (dt / left).min(1.0);
             b.vel = (btf.translation - before) / dt.max(1e-4);
             if t >= CONTROL_SNAP {
@@ -1100,9 +1106,10 @@ pub fn ball_control(
         p.receiving = Some(0.0);
         b.spin = Vec3::ZERO;
         p.receive_act = CONTROL_ACT_BY_HEIGHT.iter().find(|(h, _)| btf.translation.y < *h).map_or(22.0 / 60.0, |(_, act)| *act);
-        // A control ends a push ball's chase; you move freely as it settles the ball (Kev: no
-        // carry, no delay).
+        // A control ends a push ball's chase, and a dash almost at once (mechanics.md: 8% in); you
+        // move freely as it settles the ball (Kev: no carry, no delay).
         p.run = None;
+        p.dash = None;
         p.receive_way = None;
     }
 }
@@ -1145,7 +1152,11 @@ fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3
     // Touches go the way you move (a dribble's way while it lasts), a little ahead of you.
     let way = p.dribble.map_or_else(|| Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or(forward(p.facing)), |d| d.dir);
     let predict = |at: f32| {
-        let spot = root + Vec3::new(p.vel.x, 0.0, p.vel.z) * (at - now).max(0.0) + way * ahead;
+        // Your pace, at most your run with the ball (a dribble sets its own): faster, the touch
+        // would send the ball far ahead and you'd run back onto it.
+        let pace = Vec3::new(p.vel.x, 0.0, p.vel.z);
+        let pace = if p.dribble.is_some() { pace } else { pace.clamp_length_max(own) };
+        let spot = root + pace * (at - now).max(0.0) + way * ahead;
         Vec3::new(spot.x, BALL_RADIUS, spot.z)
     };
     let mut c = p.carry.unwrap_or_else(|| {
@@ -1501,7 +1512,11 @@ pub fn charge(kind: Kick, held: f32) -> f32 {
 /// When the foot meets the ball, from the press (ShootDataTable): a shot under 29.41 m/s is the
 /// quicker low-power kick (20 frames, not 32). The ball leaves then or at the release, if later.
 pub fn contact_time(k: &KickState) -> f32 {
-    if k.kind == Kick::Shot && shot_speed(k) < SHOT_HIGH_POWER_SPEED { SHOT_LOW_POWER_CONTACT } else { k.kind.buildup() }
+    match k.kind {
+        Kick::Shot if shot_speed(k) < SHOT_HIGH_POWER_SPEED => SHOT_LOW_POWER_CONTACT - TAP_NETWORK_MARGIN,
+        Kick::Pass | Kick::Lob => k.kind.buildup() - TAP_NETWORK_MARGIN,
+        _ => k.kind.buildup(),
+    }
 }
 
 /// A shot's ball speed: the force curve by seconds held (at least the build-up), plus your run-up

@@ -82,13 +82,13 @@ pub const STOP_DECEL: f32 = 5.0 / 0.38;
 /// instead of dropping to it at once: an extra-effort tap is a little burst (Kev: the pros' mini
 /// dash).
 pub const OVERSPEED_DECEL: f32 = 15.0;
-/// Each extra-effort touch on the ball keeps your own magnet off this long (the game's
-/// BP_NoSelfInteract_ExtraEffort and its 0.5 s no-control for the kicker), so letting go of extra
-/// effort doesn't hand you the ball at once.
-pub const EE_TOUCH_NO_CONTROL: f32 = 0.5;
+/// Each extra-effort touch on the ball keeps your own magnet off this long, so letting go of extra
+/// effort doesn't hand you the ball at once (the game's no-control for the kicker is 0.5 s; Kev
+/// wants the magnet back a little sooner).
+pub const EE_TOUCH_NO_CONTROL: f32 = 0.3;
 /// Letting go of extra effort keeps your magnet off this long too (Kev: the magnet doesn't come
 /// back at once, which the pros use to run over a push ball and take it further on). TUNE.
-pub const EE_END_NO_CONTROL: f32 = 0.4;
+pub const EE_END_NO_CONTROL: f32 = 0.2;
 /// Time to stop from full speed by state (the stop transitions): run, with ball, sprint, sprint with ball.
 pub const STOP_TIME: [f32; 4] = [0.38, 0.7, 0.68, 1.0];
 
@@ -267,6 +267,10 @@ pub const MAX_HOLD: f32 = 1.0;
 pub const SHOT_BUILDUP: f32 = 32.0 / 60.0;
 pub const PASS_BUILDUP: f32 = 24.0 / 60.0;
 pub const LOB_BUILDUP: f32 = 24.0 / 60.0;
+/// A tapped kick leaves this much before its animation's contact frame: the game takes its
+/// network margins (0.12 + 0.03 s) off the build-up (mechanics.md §4), and Kev finds taps slower
+/// than the game's without them. A tapped pass or lob leaves at 15f, a tapped shot at 11f.
+pub const TAP_NETWORK_MARGIN: f32 = 0.15;
 pub const WINDUP_SPEED_SCALE: f32 = 0.5; // TUNE: how much you slow down winding up a pass or lob
 /// A shot keeps your run-up: through the build-up you slide on in the same direction at a share
 /// of your speed at the press that shrinks to this (HighPowerBeforeShootScaleSpeedData)...
@@ -507,6 +511,9 @@ pub const CONTROL_SNAP_NEAR: f32 = 0.1;
 /// round a little faster), so a ball taken from the edge of the magnet glides in instead of
 /// jumping (Kev: the ball moved too fast all of a sudden).
 pub const CONTROL_PULL_SPEED: (f32, f32) = (5.0, 9.0);
+/// In the ippy the ball keeps its own momentum and eases into the pull over this long (s), instead
+/// of taking your velocity at once (Kev: it looked like a teleport).
+pub const IPPY_BALL_BLEND: f32 = 0.1;
 /// The ball you carry never moves faster than this against you (m/s), kicks aside: a sudden
 /// change of way, the stance's sole or a touch glides it there instead of jumping it.
 pub const CARRY_MAX_REL_SPEED: f32 = 6.0;
