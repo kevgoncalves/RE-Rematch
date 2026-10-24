@@ -203,6 +203,18 @@ impl Turn {
 
 /// Starts a turn toward `dir` (turns.md §2). Entering slower than top speed, the game treats you
 /// as at top speed and starts the brake where its curve gives your speed, at most 20% in.
+/// When a move hands control back (a dash, a pass's drag, a shot's follow-through) with the stick
+/// against the way you're going, you turn as from a run: brake to the pivot and re-accelerate,
+/// instead of arcing round (players confirm a smooth change of way after a dash).
+fn hand_back(p: &mut Player, dir_now: Vec3, walking: bool, top: f32) {
+    if p.locked || dir_now == Vec3::ZERO {
+        return;
+    }
+    if let Some(big) = turn_band(p.vel.angle_between(dir_now).to_degrees(), p.has_ball, walking) {
+        p.turn = Some(start_turn(p, dir_now, big, p.vel.length(), top));
+    }
+}
+
 /// How fast your body turns to face your heading, deg/s (the speed tables' rotation rates): without
 /// the ball 600, 400 at full stick, 360 sprinting; with it 720 barely tilting the stick, else 360,
 /// 180 sprinting; in extra effort 600, 450 at full stick.
@@ -646,6 +658,9 @@ pub fn player_move(
         // sharper turn it runs on to the blend-out (responsiveness.md §5).
         let exit = r.t >= r.free_at && wish != Vec3::ZERO && r.dir.angle_between(wish).to_degrees() <= RUN_TURN_LIMIT;
         p.run = (r.t < r.length && !exit).then_some(r);
+        if p.run.is_none() {
+            hand_back(p, dir_now, walking, top);
+        }
     } else if let Some(k) = p.kick.filter(|k| k.kind.is_pass() && Vec3::new(k.entry.x, 0.0, k.entry.z).length() > PASS_DRAG_MIN_SPEED) {
         // A pass or lob drags you on at your speed at the press, that way, with no steering
         // (players confirm: a pass out of a dribble carries you like a shot).
@@ -681,13 +696,8 @@ pub fn player_move(
             && wish.angle_between(d.dir).to_degrees() <= DASH_EXIT_ANGLE
             && forward(p.facing).angle_between(d.dir).to_degrees() <= DASH_EXIT_ANGLE;
         p.dash = (d.t < d.free() && !(d.t >= exit_from && keeps_way)).then_some(d);
-        // Handed back with the stick against the way you're going, you turn as from a run: brake
-        // to the pivot and re-accelerate (players confirm a smooth change of side after a dash).
-        if p.dash.is_none()
-            && !p.locked
-            && let Some(big) = turn_band(p.vel.angle_between(dir_now).to_degrees(), p.has_ball, walking).filter(|_| dir_now != Vec3::ZERO)
-        {
-            p.turn = Some(start_turn(p, dir_now, big, p.vel.length(), top));
+        if p.dash.is_none() {
+            hand_back(p, dir_now, walking, top);
         }
     } else if p.locked {
         // Lock move (mechanics.md §2): face the camera, strafe, slower going backwards.
