@@ -75,14 +75,16 @@ This is a hidden detail.
 
 ## 2. Movement speeds
 
+Top speeds come from the character's locomotion attributes (DefaultCharacterLocomotionAttributeTable). The speed tables read those attributes, not their own fallback numbers, which is where older figures here came from; the out-of-stamina effect overrides the same attributes with the tired speeds.
+
 | Situation | Top speed | km/h | Acceleration |
 |---|---|---|---|
 | Walk | 2.5 m/s | 9 | |
 | Run (stick fully pushed) | **5 m/s** | 18 | 18 m/s² (0 to 5 m/s in ~0.3 s) |
-| **Sprint** | **8.75 m/s** | **31.5** | |
+| **Sprint** | **8.0 m/s** | **28.8** | |
 | Run with ball | 4.5 m/s | 16 | |
 | **Sprint with ball** | **6.5 m/s** | **23.4** | |
-| Extra effort | 8.75 m/s | 31.5 | **100 m/s² (instant)** |
+| Extra effort | **9.5 m/s** | 34.2 | **100 m/s² (instant)** |
 | Sweeper extra effort | **11.5 m/s** | 41 | |
 
 ### Turning
@@ -129,12 +131,15 @@ What this means in practice:
 - Some transitions can be cut short by a new input: a start or stop after 30% of it, a 180° after 60% (40% in a sprint), a 90° after 80% (unconfirmed meaning).
 
 ### Lock move (strafing: facing one way, moving another)
+- **Stance** (lock move with the ball) lasts at least **0.15 s** from the press: the release is only checked then.
+- **Losing the ball ends lock move at once**; it needs a fresh press to come back.
+- **No sprint and no extra effort in lock move** (its layers remove both).
 - **Leaving lock move keeps your velocity:** if you were backing off, the body turns round to face the way you move while you keep moving back (the leave-lock-move transitions rotate the body, not the velocity). Spamming stance while backing off never drags you sideways.
 
 | Who | Slow | Full | Turn rate |
 |---|---|---|---|
-| Outfield | 1 m/s | 4 m/s | 400°/s |
-| Outfield with ball | 1.75 m/s | 3.5 m/s | |
+| Outfield | 2 m/s | **5.25 m/s** | 400°/s |
+| Outfield with ball | 1.75 m/s | **4 m/s** | 400°/s (inherited) |
 | **Goalkeeper** | 2 m/s | **5 m/s** | **900°/s** |
 
 Players find the outfield turn to face the front in lock move much quicker than 400°/s; the table has no value with the ball.
@@ -203,7 +208,7 @@ Players say a quick tap goes off much sooner than the build-up, so the build-up 
 
 | Kick | Build-up (earliest ball contact) |
 |---|---|
-| Shot | **0.53 s** |
+| Shot | **0.53 s** (power shot; a shot under 29.41 m/s is the low-power kick, struck at **0.33 s**) |
 | Pass | 0.4 s |
 | Lob | 0.4 s |
 
@@ -231,6 +236,15 @@ A shot keeps your run-up instead of stopping you:
 - **After the touch** that speed is kept until the move ends.
 - Passes keep 100% of your speed after the touch (below 2 m/s they use a fixed speed).
 - **Running adds shot speed:** +1.25 m/s at 6 m/s, **+4 m/s at 9.5 m/s**.
+
+### Launch angle, roll and spin by kick
+- **Quick shots are a different kick.** A shot whose final speed (run-up bonus included) is under **29.41 m/s** uses the low-power kick, struck at **20 frames** (0.33 s) with a 3-frame freeze; stronger shots use the power kick at 32 frames with a 5-frame freeze. Every quick release is under 29.41 m/s, which is why taps go off before the 0.53 s build-up.
+- **The run-up bonus** to shot speed (+1.25 m/s at 6 m/s, +4 m/s at 9.5 m/s) only counts for stronger shots: none up to 27.85 m/s, all of it from 38 m/s.
+- **Passes leave flat.** Holding past the 0.6 s sweet spot lifts them by 3.9°, rising to 6° at 1 s. Low-power passes stay flat.
+- **Lobs leave at 44°**, flattening to **30.26°** as you hold to 1 s (longer lobs are flatter and faster). The low-power lob leaves at **52°**.
+- **Roll:** players' passes use a friction override of **1.2** (0.3 belongs to the bots' pass); low-power passes 1.5× the base.
+- **Forced spin:** shots 210 and passes 200 one way, lobs 300 and low-power lobs 420 the other way.
+- **Curve input to spin:** side ±350 at 0.5, ±650 at 0.9, ±825 at full (dead zone 0.1); pulling back +330/+660/+780, pushing up −40/−80/−120. Scaled by charge: side ×1.02 → ×0.8, top ×0.95 → ×0.85 from a tap to full power.
 
 ### Fixed-force kicks
 These ignore how long you hold:
@@ -330,7 +344,20 @@ The game has two kinds of reception. Their timing:
 | Chest | 0.2 s | 0.33 s | 0.083 s | 0.22 s |
 | Head | 0.2 s | **0.37 s** | 0.083 s | 0.25 s |
 
-When each kind triggers is unconfirmed. Instant controls also exist mid-dash.
+"Instant" control is a match option (off in normal play), so the magnet timings are the normal ones. Instant controls also exist mid-dash.
+
+**Control zones** (the character's control hitboxes, centred at pitch level, metres ahead of you; the ball's hit sphere is 0.12 m):
+
+| When | Zone |
+|---|---|
+| Standing (up to **2.5 m/s**) | capsule r **0.50**, reaching 1.85 m, 0.10 ahead; plus a ground sphere r **0.83**, 0.10 ahead |
+| Moving (above 2.5 m/s, or starting/turning) | capsule r **0.90**, reaching ~1.84 m, 0.30 ahead |
+| Running forward | a ground capsule r 0.60 that also takes a ball rolling **away** from you |
+| Lock move, no ball | capsule r **0.675**, from **any** direction |
+
+- The normal zones **refuse a ball heading away from you**: the angle between you-to-ball and the ball's velocity must be over 75°.
+- During a control you can only move, sprint, lock move, use extra effort and turn the camera; the ball becomes yours at **12 frames** and the rest opens at the control's action frame (14–22 frames by animation).
+- **You can't control your own kick for 0.5 s** after any kick (the "lost ball" effect), and most kicks stop anyone controlling them for 0.5 s (push balls 0.3 s for others).
 
 ### First-time volley pass (volley tap)
 | Contact | Ball leaves | Can act |
