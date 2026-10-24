@@ -432,6 +432,15 @@ pub fn player_move(
             wish.normalize() * top * input.length() * curve(by_angle, angle)
         };
         p.vel = p.vel.move_towards(target, if target == Vec3::ZERO { STOP_DECEL } else { accel } * dt);
+    } else if p.extra_active && wish != Vec3::ZERO {
+        // Extra effort accelerates almost instantly, so it changes direction by acceleration rather
+        // than by turning: much snappier than a sprint (players confirm). The body follows.
+        let target = wish.normalize() * top * input.length();
+        p.vel = p.vel.move_towards(target, accel * dt);
+        let yaw = (-p.vel.x).atan2(-p.vel.z);
+        let diff = (yaw - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        let max_turn = turn.to_radians() * dt;
+        p.facing += diff.clamp(-max_turn, max_turn);
     } else if wish != Vec3::ZERO {
         let target = (-wish.x).atan2(-wish.z);
         let diff = (target - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
@@ -467,12 +476,14 @@ pub fn ball_control(mut player: Single<(&Transform, &mut Player), Without<Ball>>
     let radius = if moving { CONTROL_RADIUS_MOVING } else { CONTROL_RADIUS_STANDING } + BALL_RADIUS;
     let in_reach = b.no_control <= 0.0 && flat.length() < radius && btf.translation.y < CONTROL_MAX_HEIGHT;
     if p.extra_active {
-        // Extra effort can't control the ball: running into it knocks it on ahead.
-        let ahead = forward(p.facing);
-        let catching_up = b.vel.dot(ahead) < Vec3::new(p.vel.x, 0.0, p.vel.z).length();
+        // Extra effort can't control the ball: running into it taps it on the way you're running,
+        // from any side, so turning on the ball takes it with you (players confirm).
+        let moving = Vec3::new(p.vel.x, 0.0, p.vel.z);
+        let dir = if moving.length() > 0.5 { moving.normalize() } else { forward(p.facing) };
         let touching = flat.length() < EXTRA_EFFORT_KNOCK_REACH && btf.translation.y < CONTROL_MAX_HEIGHT;
-        if b.no_control <= 0.0 && touching && Vec3::new(flat.x, 0.0, flat.y).dot(ahead) > 0.0 && catching_up {
-            b.vel = ahead * EXTRA_EFFORT_KNOCK_SPEED + Vec3::Y * b.vel.y.max(0.0);
+        if b.no_control <= 0.0 && touching && b.vel.dot(dir) < moving.length() {
+            let speed = EXTRA_EFFORT_KNOCK_SPEED.max(moving.length() + EXTRA_EFFORT_TOUCH_LEAD);
+            b.vel = dir * speed + Vec3::Y * b.vel.y.max(0.0);
             b.friction = EXTRA_EFFORT_FRICTION;
         }
         return;
@@ -582,7 +593,12 @@ pub fn kicking(
         Kick::ShortPass => (SHORT_PASS_SPEED, PASS_ELEVATION, SHORT_PASS_FRICTION, NO_RECONTROL_TIME),
         Kick::Lob => (curve(&LOB_FORCE, t), LOB_ELEVATION, SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::ShortLob => (SHORT_LOB_SPEED, LOB_ELEVATION, SHOT_FRICTION, NO_RECONTROL_TIME),
-        Kick::PushBall if p.extra_active => (EXTRA_EFFORT_TAP_SPEED, 0.0, EXTRA_EFFORT_FRICTION, PUSH_BALL_NO_CONTROL_EXTRA_EFFORT),
+        Kick::PushBall if p.extra_active => (
+            EXTRA_EFFORT_TAP_SPEED.max(Vec3::new(p.vel.x, 0.0, p.vel.z).length() + EXTRA_EFFORT_TOUCH_LEAD),
+            0.0,
+            EXTRA_EFFORT_FRICTION,
+            PUSH_BALL_NO_CONTROL_EXTRA_EFFORT,
+        ),
         // Tired push balls ignore sprinting and pop up a little.
         Kick::PushBall if p.exhausted => (EXHAUSTED_PUSH_BALL_SPEED * push_factor, EXHAUSTED_PUSH_BALL_LIFT, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
         Kick::DribblePushBall if p.exhausted => (EXHAUSTED_PUSH_BALL_SPEED, EXHAUSTED_PUSH_BALL_LIFT, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
