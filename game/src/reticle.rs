@@ -48,6 +48,8 @@ pub struct Reticle;
 #[derive(Default)]
 pub struct ReticleAnim {
     aim: f32,
+    /// A shot started: play the aim-in to the end even if the button was only tapped.
+    aim_latched: bool,
     defense: f32,
     force_shown: f32,
     force: f32,
@@ -111,7 +113,16 @@ pub fn update_reticle(
         anim.force = power(k.kind, k.held).max(MIN_FORCE_FILL);
         anim.curve = axes.curve.clamp_length_max(1.0);
     }
-    let on = shot.is_some();
+    // Aiming lasts the whole shot, until the ball leaves, and the aim-in always plays to the end
+    // (as the game's widget animations do), so a tapped shot still shows.
+    let shooting = player.kick.is_some_and(|k| k.kind == Kick::Shot);
+    if shooting {
+        anim.aim_latched = true;
+    }
+    if anim.aim >= 1.0 {
+        anim.aim_latched = false;
+    }
+    let on = shooting || anim.aim_latched;
     step(&mut anim.aim, on, AIM_IN, AIM_OUT, dt);
     step(&mut anim.force_shown, on, FORCE_IN, FORCE_OUT, dt);
     step(&mut anim.defense, player.locked, DEFENSE, DEFENSE, dt);
