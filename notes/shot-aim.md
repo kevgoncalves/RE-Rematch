@@ -56,21 +56,49 @@ Linear between keys and flat outside them.
 The spin computation gives a spin vector in the flight frame (see ball-flight.md): spin.z curves right, spin.y dips.
 
 1. **Input (x, y).**
-   - **Gamepad:** the left stick.
-     - A tolerance angle of 15° and a dead zone of 0.2 apply (class defaults).
+   - **Gamepad:** the left stick, with a dead zone of 0.2 (class default). The tolerance angle is 0 (set in the Blueprint).
    - **Mouse:** an accumulator.
-     - Each update adds input × **0.2** × the "Magnus sensitivity" option.
-     - The total is clamped to a **circle of radius 1**, so diagonals don't reach 1 on both axes.
-     - It is kept on the shot's own data, so it starts at zero for each shot (assumed).
-     - Both input setups also have a "swap axis" flag set. The raw order of the mouse action's vector was not traced, so the net effect is unconfirmed.
+     - **What it reads:** the "Magnus" input has two axis slots: MagnusHorizontal is MouseX and MagnusVertical is MouseY, both with scale 1.0 (keyboard presets).
+       - These are engine mouse axes. Their value is the frame's mouse movement in pixels times the engine's mouse axis sensitivity, 0.07 by default (the game's input config was not read).
+       - Mouse up is positive Y, so pulling the mouse down (toward you) gives negative y, which is the dip.
+     - **Swap axis:** the "swap axis" flag swaps the vector built from the slots back into (horizontal, vertical). Net effect: **horizontal mouse → curve, vertical mouse → dip/lift**.
+     - **Accumulation:** each update adds the input × **0.2** × the "Magnus sensitivity" option. The option's default was not found; assumed 1.0.
+       - At 1.0 a full curve takes about **71 pixels** of mouse movement (1 ÷ (0.07 × 0.2)).
+     - **Clamp:** the total is clamped to a **circle of radius 1** (as a 2D length, not each axis), so full curve and full dip together give about 0.71 on each axis.
+     - **Start:** it is kept on the shot's own data, so it starts at zero for each shot.
 2. **Inversion:** the invert X and invert Y options negate x or y.
 3. **Spin:**
    - **spin.z = SpinningRotationByXStickAxis(x):** 0 within ±0.1, ±350 at 0.5, ±650 at 0.9, ±825 at 1. Positive curves right.
    - **spin.y = SpinningRotationByYStickAxis(y):** pulling down gives +330 at −0.5, +660 at −0.9, **+780** at −1 (dip). Pushing up gives −40, −80, **−120** at 1 (lift). Dead between −0.1 and 0.2.
-4. **Charge scaling:** a ratio of time held ÷ the force curve's last key scales each axis:
+4. **Charge scaling:** a ratio scales each axis:
    - side (spin.z): **1.02 → 0.8**;
    - vertical (spin.y): **0.95 → 0.85**, from a tap to a full charge.
+
+   - **The ratio comes from time, not force or speed.** The modifiers' source is "max time from shoot force curve": the shot's input time ÷ the force curve's last key (1.0 s), capped at 1.
+   - The input time is the same one the force uses, held at least the build-up (the shot's force source clamps with the build-up duration). So a tap counts as 0.53.
+   - The "DependingForce" in the curve names is misleading.
 5. **Built-in spin:** the shot's own Magnus modifier then adds its forced spin once at launch, spin.y −= 210. That is a small **lift** on every shot.
+
+## Units and timing
+- **No unit conversion anywhere on the way.** The curve values (825, 780, …), scaled by charge, are stored unchanged as the shot's rotation velocity. The flight copies them as its starting spin, and the Magnus force multiplies them by 0.0007986 × speed (ball-flight.md). They are not degrees, radians or rpm; only that product matters.
+- **When the spin is read:** the spin is recomputed on every update while the shot charges (the accumulator keeps adding).
+  - Once the shot's data is synced (after the release), the computation returns the cached value instead.
+  - The ball takes that value when the shot is built at contact.
+  - The exact sync moment is the shot sync task's (not traced further).
+
+## Prototype check (game/prototype b74e576)
+Everything above matches the prototype except:
+
+| # | Prototype | Game | In play |
+|---|---|---|---|
+| 1 | The mouse curve is clamped per axis (a square) | Clamped to a circle of radius 1 | **Curve and dip together are too strong in the prototype**: up to 825 side + 780 dip, where the game gives about 505 + 500. Pure curve or pure dip are the same |
+| 2 | Stick and mouse are added together; no stick dead zone | One device's computation; stick dead zone 0.2 | Gamepad only: small stick tilts curve a little in the prototype |
+
+Matching:
+- the spin curves, the charge ratio (with the build-up floor), the shot's built-in lift, the units;
+- the Magnus constant, the fade and the flight frame;
+- the dip launch correction and the 3° yaw offset;
+- the mouse scale (0.07 × 0.2 per pixel, assuming the option is 1.0 and the engine's default mouse sensitivity).
 
 ## Constants
 | Name | Value | Source |
@@ -88,7 +116,10 @@ The spin computation gives a spin vector in the flight frame (see ball-flight.md
 
 ## Open questions
 1. Is the 2° pitch cap in effect? If raising the camera makes shots fly higher in Rematch, it is not.
-2. The mouse input's raw scale and axis order before the accumulator (the custom input mapping wasn't traced). The prototype uses 0.07 per pixel.
+2. The Magnus sensitivity option's default, and the value Kev plays with: it scales the mouse curve directly (at 2.0 a full curve takes 36 pixels instead of 71).
+3. The engine mouse axis sensitivity, assumed to be the default 0.07 per pixel (the game's input config wasn't read).
+4. Whether the accumulator is fed more than once per frame (it adds on every call). If two systems ask for the spin each frame, the effective mouse sensitivity would double.
+5. The camera's default pitch and range decide every shot's height through the launch angle curve. They belong to the camera notes.
 
 ## Sources
 **Native code** (Rematch build of 2026-10-24):
@@ -99,8 +130,13 @@ The spin computation gives a spin vector in the flight frame (see ball-flight.md
 | `FUN_145312700` | the 150 m trace |
 | `FUN_1453161f0` | launch angle: curve, dip correction, range clamp |
 | `FUN_14530ba80` | yaw offset |
-| `FUN_14531aa80` | mouse accumulator |
-| `FUN_145316870` | input to spin, inversion and charge scaling |
+| `FUN_14531aa80` (`InputShootRotationForceComputation` vf89) | mouse accumulator |
+| `FUN_145316870` (vf90) | input to spin, inversion, charge scaling, freeze after the sync |
+| `FUN_145313fd0` (vf92) | whether the curve input is taken this update |
+| `FUN_14531fbc0` (vf91) | spin as a share of the curves' range (for the crosshair) |
+| `ShootModifierComputationData` vf89 (`FUN_145321f90`) | the modifier ratio by source: force, time, max time from the force curve, … |
+| `FUN_14530eec0` | builds the shot: force × direction, spin into `ShootParams.m_vRotationVelocity` |
+| `FUN_145372ea0` | the flight copies that spin as its starting spin |
 | `FUN_1452de6a0`, `FUN_1452e7370` | constructors (defaults) |
 
 **Data:** GA_Shoot, BP_ShootAbilityData, BP_MK_ and BP_Gamepad_CameraDirectionComputation, BP_MK_ and BP_Gamepad_InputRotationForceComputation, and the curves listed above.

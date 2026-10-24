@@ -67,6 +67,7 @@ The ball's physics component carries these four, all with weight 1:
   - The dip/lift part then pushes along the path: dip spin brakes a rolling ball, lift spin pushes it on.
   - The side part keeps curving the ball.
 - **Coefficient:** M is the modifier's default force, 1.0, times the constant above. Kicks don't change it.
+- **Units of spin:** none to convert. The kick's spin values (the input curves, e.g. ±825, already charge-scaled) are stored unchanged in the shot (`ShootParams.m_vRotationVelocity`). The flight copies them as its starting spin, and the formula above uses them as they are. Checked end to end in shot-aim.md "Units and timing".
 - **Spin fades:** each step spin loses rate × dt, with rate = A ÷ B from the flying (or rolling) pair. Both pairs default to (1, 1), so spin fades at **1 per second**, flying or rolling.
 - **Forced spin.** A kick's Magnus modifier can add a fixed spin once, when the flight starts (after an optional delay, and only on the right bounce number).
   - It **subtracts** the file's Y value from spin.y and adds its X value to spin.z.
