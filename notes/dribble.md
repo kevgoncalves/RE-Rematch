@@ -68,6 +68,7 @@ The roulette covers about the same ground as the fast cut (average 4.8 against 4
   | Back | ×0.79 (9.1 m/s) |
 
 - **Sprinting** switches in a stronger force. The factor isn't in the exported files. Walking and jogging with the ball give **the same** push ball; only sprinting changes it.
+- **Sprinting means holding the sprint button**, even standing still: players confirm that a push ball with sprint held is a sprint push ball, and that standing still with sprint held costs no stamina.
 - **Tired:** 11.25 m/s, pops up 13°, sprint ignored.
 - **Timing:** ball touched at **8f**; free to act at **23f**. After that you can only steer out of the move within 30° of it until it ends (about 55f).
 - **You chase the ball** on a set speed after the touch:
