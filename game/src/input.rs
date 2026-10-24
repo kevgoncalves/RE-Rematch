@@ -18,6 +18,8 @@ pub enum Input {
     Key(KeyCode),
     Mouse(MouseButton),
     Pad(GamepadButton),
+    /// Whatever the Modifier action is bound to, so "Modifier + Pass" follows a rebind of the modifier.
+    Modifier,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Debug)]
@@ -43,10 +45,12 @@ pub enum Action {
     Dash,
     Dive,
     Ping,
+    Modifier,
 }
 
 impl Action {
-    pub const ALL: [Action; 21] = [
+    pub const ALL: [Action; 22] = [
+        Action::Modifier,
         Action::MoveForward,
         Action::MoveBack,
         Action::MoveLeft,
@@ -206,11 +210,12 @@ impl Axes {
 #[derive(Resource, Default)]
 pub struct InputBlocked(pub bool);
 
-fn held(input: &Input, keys: &ButtonInput<KeyCode>, mouse: &ButtonInput<MouseButton>, pads: &Query<&Gamepad>) -> bool {
+fn held(input: &Input, modifier: bool, keys: &ButtonInput<KeyCode>, mouse: &ButtonInput<MouseButton>, pads: &Query<&Gamepad>) -> bool {
     match input {
         Input::Key(k) => keys.pressed(*k),
         Input::Mouse(m) => mouse.pressed(*m),
         Input::Pad(b) => pads.iter().any(|g| g.pressed(*b)),
+        Input::Modifier => modifier,
     }
 }
 
@@ -227,11 +232,14 @@ pub fn read_input(
     mut axes: ResMut<Axes>,
 ) {
     let t = time.elapsed_secs();
+    let modifier = [&bindings.keyboard, &bindings.gamepad].iter().any(|chords| {
+        chords.get(&Action::Modifier).is_some_and(|c| !c.is_empty() && c.iter().all(|i| held(i, false, &keys, &mouse, &pads)))
+    });
     let mut raw: Vec<(Action, &Vec<Input>)> = Vec::new();
     if !blocked.0 {
         for chords in [&bindings.keyboard, &bindings.gamepad] {
             for (action, chord) in chords {
-                if !chord.is_empty() && chord.iter().all(|i| held(i, &keys, &mouse, &pads)) {
+                if !chord.is_empty() && chord.iter().all(|i| held(i, modifier, &keys, &mouse, &pads)) {
                     raw.push((*action, chord));
                 }
             }
@@ -320,6 +328,7 @@ pub fn input_name(input: &Input) -> String {
             GamepadButton::RightThumb => "R3".into(),
             other => format!("{other:?}"),
         },
+        Input::Modifier => "Modifier".into(),
     }
 }
 

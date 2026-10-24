@@ -4,12 +4,13 @@ mod ball;
 mod input;
 mod menu;
 mod player;
+mod reticle;
 mod tuning;
 
 use bevy::prelude::*;
 
 use ball::{Ball, GoalScored};
-use input::{Action, Actions, Axes, Bindings, InputBlocked, chord_name};
+use input::{Actions, Axes, Bindings, InputBlocked};
 use player::{CameraRig, Kick, Player};
 use tuning::*;
 
@@ -21,10 +22,12 @@ struct Hud;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window { title: "RE Rematch (prototype)".into(), ..default() }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin { primary_window: Some(Window { title: "RE Rematch (prototype)".into(), ..default() }), ..default() })
+                // The Vulkan loader logs stale overlay layers some launchers leave registered; harmless noise.
+                .set(bevy::log::LogPlugin { filter: "wgpu=error,naga=warn,wgpu_hal::vulkan::instance=off".into(), ..default() }),
+        )
         .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)))
         .init_resource::<Score>()
         .insert_resource(Bindings::load())
@@ -33,7 +36,7 @@ fn main() {
         .init_resource::<InputBlocked>()
         .init_resource::<menu::Menu>()
         .add_event::<GoalScored>()
-        .add_systems(Startup, (setup, menu::spawn_menu))
+        .add_systems(Startup, (setup, menu::spawn_menu, reticle::spawn_reticle))
         .add_systems(
             Update,
             (
@@ -52,6 +55,7 @@ fn main() {
                 on_goal,
                 player::camera_follow,
                 update_hud,
+                reticle::update_reticle,
             )
                 .chain(),
         )
@@ -186,7 +190,6 @@ fn update_hud(
     ball: Single<&Ball>,
     score: Res<Score>,
     axes: Res<Axes>,
-    bindings: Res<Bindings>,
 ) {
     let p = *player;
     let charge = match p.kick {
@@ -202,12 +205,8 @@ fn update_hud(
         }
         _ => "-".into(),
     };
-    let key = |a: Action| chord_name(bindings.keyboard.get(&a));
     hud.0 = format!(
-        "Score  {} - {}\nStamina {:4.1}/10{}   Extra effort {:3.0}%{}\nSpeed {:4.1} m/s{}\nCharge {}\nBall {:4.1} m/s\n\n\
-         F1 controls (rebind)   Click to capture mouse, Esc to release\n\
-         Shot {}  Pass {}  Lob {}  Push ball {}  Sprint {}\n\
-         Shot direction locks when you start charging; move the mouse while charging to curve it.",
+        "Score  {} - {}\nStamina {:4.1}/10{}   Extra effort {:3.0}%{}\nSpeed {:4.1} m/s{}\nCharge {}\nBall {:4.1} m/s\n\nF1 Controls",
         score.0[0],
         score.0[1],
         p.stamina,
@@ -223,10 +222,5 @@ fn update_hud(
         },
         charge,
         ball.vel.length(),
-        key(Action::Shoot),
-        key(Action::Pass),
-        key(Action::Lob),
-        key(Action::PushBall),
-        key(Action::Sprint),
     );
 }

@@ -156,9 +156,20 @@ pub fn capture_binding(
         Input::Key(k) => keys.pressed(*k),
         Input::Mouse(m) => mouse.pressed(*m),
         Input::Pad(b) => pads.iter().any(|g| g.pressed(*b)),
+        Input::Modifier => false,
     });
     if !chord.is_empty() && !still_held {
-        let (action, device, chord) = (*action, *device, chord.clone());
+        let (action, device, mut chord) = (*action, *device, chord.clone());
+        // Pressing the modifier's key inside another binding stores "Modifier", not the raw key.
+        let modifier_key = match bindings.get_mut(device).get(&Action::Modifier).map(Vec::as_slice) {
+            Some([single]) => Some(*single),
+            _ => None,
+        };
+        if action != Action::Modifier
+            && let Some(m) = modifier_key
+        {
+            chord.iter_mut().filter(|i| **i == m).for_each(|i| *i = Input::Modifier);
+        }
         bindings.get_mut(device).insert(action, chord);
         bindings.save();
         menu.capturing = None;

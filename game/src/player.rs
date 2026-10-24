@@ -321,8 +321,9 @@ pub fn kicking(
         return;
     }
 
-    // Lock move can't shoot, pass or push the ball, and nor can a dash (frame-data.md).
-    if p.has_ball && p.kick.is_none() && !p.locked && p.dash.is_none() {
+    // No kicks during a dash (frame-data.md). Lock move (defence stance) can shoot: the game's
+    // lock-move layer forbids it in the files, but players confirm you can shoot from stance.
+    if p.has_ball && p.kick.is_none() && p.dash.is_none() {
         let charged = [(Action::Shoot, Kick::Shot), (Action::Pass, Kick::Pass), (Action::Lob, Kick::Lob)];
         let instant = [(Action::LowPowerPass, Kick::ShortPass), (Action::LowPowerLob, Kick::ShortLob), (Action::PushBall, Kick::PushBall)];
         let pressed = instant.into_iter().chain(charged).find(|(a, _)| actions.just_pressed(*a));
