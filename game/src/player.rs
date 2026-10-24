@@ -517,20 +517,24 @@ pub fn ball_control(mut player: Single<(&Transform, &mut Player), Without<Ball>>
             && btf.translation.y < CONTROL_MAX_HEIGHT
         {
             let turn = if b.vel.length() > 0.5 { b.vel.angle_between(dir).to_degrees() } else { 0.0 };
-            let force = EXTRA_EFFORT_KNOCK_SPEED.max(speed + EXTRA_EFFORT_TOUCH_LEAD) * curve(&EXTRA_EFFORT_TURN_FORCE, turn);
+            let force = EXTRA_EFFORT_KNOCK_SPEED * curve(&EXTRA_EFFORT_TURN_FORCE, turn);
             b.vel = dir * force + Vec3::Y * b.vel.y.max(0.0);
             b.friction = EXTRA_EFFORT_FRICTION;
             p.extra_cut = None;
             return;
         }
-        // Extra effort can't control the ball: running into it taps it on the way you're running,
-        // from any side, so turning on the ball takes it with you (players confirm).
+        // Extra effort can't control the ball. Running into it taps it on the way you're running,
+        // and changing direction with it at your feet cuts it the new way, weaker on a sharp turn
+        // (players confirm; three cuts per full gauge).
         let moving = Vec3::new(p.vel.x, 0.0, p.vel.z);
         let dir = if moving.length() > 0.5 { moving.normalize() } else { forward(p.facing) };
-        let touching = flat.length() < EXTRA_EFFORT_KNOCK_REACH && btf.translation.y < CONTROL_MAX_HEIGHT;
-        if b.no_control <= 0.0 && touching && b.vel.dot(dir) < moving.length() {
-            let speed = EXTRA_EFFORT_KNOCK_SPEED.max(moving.length() + EXTRA_EFFORT_TOUCH_LEAD);
-            b.vel = dir * speed + Vec3::Y * b.vel.y.max(0.0);
+        let low = btf.translation.y < CONTROL_MAX_HEIGHT && b.no_control <= 0.0;
+        let ball_flat = Vec3::new(b.vel.x, 0.0, b.vel.z);
+        let turn = if ball_flat.length() > 0.5 { ball_flat.angle_between(dir).to_degrees() } else { 0.0 };
+        let cut = low && flat.length() < EXTRA_EFFORT_CUT_REACH && turn > EXTRA_EFFORT_CUT_ANGLE;
+        let knock = low && flat.length() < EXTRA_EFFORT_KNOCK_REACH && b.vel.dot(dir) < moving.length();
+        if cut || knock {
+            b.vel = dir * EXTRA_EFFORT_KNOCK_SPEED * curve(&EXTRA_EFFORT_TURN_FORCE, turn) + Vec3::Y * b.vel.y.max(0.0);
             b.friction = EXTRA_EFFORT_FRICTION;
         }
         return;
@@ -652,7 +656,7 @@ pub fn kicking(
         Kick::Lob => (curve(&LOB_FORCE, t), LOB_ELEVATION, SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::ShortLob => (SHORT_LOB_SPEED, LOB_ELEVATION, SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::PushBall if p.extra_active => (
-            EXTRA_EFFORT_TAP_SPEED.max(Vec3::new(p.vel.x, 0.0, p.vel.z).length() + EXTRA_EFFORT_TOUCH_LEAD),
+            EXTRA_EFFORT_TAP_SPEED,
             0.0,
             EXTRA_EFFORT_FRICTION,
             PUSH_BALL_NO_CONTROL_EXTRA_EFFORT,

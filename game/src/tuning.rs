@@ -218,14 +218,15 @@ pub const TURN_RATE_EXTRA_EFFORT: f32 = 150.0;
 pub const EXTRA_EFFORT_TAP_SPEED: f32 = 13.0;
 pub const EXTRA_EFFORT_KNOCK_SPEED: f32 = 12.0;
 pub const EXTRA_EFFORT_FRICTION: f32 = 1.5; // override
-/// Those speeds barely beat your own 8.75 m/s, so the ball only got ~0.7 m ahead; players say it
-/// goes much further. A touch now leaves at least this much faster than you (TUNE).
-pub const EXTRA_EFFORT_TOUCH_LEAD: f32 = 5.0;
+/// Those speeds keep the ball within ~0.8 m of you, so you can cut it again quickly: a full
+/// gauge (one ~1.5 s hold) gives three cuts, as players report.
 /// Each activation costs a quarter of the gauge (GE_Cost_ExtraEffort) on top of the hold drain,
 /// and needs that much to start: a full gauge gives three direction cuts (players confirm).
 pub const EXTRA_EFFORT_START_COST: f32 = 0.25;
-/// A fresh activation near the ball cuts it the way you're going: within this reach, for this long (TUNE).
-pub const EXTRA_EFFORT_CUT_REACH: f32 = 1.2;
+/// Changing direction with the ball this close (or a fresh activation near it) cuts it the new way (TUNE).
+pub const EXTRA_EFFORT_CUT_REACH: f32 = 1.0;
+/// How far your run must turn away from the ball's path to count as a cut (TUNE).
+pub const EXTRA_EFFORT_CUT_ANGLE: f32 = 30.0;
 pub const EXTRA_EFFORT_CUT_WINDOW: f32 = 0.3;
 /// Touch force by how hard you turn against your run: x0.8 at 135 deg, x0.5 at 180 deg
 /// (BP_ExtraEffortAutoTap_FastTurnModifier).
