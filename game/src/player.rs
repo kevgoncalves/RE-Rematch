@@ -14,7 +14,10 @@ pub struct Player {
     pub stamina: f32,
     pub exhausted: bool,
     pub regen_wait: f32,
+    /// Holding sprint (outside lock move and dashes), moving or not: push balls read this.
     pub sprinting: bool,
+    /// Sprinting while moving: only this costs stamina.
+    pub sprint_running: bool,
     pub extra_effort: f32, // gauge 0..1
     pub extra_active: bool,
     pub has_ball: bool,
@@ -128,6 +131,7 @@ impl Default for Player {
             exhausted: false,
             regen_wait: 0.0,
             sprinting: false,
+            sprint_running: false,
             extra_effort: MAX_EXTRA_EFFORT,
             extra_active: false,
             has_ball: false,
@@ -314,13 +318,16 @@ pub fn player_move(
         }
     }
 
-    // Stamina (mechanics.md §1). Lock move and dashes can't sprint.
-    let want_sprint = actions.pressed(Action::Sprint) && input != Vec2::ZERO && !p.locked && p.dash.is_none();
-    if want_sprint && !p.sprinting && !p.exhausted {
+    // Stamina (mechanics.md §1). Lock move and dashes can't sprint. Holding sprint standing still
+    // still counts as sprinting (a push ball from it is a sprint push ball), but stamina only
+    // drains while you move (players confirm).
+    p.sprinting = actions.pressed(Action::Sprint) && !p.locked && p.dash.is_none();
+    let running = p.sprinting && input != Vec2::ZERO;
+    if running && !p.sprint_running && !p.exhausted {
         p.stamina -= SPRINT_START_COST;
     }
-    p.sprinting = want_sprint;
-    if p.sprinting {
+    p.sprint_running = running;
+    if running {
         p.stamina -= if p.has_ball { BALL_SPRINT_DRAIN } else { SPRINT_DRAIN } * dt;
         p.regen_wait = REGEN_DELAY;
     }
@@ -330,7 +337,7 @@ pub fn player_move(
     }
     p.stamina = p.stamina.max(0.0);
     p.regen_wait -= dt;
-    if !p.sprinting && p.regen_wait <= 0.0 {
+    if !running && p.regen_wait <= 0.0 {
         let rate = if p.exhausted { EXHAUSTED_REGEN } else { STAMINA_REGEN };
         p.stamina = (p.stamina + rate * dt).min(MAX_STAMINA);
     }
@@ -662,7 +669,7 @@ pub fn camera_follow(
     ctf.translation = pivot + rot * Vec3::new(CAMERA_RIGHT, 0.0, CAMERA_DISTANCE);
     ctf.rotation = rot;
     if let Projection::Perspective(persp) = &mut **proj {
-        let target = if p.sprinting || p.extra_active { SPRINT_FOV } else { FOV }.to_radians();
+        let target = if p.sprint_running || p.extra_active { SPRINT_FOV } else { FOV }.to_radians();
         persp.fov += (target - persp.fov) * (time.delta_secs() * 5.0).min(1.0);
     }
 }

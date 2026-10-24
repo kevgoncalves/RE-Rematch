@@ -234,7 +234,7 @@ fn update_hud(
         p.extra_effort * 100.0,
         if p.extra_active { " ACTIVE" } else { "" },
         p.vel.length(),
-        match (p.dribble, p.dash.is_some(), p.locked, p.sprinting) {
+        match (p.dribble, p.dash.is_some(), p.locked, p.sprint_running) {
             (Some(d), ..) if d.feint => "  FEINT",
             (Some(_), ..) => "  DRIBBLE",
             (_, true, ..) => "  DASH",
