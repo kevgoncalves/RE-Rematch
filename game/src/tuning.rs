@@ -328,9 +328,10 @@ pub const SHORT_LOB_SPEED: f32 = 13.2;
 pub const PUSH_BALL_SPEED: f32 = 11.5;
 pub const PUSH_BALL_FRICTION: f32 = BASE_FRICTION * 2.8; // about 5.1 m of roll at 11.5 m/s
 pub const PUSH_BALL_WINDUP: f32 = 8.0 / 60.0;
-/// After any kick you can't control your own ball for 0.5 s (GE_LostBall).
+/// After any kick you can't control your own ball for 0.5 s (GE_LostBall). Push balls and
+/// extra-effort taps also mark the ball: 0.5 s for you, 0.3 s for others (BP_NoControl_PushBall,
+/// BP_NoControl_ExtraEffort).
 pub const PUSH_BALL_NO_CONTROL: f32 = 0.5;
-pub const PUSH_BALL_NO_CONTROL_EXTRA_EFFORT: f32 = 12.0 / 60.0;
 pub const PUSH_BALL_COST: f32 = 0.375;
 pub const PUSH_BALL_REGEN_DELAY: f32 = 1.0;
 /// Sprinting switches the push ball's force up (BP_FastTap_ForceFromSpeed bytecode).

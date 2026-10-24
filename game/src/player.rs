@@ -953,7 +953,7 @@ pub fn kicking(
             EXTRA_EFFORT_TAP_SPEED * auto_tap_factor(k.entry, push_dir, ball_tf.translation.y),
             0.0,
             EXTRA_EFFORT_FRICTION,
-            PUSH_BALL_NO_CONTROL_EXTRA_EFFORT,
+            PUSH_BALL_NO_CONTROL,
         ),
         // Tired push balls ignore sprinting and pop up a little.
         Kick::PushBall if p.exhausted => (EXHAUSTED_PUSH_BALL_SPEED * push_factor, EXHAUSTED_PUSH_BALL_LIFT, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
