@@ -420,6 +420,11 @@ pub const DRIBBLE_OFFSET: f32 = 0.7; // TUNE: where a control settles the ball, 
 pub const STANCE_BALL: (f32, f32) = (0.27, 0.15);
 pub const STANCE_BALL_LEAD: f32 = 0.03;
 pub const STANCE_BALL_TIME: f32 = 0.06;
+/// Where a push ball's touch draws the ball to, ahead of you the way you push (m). TUNE.
+pub const PUSH_TOUCH_REACH: f32 = 0.4;
+/// While an extra-effort chop is possible, the ridden ball sits this far ahead of you (m), under
+/// your feet. TUNE.
+pub const EFFORT_RIDE_AHEAD: f32 = 0.12;
 /// Running with the ball, it travels from touch to touch (TouchBallComponent and the run-with-ball
 /// cycles' touch data): each touch is aimed this far ahead of you, every few steps.
 pub const TOUCH_AHEAD_RUN: f32 = 0.20;

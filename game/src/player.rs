@@ -886,6 +886,11 @@ pub fn ball_control(
             Some(EffortTouch::Ride) => {
                 p.effort_ride += time.delta_secs();
                 b.vel = Vec3::new(p.vel.x, b.vel.y, p.vel.z);
+                // While you can chop, the ball sits under you, so the window shows.
+                let under = ptf.translation + Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or_zero() * EFFORT_RIDE_AHEAD;
+                let pull = (time.delta_secs() / 0.08).min(1.0);
+                btf.translation.x += (under.x - btf.translation.x) * pull;
+                btf.translation.z += (under.z - btf.translation.z) * pull;
             }
             Some(EffortTouch::Tap) => {
                 b.vel = dir * EXTRA_EFFORT_KNOCK_SPEED;
@@ -916,6 +921,14 @@ fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3
         let spot = root + fwd * STANCE_BALL.0 + fwd.cross(Vec3::Y) * STANCE_BALL.1 + Vec3::new(p.vel.x, 0.0, p.vel.z) * STANCE_BALL_LEAD;
         p.carry = None;
         return ball.lerp(Vec3::new(spot.x, BALL_RADIUS, spot.z), 1.0 - (-dt / STANCE_BALL_TIME).exp());
+    }
+    // A push ball's touch draws the ball onto the way you push by its contact frame, so it leaves
+    // from your foot and you chase it in line, even flicked a new way out of a control.
+    if let Some(k) = p.kick.filter(|k| matches!(k.kind, Kick::PushBall | Kick::DribblePushBall)) {
+        let way = if k.steer == Vec3::ZERO { forward(p.facing) } else { k.steer };
+        let spot = root + way * PUSH_TOUCH_REACH;
+        let left = (contact_time(&k) - k.elapsed).max(dt);
+        return ball.lerp(Vec3::new(spot.x, BALL_RADIUS, spot.z), (dt / left).min(1.0));
     }
     let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
     let (ahead, every, own) = if p.sprinting { (TOUCH_AHEAD_SPRINT, TOUCH_EVERY_SPRINT, BALL_SPRINT_SPEED) } else { (TOUCH_AHEAD_RUN, TOUCH_EVERY_RUN, BALL_RUN_SPEED) };
