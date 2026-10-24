@@ -12,6 +12,7 @@ No part gets prototype code before its notes are written and reviewed.
 - **Native code:** the game's own modules are `Runtime` (Rematch), `SCCore` (Sloclap's shared base, also used by Sifu) and `SCCombatSystem`. They are 1,466 of the exe's 5,140 reflected classes.
   - `tools/natives.py` names 26,689 native entry points from the reflection tables.
   - `tools/classmap.py` lists the game's classes with their properties and functions (local output: `tools/rmx/out_bp/_game_classes.md`).
+  - `tools/vtables.py` finds each game class's virtual function table and names the virtual functions the class overrides (8,245 for 1,404 classes). That's where logic outside the reflection tables lives, such as the ball's simulation and each trajectory modifier.
   - `tools/ghidra/NameAndDump.java` applies the names in Ghidra and decompiles the game modules. The output stays local, outside the repo.
 - **Blueprints:** abilities and gameplay Blueprints, extracted with their bytecode (`tools/rmx --script`, summarised by `tools/kismet.py`).
 - **Data:** data tables, curve tables, data assets and levels (`tools/rmx`).

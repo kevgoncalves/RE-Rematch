@@ -61,7 +61,7 @@ public class NameAndDump extends GhidraScript {
                         inside.add(c);
                     }
                 }
-                if (inside.size() == 1) {
+                if (inside.size() == 1 && name.contains("__exec")) {
                     inside.get(0).setName(name.replace("__exec", "__"), SourceType.USER_DEFINED);
                     impls++;
                 }
