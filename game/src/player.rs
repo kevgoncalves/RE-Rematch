@@ -61,9 +61,8 @@ pub struct Player {
     pub effort_ride: f32,
     /// Where a control took the ball from.
     pub receive_from: Vec3,
-    /// The control's action frame, and where it settles the ball (m ahead, m right).
+    /// The control's action frame.
     pub receive_act: f32,
-    pub receive_spot: Vec2,
     /// A turning control's new way.
     pub receive_way: Option<Vec3>,
     /// Running with the ball: its travel from one touch to the next.
@@ -400,7 +399,6 @@ impl Default for Player {
             effort_ride: 0.0,
             receive_from: Vec3::ZERO,
             receive_act: 16.0 / 60.0,
-            receive_spot: Vec2::new(DRIBBLE_OFFSET, 0.0),
             receive_way: None,
             carry: None,
         }
@@ -972,7 +970,7 @@ pub fn ball_control(
             let target = match p.receive_way {
                 // A turning control: the foot pulls the ball out the turn's way.
                 Some(way) => ptf.translation + way * CONTROL_TURN_SPOT,
-                None => ptf.translation + fwd * p.receive_spot.x + fwd.cross(Vec3::Y) * p.receive_spot.y,
+                None => ptf.translation + fwd * DRIBBLE_OFFSET,
             };
             let target = Vec3::new(target.x, BALL_RADIUS, target.z);
             let u = if p.receive_from.distance(target) < CONTROL_SNAP_NEAR { 1.0 } else { (t / CONTROL_SNAP).min(1.0) };
@@ -1058,9 +1056,6 @@ pub fn ball_control(
         p.receive_from = btf.translation;
         b.spin = Vec3::ZERO;
         p.receive_act = CONTROL_ACT_BY_HEIGHT.iter().find(|(h, _)| btf.translation.y < *h).map_or(22.0 / 60.0, |(_, act)| *act);
-        // A ball behind you is taken on the back foot, on its side (the BfromS controls).
-        let behind = Vec2::new(rel.x, rel.z).angle_to(Vec2::X).abs().to_degrees() > CONTROL_BEHIND_ANGLE;
-        p.receive_spot = if behind { Vec2::new(CONTROL_REAR_SPOT.0, CONTROL_REAR_SPOT.1.copysign(rel.z)) } else { Vec2::new(DRIBBLE_OFFSET, 0.0) };
         // A control ends a push ball's chase; you move freely as it settles the ball (Kev: no
         // carry, no delay).
         p.run = None;
@@ -1241,7 +1236,7 @@ pub fn kicking(
             actions.consume(action);
             let pre = p.queued.filter(|(q, _)| *q == action).map_or(0.0, |(_, held)| held);
             axes.reset_curve();
-            let from_dribble = p.dribble.is_some();
+            let from_dribble = p.dribble.is_some() || p.since_dribble < DRIBBLE_PUSH_GRACE;
             // Shots and push balls take over from the dribble. A pass or lob keeps the dribble's
             // permissions, but its own drag moves you from now on (the dribble stops carrying you).
             if kind.is_pass() {
@@ -1284,6 +1279,11 @@ pub fn kicking(
 
     let Some(k) = &mut p.kick else { return };
     k.elapsed += dt;
+    // Extra effort's auto tap goes where the stick points at its touch, not at the press: you press
+    // extra effort and the new way together, often a frame or two apart.
+    if k.kind == Kick::PushBall && p.extra_active && axes.movement.length() >= PUSH_BALL_DEAD_ZONE {
+        k.steer = camera_relative(axes.movement.normalize(), rig.yaw).normalize();
+    }
     // Extra effort's auto tap turns you to where you push by its touch (as the game's 135/180 deg
     // weakening implies), so starting it any way, even out of a dribble, takes the ball with you.
     // A dribble push ball turns you to the push before its touch, over its first 9 frames.
@@ -1337,7 +1337,9 @@ pub fn kicking(
         Kick::Lob => (curve(&LOB_FORCE, t), curve(&LOB_ANGLE_BY_HOLD, t), SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::ShortLob => (SHORT_LOB_SPEED, SHORT_LOB_ANGLE, SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::PushBall if p.extra_active => (
-            EXTRA_EFFORT_TAP_SPEED * auto_tap_factor(k.entry, push_dir, ball_tf.translation.y),
+            // Out of a dribble it isn't weakened by the turn, so the ball goes on ahead of you the new
+            // way (Kev).
+            EXTRA_EFFORT_TAP_SPEED * if k.from_dribble { 1.0 } else { auto_tap_factor(k.entry, push_dir, ball_tf.translation.y) },
             0.0,
             EXTRA_EFFORT_FRICTION,
             PUSH_BALL_NO_CONTROL,

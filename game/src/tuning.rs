@@ -436,10 +436,6 @@ pub const CONTROL_AWAY_ANGLE: f32 = 75.0;
 /// 16f, chest 20f, head 22f.
 pub const CONTROL_SNAP: f32 = 12.0 / 60.0;
 pub const CONTROL_ACT_BY_HEIGHT: [(f32, f32); 4] = [(0.6, 14.0 / 60.0), (1.1, 16.0 / 60.0), (1.5, 20.0 / 60.0), (f32::INFINITY, 22.0 / 60.0)];
-/// A ball more than this far round behind you (degrees from your facing) is taken on the back
-/// foot, settling there (m ahead, m to its side) instead of in front (the BfromS controls). TUNE.
-pub const CONTROL_BEHIND_ANGLE: f32 = 112.5;
-pub const CONTROL_REAR_SPOT: (f32, f32) = (-0.25, 0.15);
 /// Kev's ippy (as before Season 1, which he says was 100% consistent, sprint or not): after your
 /// own push ball, with the stick turned back past IPPY_ANGLE, as soon as you may take the ball
 /// again (within IPPY_WINDOW of the touch), if it is within IPPY_REACH you turn over it (a quick
