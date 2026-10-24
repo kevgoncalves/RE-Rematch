@@ -287,7 +287,9 @@ pub const SHOT_DIP_PITCH_CORRECTION: f32 = 4.0;
 /// The shot flies from the ball toward where the crosshair meets the arena walls (traced 150 m
 /// from the camera, through the floor, which the trace ignores).
 pub const SHOT_TRACE_RANGE: f32 = 150.0;
-/// Passes leave flat; holding past 0.6 s lifts them (degrees by seconds held, not by charge).
+/// Passes leave flat; held past 60% lift (degrees). The game keys this and the lob angle by seconds
+/// held up to 1 s; with the kick going off as the gauge fills, they run on the charge instead, so a
+/// full lob is the flat one (players: lobs were far too strong held at 42 deg).
 pub const PASS_LIFT_BY_HOLD: [(f32, f32); 4] = [(0.0, 0.0), (0.6, 0.0), (0.601, 3.9), (1.0, 6.0)];
 /// The side curve input turns the shot this many degrees the other way, so the ball bends back
 /// toward the crosshair (Curve_TrajectoryYawByXAxis, applied against the input).
@@ -321,7 +323,7 @@ pub const FAKE_SHOT_COST: f32 = 1.5;
 pub const SHORT_WINDUP: f32 = 16.0 / 60.0;
 pub const SHORT_PASS_SPEED: f32 = 24.25;
 pub const SHORT_PASS_FRICTION: f32 = BASE_FRICTION * 1.5 * 1.675; // multiplier x the override's weight
-/// Lob launch angle by seconds held (overrides the aim): longer holds are flatter.
+/// Lob launch angle by charge (overrides the aim): fuller is flatter, 44 deg to 30.26 at full.
 pub const LOB_ANGLE_BY_HOLD: [(f32, f32); 2] = [(0.3, 44.0), (1.0, 30.26)];
 pub const SHORT_LOB_ANGLE: f32 = 52.0;
 pub const SHORT_LOB_SPEED: f32 = 13.2;

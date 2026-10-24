@@ -1110,9 +1110,9 @@ pub fn kicking(
             SHOT_FRICTION,
             NO_RECONTROL_TIME,
         ),
-        Kick::Pass => (curve(&PASS_FORCE, t), curve(&PASS_LIFT_BY_HOLD, k.held), PASS_FRICTION, NO_RECONTROL_TIME),
+        Kick::Pass => (curve(&PASS_FORCE, t), curve(&PASS_LIFT_BY_HOLD, t), PASS_FRICTION, NO_RECONTROL_TIME),
         Kick::ShortPass => (SHORT_PASS_SPEED, 0.0, SHORT_PASS_FRICTION, NO_RECONTROL_TIME),
-        Kick::Lob => (curve(&LOB_FORCE, t), curve(&LOB_ANGLE_BY_HOLD, k.held), SHOT_FRICTION, NO_RECONTROL_TIME),
+        Kick::Lob => (curve(&LOB_FORCE, t), curve(&LOB_ANGLE_BY_HOLD, t), SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::ShortLob => (SHORT_LOB_SPEED, SHORT_LOB_ANGLE, SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::PushBall if p.extra_active => (
             EXTRA_EFFORT_TAP_SPEED * auto_tap_factor(k.entry, push_dir, ball_tf.translation.y),

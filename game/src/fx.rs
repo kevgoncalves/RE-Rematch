@@ -74,21 +74,42 @@ fn predict_path(pos: Vec3, ball: &Ball, seconds: f32) -> Vec<Vec3> {
     path
 }
 
-/// The cheats' lines: the loose ball's trail and its predicted path.
-pub fn ball_lines(cheats: Res<Cheats>, ball: Single<(&Transform, &Ball)>, mut trail: Local<Vec<Vec3>>, mut gizmos: Gizmos) {
+/// The cheats' lines: the loose ball's trail, its oldest points fading over 3 s, and its predicted
+/// path, which fades over 1 s once the ball is controlled or stops.
+pub fn ball_lines(
+    time: Res<Time>,
+    cheats: Res<Cheats>,
+    ball: Single<(&Transform, &Ball)>,
+    mut trail: Local<Vec<(Vec3, f32)>>,
+    mut path: Local<(Vec<Vec3>, f32)>,
+    mut gizmos: Gizmos,
+) {
+    let dt = time.delta_secs();
     let (tf, b) = *ball;
-    if !cheats.on(Cheat::BallTrail) || b.held {
+    for point in trail.iter_mut() {
+        point.1 += dt;
+    }
+    trail.retain(|(_, age)| *age < 3.0);
+    if !cheats.on(Cheat::BallTrail) {
         trail.clear();
-    } else if trail.last().is_none_or(|p| p.distance(tf.translation) > 0.05) {
-        trail.push(tf.translation);
-        if trail.len() > 1200 {
-            trail.remove(0);
-        }
+    } else if !b.held && trail.last().is_none_or(|(p, _)| p.distance(tf.translation) > 0.05) {
+        trail.push((tf.translation, 0.0));
     }
-    gizmos.linestrip(trail.iter().copied(), Color::srgb(1.0, 0.85, 0.2));
-    if cheats.on(Cheat::BallPath) && !b.held && b.vel != Vec3::ZERO {
-        gizmos.linestrip(predict_path(tf.translation, b, 6.0), Color::srgb(0.3, 0.9, 1.0));
+    let yellow = Color::srgb(1.0, 0.85, 0.2);
+    gizmos.linestrip_gradient(trail.iter().map(|(p, age)| (*p, yellow.with_alpha(1.0 - age / 3.0))));
+    if !cheats.on(Cheat::BallPath) {
+        path.0.clear();
+        return;
     }
+    if !b.held && b.vel != Vec3::ZERO {
+        *path = (predict_path(tf.translation, b, 6.0), 0.0);
+    } else {
+        path.1 += dt;
+    }
+    let fade = (1.0 - path.1).clamp(0.0, 1.0);
+    let n = path.0.len().max(1) as f32;
+    let cyan = Color::srgb(0.3, 0.9, 1.0);
+    gizmos.linestrip_gradient(path.0.iter().enumerate().map(|(i, p)| (*p, cyan.with_alpha(fade * (1.0 - 0.6 * i as f32 / n)))));
 }
 
 /// Kicks this fast or faster get a marker (players confirm: a full pass or a shot shows one, a push
