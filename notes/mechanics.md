@@ -129,6 +129,8 @@ What this means in practice:
 - Some transitions can be cut short by a new input: a start or stop after 30% of it, a 180° after 60% (40% in a sprint), a 90° after 80% (unconfirmed meaning).
 
 ### Lock move (strafing: facing one way, moving another)
+- **Leaving lock move keeps your velocity:** if you were backing off, the body turns round to face the way you move while you keep moving back (the leave-lock-move transitions rotate the body, not the velocity). Spamming stance while backing off never drags you sideways.
+
 | Who | Slow | Full | Turn rate |
 |---|---|---|---|
 | Outfield | 1 m/s | 4 m/s | 400°/s |
