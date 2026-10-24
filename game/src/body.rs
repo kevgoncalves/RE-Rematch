@@ -223,7 +223,9 @@ enum Cycle {
 
 struct Clips {
     stand: Pose,
-    kick: [Pose; 3],
+    /// Kicks (the right foot): wind-up, contact, follow-through, for a shot, a pass (the inside of
+    /// the foot) and a lob (under the ball, leaning back).
+    kicks: [[Pose; 3]; 3],
     start: OneShot,
     stop: OneShot,
     turn: OneShot,
@@ -534,7 +536,7 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
     let lock_right = Clip { keys: [apart, together, apart, together], speed: 4.5, duration: 0.5, flight: 0.0 };
 
     // A kick (the right foot): wind-up, contact, follow-through; the left arm out for balance.
-    let kick = [
+    let shot_kick = [
         stand.with(&[
             (SPINE_J, [6.0, 0.0, 0.0]),
             (CHEST_J, [2.0, 12.0, 0.0]),
@@ -588,6 +590,94 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         (UPPER_L, [0.0, 0.0, -12.0]),
         (UPPER_R, [0.0, 0.0, 10.0]),
     ]);
+
+    // A pass: a short backswing with the toes turned out, the inside of the foot swept through.
+    let pass_kick = [
+        stand.with(&[
+            (SPINE_J, [6.0, 0.0, 0.0]),
+            (CHEST_J, [2.0, 8.0, 0.0]),
+            (THIGH_L, [8.0, 0.0, -4.0]),
+            (SHIN_L, [22.0, 0.0, 0.0]),
+            (FOOT_L, [-14.0, 0.0, 4.0]),
+            (THIGH_R, [-15.0, -15.0, 6.0]),
+            (SHIN_R, [50.0, 0.0, 0.0]),
+            (FOOT_R, [-35.0, 0.0, -10.0]),
+            (UPPER_L, [20.0, 0.0, -40.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [-10.0, 0.0, 25.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [4.0, 0.0, 0.0]),
+            (CHEST_J, [0.0, -8.0, 0.0]),
+            (THIGH_L, [8.0, 0.0, -4.0]),
+            (SHIN_L, [20.0, 0.0, 0.0]),
+            (FOOT_L, [-12.0, 0.0, 4.0]),
+            (THIGH_R, [25.0, -25.0, -6.0]),
+            (SHIN_R, [12.0, 0.0, 0.0]),
+            (FOOT_R, [13.0, 0.0, -15.0]),
+            (UPPER_L, [25.0, 0.0, -45.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [-5.0, 0.0, 30.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [2.0, 0.0, 0.0]),
+            (CHEST_J, [0.0, -10.0, 0.0]),
+            (THIGH_L, [6.0, 0.0, -4.0]),
+            (SHIN_L, [18.0, 0.0, 0.0]),
+            (FOOT_L, [-12.0, 0.0, 4.0]),
+            (THIGH_R, [40.0, -20.0, -12.0]),
+            (SHIN_R, [20.0, 0.0, 0.0]),
+            (FOOT_R, [20.0, 0.0, -12.0]),
+            (UPPER_L, [20.0, 0.0, -40.0]),
+            (UPPER_R, [10.0, 0.0, 25.0]),
+        ]),
+    ];
+    // A lob: the foot gets under the ball and lifts through it, the body leaning back.
+    let lob_kick = [
+        stand.with(&[
+            (SPINE_J, [2.0, 0.0, 0.0]),
+            (CHEST_J, [0.0, 10.0, 0.0]),
+            (THIGH_L, [10.0, 0.0, -4.0]),
+            (SHIN_L, [28.0, 0.0, 0.0]),
+            (FOOT_L, [-18.0, 0.0, 4.0]),
+            (THIGH_R, [-30.0, 0.0, 4.0]),
+            (SHIN_R, [90.0, 0.0, 0.0]),
+            (FOOT_R, [-90.0, 0.0, 0.0]),
+            (UPPER_L, [30.0, 0.0, -50.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [-20.0, 0.0, 30.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [-10.0, 0.0, 0.0]),
+            (CHEST_J, [-2.0, -6.0, 0.0]),
+            (NECK_J, [4.0, 0.0, 0.0]),
+            (THIGH_L, [12.0, 0.0, -4.0]),
+            (SHIN_L, [26.0, 0.0, 0.0]),
+            (FOOT_L, [-14.0, 0.0, 4.0]),
+            (THIGH_R, [40.0, 0.0, 0.0]),
+            (SHIN_R, [10.0, 0.0, 0.0]),
+            (FOOT_R, [20.0, 0.0, 0.0]),
+            (UPPER_L, [40.0, 0.0, -55.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [10.0, 0.0, 40.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [-12.0, 0.0, 0.0]),
+            (CHEST_J, [-2.0, -10.0, 0.0]),
+            (THIGH_L, [6.0, 0.0, -4.0]),
+            (SHIN_L, [16.0, 0.0, 0.0]),
+            (FOOT_L, [10.0, 0.0, 4.0]),
+            (THIGH_R, [85.0, 0.0, -4.0]),
+            (SHIN_R, [15.0, 0.0, 0.0]),
+            (FOOT_R, [70.0, 0.0, 0.0]),
+            (UPPER_L, [30.0, 0.0, -45.0]),
+            (UPPER_R, [30.0, 0.0, 30.0]),
+        ]),
+    ];
 
     // Dribbles, timed to their touch. A fast cut loads low, plants the left foot and pushes the ball
     // on with the right at 17f, then runs out of it.
@@ -791,7 +881,7 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
 
     Clips {
         stand,
-        kick,
+        kicks: [shot_kick, pass_kick, lob_kick],
         start,
         stop,
         turn,
@@ -1179,8 +1269,15 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             anim.follow = None;
         }
     }
-    let [windup, hit, through] = &clips.kick;
-    let kick_pose = if let Some(k) = p.kick {
+    let keys = |kind: Kick| match kind {
+        Kick::Pass | Kick::ShortPass => &clips.kicks[1],
+        Kick::Lob | Kick::ShortLob => &clips.kicks[2],
+        _ => &clips.kicks[0],
+    };
+    // Push balls are a touch on top of the run (below), not a kick pose.
+    let push = |kind: Kick| matches!(kind, Kick::PushBall | Kick::DribblePushBall);
+    let kick_pose = if let Some(k) = p.kick.filter(|k| !push(k.kind)) {
+        let [windup, hit, _] = keys(k.kind);
         let first = contact_time(&k);
         let contact = if k.released { first.max(k.held) } else { first };
         let key = if !k.released {
@@ -1191,11 +1288,23 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         };
         Some((key, k.kind, 1.0))
     } else {
-        anim.follow.map(|(t, kind)| {
+        anim.follow.filter(|(_, kind)| !push(*kind)).map(|(t, kind)| {
+            let [_, hit, through] = keys(kind);
             let u = t / follow_time(kind);
             (hit.lerp(through, (u / 0.4).min(1.0)), kind, 1.0 - ((u - 0.4) / 0.6).clamp(0.0, 1.0))
         })
     };
+    // A push ball: the right foot reaches through the ball by its touch (8f) and back, the legs
+    // running on underneath.
+    let push_touch = match (p.kick.filter(|k| push(k.kind)), anim.follow.filter(|(_, kind)| push(*kind))) {
+        (Some(k), _) => (k.elapsed / contact_time(&k).max(1.0 / 60.0)).min(1.0),
+        (_, Some((t, kind))) => 1.0 - t / follow_time(kind),
+        _ => 0.0,
+    };
+    if push_touch > 0.0 {
+        let w = push_touch * push_touch * (3.0 - 2.0 * push_touch) * 1.2;
+        pose = pose.plus(&Pose(clips.control.0.map(|a| a * w)));
+    }
     let target = kick_pose.map_or(0.0, |(_, _, w)| w);
     anim.action += (target - anim.action).clamp(-dt / 0.25, dt / 0.08);
     if let Some((key, kind, _)) = kick_pose {
