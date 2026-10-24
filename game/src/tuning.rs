@@ -93,6 +93,8 @@ pub const DRIBBLE_COST: f32 = 0.5;
 pub const DRIBBLE_REGEN_DELAY: f32 = 0.9;
 /// No new dribble until this long after a feint starts (our reading of the game's 1 s tag time).
 pub const FEINT_LOCKOUT: f32 = 12.0 / 60.0 + 1.0;
+/// How fast a fast cut turns you (and the ball) to its direction, degrees per second.
+pub const DRIBBLE_TURN_RATE: f32 = 1440.0;
 pub const EXHAUSTED_SPRINT: f32 = 6.0;
 pub const EXHAUSTED_BALL_SPRINT: f32 = 5.0;
 
@@ -120,6 +122,11 @@ pub const SHOT_BUILDUP: f32 = 32.0 / 60.0;
 pub const PASS_BUILDUP: f32 = 24.0 / 60.0;
 pub const LOB_BUILDUP: f32 = 24.0 / 60.0;
 pub const WINDUP_SPEED_SCALE: f32 = 0.5; // TUNE: how much you slow down while winding up
+/// Earliest ball contact for a quick tap, from the press. Players say taps go off much sooner
+/// than the build-up, which then only sets the minimum force (TUNE until the code confirms it).
+pub const SHOT_TAP_CONTACT: f32 = 15.0 / 60.0;
+pub const PASS_TAP_CONTACT: f32 = 10.0 / 60.0;
+pub const LOB_TAP_CONTACT: f32 = 12.0 / 60.0;
 /// Camera pitch (degrees, + is up) to launch elevation (degrees).
 pub const ELEVATION_BY_PITCH: [(f32, f32); 6] =
     [(-24.9, 2.93), (-14.6, 2.93), (-13.2, 3.99), (-7.6, 9.29), (0.7, 17.42), (4.0, 20.46)];

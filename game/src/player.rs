@@ -69,6 +69,8 @@ pub struct DribbleState {
     pub exhausted: bool,
     pub heading: Heading,
     pub dir: Vec3,
+    /// The yaw you turn to: the cut's direction going forward, the camera's otherwise.
+    pub facing: f32,
 }
 
 impl DribbleState {
@@ -162,6 +164,17 @@ impl Kick {
         }
     }
 
+    /// Earliest ball contact from the press: a quick tap goes off this soon.
+    fn contact(self) -> f32 {
+        match self {
+            Kick::Shot => SHOT_TAP_CONTACT,
+            Kick::Pass => PASS_TAP_CONTACT,
+            Kick::Lob => LOB_TAP_CONTACT,
+            _ => self.buildup(),
+        }
+    }
+
+    /// The force uses at least this much hold time.
     fn buildup(self) -> f32 {
         match self {
             Kick::Shot => SHOT_BUILDUP,
@@ -285,7 +298,11 @@ pub fn player_move(
             // W+A and W+D are fast cuts, S+A and S+D side dribbles going back (players confirm).
             let dir = if input == Vec2::ZERO { Vec2::Y } else { input.normalize() };
             let heading = dribble_heading(dir);
-            p.dribble = Some(DribbleState { t: 0.0, feint, exhausted: p.exhausted, heading, dir: camera_relative(dir, rig.yaw) });
+            // A fast cut goes where the camera looks (flick, then dribble) and turns you that way;
+            // side dribbles and drag backs keep you facing forward.
+            let dir = camera_relative(dir, rig.yaw);
+            let facing = if heading == Heading::Forward { (-dir.x).atan2(-dir.z) } else { rig.yaw.to_radians() };
+            p.dribble = Some(DribbleState { t: 0.0, feint, exhausted: p.exhausted, heading, dir, facing });
             if feint {
                 p.dribble_lockout = FEINT_LOCKOUT;
             }
@@ -381,6 +398,9 @@ pub fn player_move(
         p.run = (r.t < r.length && (r.t < r.free_at || sharp)).then_some(r);
     } else if let Some(mut d) = p.dribble {
         d.t += dt;
+        let diff = (d.facing - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        let max_turn = DRIBBLE_TURN_RATE.to_radians() * dt;
+        p.facing += diff.clamp(-max_turn, max_turn);
         p.vel = d.dir * curve(d.speeds(), (d.t / DRIBBLE_SPEED_TIME).min(1.0));
         p.dribble = (d.t < d.length()).then_some(d);
     } else if let Some(mut d) = p.dash {
@@ -477,8 +497,9 @@ pub fn kicking(
     // No kicks during a dash or the first 0.2 s of a dribble (frame-data.md). Lock move (defence
     // stance) can shoot: the game's lock-move layer forbids it in the files, but players confirm
     // you can shoot from stance.
+    // Shots are open at any moment of a dribble (players confirm), the rest from 0.2 s.
     let dribble_open = p.dribble.is_none_or(|d| d.t >= DRIBBLE_WINDOW_OPENS);
-    if p.has_ball && p.kick.is_none() && p.dash.is_none() && dribble_open {
+    if p.has_ball && p.kick.is_none() && p.dash.is_none() {
         let charged = [(Action::Shoot, Kick::Shot), (Action::Pass, Kick::Pass), (Action::Lob, Kick::Lob)];
         // In lock move the push ball button dribbles instead (player_move); inside a dribble,
         // released from lock move, it's the dribble push ball.
@@ -488,9 +509,10 @@ pub fn kicking(
             .into_iter()
             .chain(charged)
             .filter(|(a, _)| *a != Action::PushBall || !p.locked)
+            .filter(|(a, _)| dribble_open || *a == Action::Shoot)
             .find(|(a, _)| actions.just_pressed(*a));
         // Extra effort can't keep the ball: starting it touches the ball on ahead.
-        let pressed = pressed.or(p.extra_active.then_some((Action::ExtraEffort, Kick::PushBall)));
+        let pressed = pressed.or((p.extra_active && dribble_open).then_some((Action::ExtraEffort, Kick::PushBall)));
         if let Some((_, kind)) = pressed {
             axes.reset_curve();
             p.dribble = None; // the kick takes over from the dribble
@@ -513,8 +535,8 @@ pub fn kicking(
         k.aim.x -= axes.look_pad.x;
         k.aim.y = (k.aim.y + axes.look_pad.y).clamp(-PITCH_DOWN_LIMIT, PITCH_UP_LIMIT);
     }
-    // The build-up plays while you hold: the ball leaves on release, never before the build-up ends.
-    if !k.released || k.elapsed < k.kind.buildup() {
+    // The ball leaves on release, or soon after the press for a quick tap.
+    if !k.released || k.elapsed < k.kind.contact() {
         return;
     }
     let k = p.kick.take().expect("checked above");
