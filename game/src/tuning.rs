@@ -228,9 +228,10 @@ pub const EXTRA_EFFORT_KNOCK_SPEED: f32 = 12.0;
 pub const EXTRA_EFFORT_FRICTION: f32 = 1.5; // override
 /// Those speeds keep the ball within ~0.8 m of you, so you can cut it again quickly: a full
 /// gauge (one ~1.5 s hold) gives three cuts, as players report.
-/// Each activation costs a quarter of the gauge (GE_Cost_ExtraEffort) on top of the hold drain,
-/// and needs that much to start: a full gauge gives three direction cuts (players confirm).
-pub const EXTRA_EFFORT_START_COST: f32 = 0.25;
+/// The ability's cost effect takes a quarter of the gauge at activation, but players see no
+/// instant drop in the game, so the native code must apply it differently (open question).
+/// Until that is read, activation is free and only the 0.5/s hold drain applies (~2 s full).
+pub const EXTRA_EFFORT_START_COST: f32 = 0.0;
 /// Changing direction with the ball this close (or a fresh activation near it) cuts it the new way (TUNE).
 pub const EXTRA_EFFORT_CUT_REACH: f32 = 1.0;
 /// How far your run must turn away from the ball's path to count as a cut (TUNE).
