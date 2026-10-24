@@ -824,6 +824,26 @@ mod tests {
     }
 
     #[test]
+    fn stance_backwards_dribbles_keep_going_back() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+        app.world_mut().resource_mut::<Axes>().movement = Vec2::NEG_Y; // holding S
+        app.world_mut().spawn((Transform::default(), Player { has_ball: true, ..default() }));
+        app.world_mut().spawn(CameraRig::default());
+        let (lock, press) = ([Action::Lock].as_slice(), [Action::Lock, Action::PushBall].as_slice());
+        let mut log = Vec::new();
+        for _ in 0..8 {
+            frames(&mut app, press, 1, 0.016);
+            frames(&mut app, lock, 15, 0.016);
+            let (tf, p) = app.world_mut().query::<(&Transform, &Player)>().single(app.world()).unwrap();
+            log.push((tf.translation, p.vel, p.dribble.map(|d| (d.heading, d.feint))));
+        }
+        // The camera looks down -Z, so going back is +Z; there should be no sideways or forward drift.
+        let (end, ..) = log.last().unwrap();
+        assert!(end.z > 2.0 && end.x.abs() < 0.2, "ended at {end:?}");
+    }
+
+    #[test]
     fn pass_aim_modes() {
         let rig = CameraRig::default();
         let camera = rig.yaw.to_radians();
