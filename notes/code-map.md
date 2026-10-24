@@ -100,6 +100,7 @@ The GA_* Blueprints (availability layers, buffers, windows), the input condition
 ## 9. Camera
 `SCCameraComponent` with services (following, lock on the ball, lock move framing, pitch resting, collision, FOV), `RuntimeCameraData`, `SCCameraDB`.
 **Partly known** (match-camera-network.md).
+**Interpreted:** [camera.md](camera.md) covers the pivot, the arm and its pitch spline, rotation from mouse and stick, smoothing, FOV, dynamic offsets, states and transitions, and where the shot ray goes.
 
 ## Order
 Parts 1 and 2 decide how the ball behaves, so they came first and are now coded. Next are 3 and 4, then 5 and 6, then 7 to 9.
