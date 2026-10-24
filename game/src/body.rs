@@ -1617,6 +1617,15 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         };
         let clip = if d.second { [60.0, 42.0, 43.0] } else { [50.0, 41.0, 50.0] }[d.heading as usize] / 60.0;
         moving = Some((shot.sample((d.t / clip).min(1.0)), 0.1));
+    } else if p.ee_cut > 0.0 && p.extra_active {
+        // An extra-effort cut: the side dash's plant, push-off and landing, the way you cut.
+        let t = EE_CUT_TIME - p.ee_cut;
+        started = t < anim.move_t || anim.move_w <= 0.0;
+        if started {
+            anim.move_mirror = !p.ee_cut_right;
+        }
+        anim.move_t = t;
+        moving = Some((clips.dash_side.sample(0.1 + 0.35 * t / EE_CUT_TIME), 0.04));
     } else {
         anim.move_t = f32::INFINITY;
     }

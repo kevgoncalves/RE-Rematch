@@ -55,6 +55,11 @@ pub struct Player {
     /// Seconds since your own push ball's touch, and the way it went (the ippy).
     pub own_push: f32,
     pub push_way: Vec3,
+    /// Whether that push ball was sprinted at the press (no ippy then, as in the game).
+    pub push_sprinted: bool,
+    /// An extra-effort cut's time left, and whether it cuts right.
+    pub ee_cut: f32,
+    pub ee_cut_right: bool,
     pub last_input: Vec3,
     /// A kick's freeze at the touch: you hold still this long (hitstop).
     pub freeze: f32,
@@ -372,6 +377,9 @@ impl Default for Player {
             since_dribble: f32::INFINITY,
             own_push: f32::INFINITY,
             push_way: Vec3::ZERO,
+            push_sprinted: false,
+            ee_cut: 0.0,
+            ee_cut_right: false,
             last_input: Vec3::ZERO,
             freeze: 0.0,
             effort_ride: 0.0,
@@ -718,6 +726,7 @@ pub fn player_move(
 
     p.since_dribble = if p.dribble.is_some() { 0.0 } else { p.since_dribble + dt };
     p.own_push += dt;
+    p.ee_cut -= dt;
     // After the hand-back a dribble keeps only its permissions, to the animation's end.
     if let Some(mut d) = p.dribble.filter(|d| !d.moving()) {
         d.t += dt;
@@ -804,10 +813,16 @@ pub fn player_move(
         // Extra effort accelerates almost instantly, so it changes direction by acceleration rather
         // than by turning: much snappier than a sprint (players confirm). The body follows.
         let target = wish.normalize() * top * input.length();
+        // A sharp change of way is a cut: the body swings round at once with a plant-and-push.
+        let flat = Vec3::new(p.vel.x, 0.0, p.vel.z);
+        if p.ee_cut <= 0.0 && flat.length() > 3.0 && flat.angle_between(wish).to_degrees() > EE_CUT_ANGLE {
+            p.ee_cut = EE_CUT_TIME;
+            p.ee_cut_right = flat.cross(wish).y < 0.0;
+        }
         p.vel = p.vel.move_towards(target, accel * dt);
         let yaw = (-p.vel.x).atan2(-p.vel.z);
         let diff = (yaw - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
-        let max_turn = turn.to_radians() * dt;
+        let max_turn = if p.ee_cut > 0.0 { EE_CUT_TURN } else { turn }.to_radians() * dt;
         p.facing += diff.clamp(-max_turn, max_turn);
     } else if p.pivot > 0.0 && wish != Vec3::ZERO {
         // A quick pivot: heading and body swing round together, your speed dipping while far off.
@@ -987,6 +1002,7 @@ pub fn ball_control(
     // way: every time, sprint or not (IPPY_*).
     let wish = (axes.movement.length() > MOVE_DIRECTION_DEAD_ZONE).then(|| camera_relative(axes.movement.normalize(), rig.yaw).normalize());
     if p.own_push < IPPY_WINDOW
+        && !p.push_sprinted
         && !p.locked
         && p.dash.is_none()
         && b.no_control <= IPPY_TURN_LEAD
@@ -1029,7 +1045,8 @@ pub fn ball_control(
         b.spin = Vec3::ZERO;
         return;
     }
-    let in_reach = b.no_control <= 0.0 && in_control_zone(rel, vel, speed, p.locked, starting || p.turn.is_some());
+    let hands_off = p.own_push < OWN_PUSH_HANDS_OFF && wish.is_none();
+    let in_reach = b.no_control <= 0.0 && !hands_off && in_control_zone(rel, vel, speed, p.locked, starting || p.turn.is_some());
     if p.extra_active {
         // Extra effort can't control the ball: touching it taps it on at 12 m/s, flat, wherever
         // your movement input points at that moment (relative to the camera), whatever way your
@@ -1405,6 +1422,7 @@ pub fn kicking(
     if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) {
         p.own_push = 0.0;
         p.push_way = flat;
+        p.push_sprinted = k.sprint;
     }
     // After a push ball you chase it on the move's own speed (extra effort keeps its running).
     if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) && !p.extra_active {

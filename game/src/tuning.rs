@@ -381,6 +381,12 @@ pub const EXTRA_EFFORT_REGEN_FULL_STAMINA: f32 = 0.1875;
 pub const EXTRA_EFFORT_SPEED: f32 = 9.5;
 pub const EXTRA_EFFORT_ACCEL: f32 = 100.0;
 pub const TURN_RATE_EXTRA_EFFORT: f32 = 150.0;
+/// A sharp change of way in extra effort (past this many degrees) is a cut (Kev: sharp, with a
+/// drastic change-of-direction move): the body swings to the new way at EE_CUT_TURN deg/s and a
+/// plant-and-push pose plays over EE_CUT_TIME.
+pub const EE_CUT_ANGLE: f32 = 60.0;
+pub const EE_CUT_TURN: f32 = 1080.0;
+pub const EE_CUT_TIME: f32 = 0.25;
 /// Extra effort can't control the ball: starting it taps the ball on, and running into the
 /// ball taps it on again. Both use the extra effort friction override.
 pub const EXTRA_EFFORT_TAP_SPEED: f32 = 13.0;
@@ -418,7 +424,7 @@ pub const CONTROL_STANDING_GROUND: (f32, f32) = (0.10, 0.95);
 pub const CONTROL_MOVING: (f32, f32, f32) = (0.30, 1.0, 1.84);
 /// Running you can also take a ball rolling away from you, once it is about under you: a ground
 /// zone with no direction check (the game's sits 0.4 m behind you, r 0.6; Kev wants it closer in).
-pub const CONTROL_MOVING_GROUND: (f32, f32, f32) = (-0.10, 0.70, 1.80);
+pub const CONTROL_MOVING_GROUND: (f32, f32, f32) = (-0.10, 0.60, 1.80);
 /// Lock move without the ball catches from any direction. The game's radius is 0.675; Kev wants
 /// the stance to reach a little further than any zone without it.
 pub const CONTROL_LOCK_MOVE: (f32, f32, f32) = (0.10, 1.1, 1.85);
@@ -426,7 +432,10 @@ pub const CONTROL_LOCK_MOVE: (f32, f32, f32) = (0.10, 1.1, 1.85);
 /// slower than CONTROL_SLOW_BALL is taken whichever way it rolls (Kev: on top of a slow ball it
 /// must be yours; the game only lets a ball at rest through).
 pub const CONTROL_AWAY_ANGLE: f32 = 75.0;
-pub const CONTROL_SLOW_BALL: f32 = 3.0;
+pub const CONTROL_SLOW_BALL: f32 = 1.5;
+/// Your own push ball isn't controlled by itself for this long while you leave the stick alone
+/// (Kev: a push ball with no input shouldn't end in a control).
+pub const OWN_PUSH_HANDS_OFF: f32 = 1.5;
 /// A dash pressed almost on top of a loose ball (this close, m) is a dribble at once (Kev: from
 /// further off it is a dash, and the ball is controlled the normal way).
 pub const DASH_DRIBBLE_REACH: f32 = 1.2;
