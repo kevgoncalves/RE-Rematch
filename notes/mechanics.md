@@ -124,6 +124,8 @@ Every direction change is a short transition: you **brake**, then you **re-accel
 | Lock move with ball | 0.18 + 0.12 s | 0.26 + 0.12 s | 47% / 47% / 32% |
 | Lock move while sprinting | 0.1 + 0.1 s | 0.1 + 0.1 s | 85% / 60% / 50% |
 
+How a turn plays (the code-driven transition data in Data/Locomotion/TransitionDB): you **brake along your old direction** on the brake curve, then **re-accelerate along the new direction** to the exit share of top speed; the direction can still change while braking. Which turn you get depends on the angle between your run and the stick: **under 30° you just steer** (with the ball at most 180°/s, without it 400°/s), **30–60° is a 45° turn** (with the ball only), **60–120° a 90° turn**, **120° and over a 180° turn** (the 135° band isn't used in free move).
+
 What this means in practice:
 - **A 180° turn in a sprint costs ~0.75 s** and you come out at half speed.
 - **With the ball it costs 0.8 s** and you come out at 45%.
