@@ -125,7 +125,18 @@ pub const MAX_HOLD: f32 = 1.0; // last key of the force curves
 pub const SHOT_BUILDUP: f32 = 32.0 / 60.0;
 pub const PASS_BUILDUP: f32 = 24.0 / 60.0;
 pub const LOB_BUILDUP: f32 = 24.0 / 60.0;
-pub const WINDUP_SPEED_SCALE: f32 = 0.5; // TUNE: how much you slow down while winding up
+pub const WINDUP_SPEED_SCALE: f32 = 0.5; // TUNE: how much you slow down winding up a pass or lob
+/// A shot keeps your run-up: through the build-up you slide on in the same direction at a share
+/// of your speed at the press that shrinks to this (HighPowerBeforeShootScaleSpeedData)...
+pub const SHOT_SLIDE: f32 = 0.75;
+/// ...sprinting at 4 m/s or more...
+pub const SHOT_SLIDE_SPRINT: f32 = 0.6;
+/// ...or shooting out of a dribble.
+pub const SHOT_SLIDE_FROM_DRIBBLE: f32 = 0.5;
+/// After the touch you keep that speed until the move ends (can act moving at 0.75 s, standing 0.67 s).
+pub const SHOT_FOLLOW_THROUGH: f32 = 13.0 / 60.0;
+/// Extra shot speed from your own speed (ShootForceByCharaSpeed, m/s).
+pub const SHOT_FORCE_BY_RUN_SPEED: [(f32, f32); 3] = [(0.0, 0.0), (6.0, 1.25), (9.5, 4.0)];
 /// Earliest ball contact for a quick tap, from the press. Players say taps go off much sooner
 /// than the build-up, which then only sets the minimum force (TUNE until the code confirms it).
 pub const SHOT_TAP_CONTACT: f32 = 15.0 / 60.0;

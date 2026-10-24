@@ -109,6 +109,8 @@ pub struct Run {
     free_at: f32,
     dir: Vec3,
     speeds: &'static [(f32, f32)],
+    /// The curve's values are multiplied by this (1 for absolute speeds).
+    scale: f32,
 }
 
 /// A kick from button press to ball contact. The build-up runs while the button is held.
@@ -120,6 +122,9 @@ pub struct KickState {
     pub released: bool,
     /// Shot aim (yaw, pitch in degrees), locked at the press so the mouse can curve the ball.
     pub aim: Vec2,
+    /// Your velocity at the press: a shot slides on from it.
+    pub entry: Vec3,
+    pub from_dribble: bool,
 }
 
 impl Default for Player {
@@ -402,7 +407,7 @@ pub fn player_move(
     let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
     if let Some(mut r) = p.run {
         r.t += dt;
-        p.vel = r.dir * curve(r.speeds, (r.t / r.length).min(1.0));
+        p.vel = r.dir * curve(r.speeds, (r.t / r.length).min(1.0)) * r.scale;
         // Once free, steering within the turn limit hands back to normal running; sharper turns wait.
         let sharp = wish != Vec3::ZERO && r.dir.angle_between(wish).to_degrees() > RUN_TURN_LIMIT;
         p.run = (r.t < r.length && (r.t < r.free_at || sharp)).then_some(r);
@@ -413,6 +418,16 @@ pub fn player_move(
         p.facing += diff.clamp(-max_turn, max_turn);
         p.vel = d.dir * curve(d.speeds(), (d.t / DRIBBLE_SPEED_TIME).min(1.0));
         p.dribble = (d.t < d.length()).then_some(d);
+    } else if let Some(k) = p.kick.filter(|k| k.kind == Kick::Shot) {
+        // A shot keeps your run-up: no steering, sliding on at a shrinking share of your speed.
+        let end = if k.from_dribble {
+            SHOT_SLIDE_FROM_DRIBBLE
+        } else if p.sprinting && k.entry.length() >= 4.0 {
+            SHOT_SLIDE_SPRINT
+        } else {
+            SHOT_SLIDE
+        };
+        p.vel = k.entry * (1.0 + (end - 1.0) * (k.elapsed / SHOT_BUILDUP).min(1.0));
     } else if let Some(mut d) = p.dash {
         d.t += dt;
         let speeds: &[(f32, f32)] = if d.second { &SECOND_DASH_SPEED } else { &DASH_SPEED };
@@ -544,10 +559,11 @@ pub fn kicking(
         let pressed = pressed.or((p.extra_active && dribble_open).then_some((Action::ExtraEffort, Kick::PushBall)));
         if let Some((_, kind)) = pressed {
             axes.reset_curve();
+            let from_dribble = p.dribble.is_some();
             p.dribble = None; // the kick takes over from the dribble
             p.push_buffered = false;
             let released = kind.charge_action().is_none();
-            p.kick = Some(KickState { kind, elapsed: 0.0, held: 0.0, released, aim: Vec2::new(rig.yaw, rig.pitch) });
+            p.kick = Some(KickState { kind, elapsed: 0.0, held: 0.0, released, aim: Vec2::new(rig.yaw, rig.pitch), entry: p.vel, from_dribble });
         }
     }
 
@@ -588,7 +604,12 @@ pub fn kicking(
     };
     let sprint = |factor: f32| if p.sprinting { factor } else { 1.0 };
     let (speed, elevation, friction, no_control) = match k.kind {
-        Kick::Shot => (curve(&SHOT_FORCE, t), curve(&ELEVATION_BY_PITCH, k.aim.y), SHOT_FRICTION, NO_RECONTROL_TIME),
+        Kick::Shot => (
+            curve(&SHOT_FORCE, t) + curve(&SHOT_FORCE_BY_RUN_SPEED, k.entry.length()),
+            curve(&ELEVATION_BY_PITCH, k.aim.y),
+            SHOT_FRICTION,
+            NO_RECONTROL_TIME,
+        ),
         Kick::Pass => (curve(&PASS_FORCE, t), PASS_ELEVATION, PASS_FRICTION, NO_RECONTROL_TIME),
         Kick::ShortPass => (SHORT_PASS_SPEED, PASS_ELEVATION, SHORT_PASS_FRICTION, NO_RECONTROL_TIME),
         Kick::Lob => (curve(&LOB_FORCE, t), LOB_ELEVATION, SHOT_FRICTION, NO_RECONTROL_TIME),
@@ -627,6 +648,10 @@ pub fn kicking(
     };
     ball.friction = friction;
     ball.no_control = no_control;
+    if k.kind == Kick::Shot {
+        let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
+        p.run = Some(Run { t: 0.0, length: SHOT_FOLLOW_THROUGH, free_at: SHOT_FOLLOW_THROUGH, dir: k.entry.normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], scale: speed });
+    }
     // After a push ball you chase it on the move's own speed (extra effort keeps its running).
     if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) && !p.extra_active {
         let cost = if k.kind == Kick::PushBall { PUSH_BALL_COST } else { DRIBBLE_PUSH_BALL_COST };
@@ -640,7 +665,7 @@ pub fn kicking(
             let i = Heading::of(push_angle, 60.0, 150.0) as usize;
             ([PUSH_BALL_RUN, SPRINT_PUSH_BALL_RUN, EXHAUSTED_PUSH_BALL_RUN][state][i], PUSH_BALL_LENGTH[i])
         };
-        p.run = Some(Run { t: 0.0, length: length - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, dir: flat, speeds });
+        p.run = Some(Run { t: 0.0, length: length - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, dir: flat, speeds, scale: 1.0 });
     }
 }
 
