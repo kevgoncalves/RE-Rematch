@@ -449,6 +449,12 @@ pub fn player_move(
         p.vel = k.entry * (1.0 + (end - 1.0) * (k.elapsed / SHOT_BUILDUP).min(1.0));
     } else if let Some(mut d) = p.dash {
         d.t += dt;
+        // Dashing onto the ball controls it and carries it on in front, the way you dash, like a
+        // fast cut (players confirm): the body turns to the dash direction.
+        if p.has_ball {
+            let max_turn = DRIBBLE_TURN_RATE.to_radians() * dt;
+            p.facing += angle_diff(yaw_of(d.dir), p.facing).clamp(-max_turn, max_turn);
+        }
         let speeds: &[(f32, f32)] = if d.second { &SECOND_DASH_SPEED } else { &DASH_SPEED };
         p.vel = d.dir * curve(speeds, d.t / DASH_DURATION);
         p.dash = (d.t < DASH_DURATION).then_some(d);
@@ -513,16 +519,6 @@ pub fn ball_control(mut player: Single<(&Transform, &mut Player), Without<Ball>>
     let moving = p.vel.length() > MOVING_THRESHOLD;
     let radius = if moving { CONTROL_RADIUS_MOVING } else { CONTROL_RADIUS_STANDING } + BALL_RADIUS;
     let in_reach = b.no_control <= 0.0 && flat.length() < radius && btf.translation.y < CONTROL_MAX_HEIGHT;
-    let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
-    // A dash can't keep the ball: running into it takes it along the dash's direction.
-    if let Some(d) = p.dash {
-        let touching = flat.length() < EXTRA_EFFORT_KNOCK_REACH && btf.translation.y < CONTROL_MAX_HEIGHT;
-        if b.no_control <= 0.0 && touching && b.vel.dot(d.dir) < speed {
-            b.vel = d.dir * (speed + DASH_TOUCH_LEAD) + Vec3::Y * b.vel.y.max(0.0);
-            b.friction = PUSH_BALL_FRICTION;
-        }
-        return;
-    }
     if p.extra_active {
         // A fresh activation near the ball cuts it the new way, weaker on a sharp turn.
         if let Some((dir, _)) = p.extra_cut
