@@ -2,7 +2,7 @@
 
 How the game handles a sharp change of direction while you run: when a turn starts, what happens to your speed, direction and body during it, when another input can cut in, and how it ends. Speeds, start and stop times are in [mechanics.md](mechanics.md) §2.
 
-**Status:** interpreted from the native code and the locomotion data, waiting for Kev's review. Answers a pro player's report that alternating W and D quickly makes the prototype almost stop, which the game doesn't do.
+**Status:** reviewed by Kev and coded in the prototype (2026-10-24); the start transitions and the 180 turn's fixed side are not modelled. Interpreted from the native code and the locomotion data. Answers a pro player's report that alternating W and D quickly makes the prototype almost stop, which the game doesn't do.
 
 ## In short
 - A turn is a short **root-motion move** with two phases in a row: a **brake** along your old velocity, then a **re-acceleration** along the new direction.
