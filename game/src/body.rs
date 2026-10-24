@@ -14,7 +14,7 @@ use std::sync::LazyLock;
 
 use bevy::prelude::*;
 
-use crate::player::{Kick, KickState, Player, contact_time};
+use crate::player::{Heading, Kick, KickState, Player, contact_time, dribble_contact};
 use crate::tuning::*;
 
 // Rematch's player (notes/animation.md §1), metres. The root entity is the capsule's centre.
@@ -227,8 +227,17 @@ struct Clips {
     start: OneShot,
     stop: OneShot,
     turn: OneShot,
-    /// Controlling the ball, added on top of whatever runs.
+    /// Controlling the ball, added on top of whatever runs (and each touch while you carry it).
     control: Pose,
+    /// The moves, each with where its touch sits on its timeline: dribbles (a fast cut, side,
+    /// back, a feint) and dashes (front, side, back). Authored going right or with the right foot.
+    dribble_forward: (OneShot, f32),
+    dribble_side: (OneShot, f32),
+    dribble_back: (OneShot, f32),
+    feint: (OneShot, f32),
+    dash_front: OneShot,
+    dash_side: OneShot,
+    dash_back: OneShot,
     cycles: Vec<(Cycle, Clip)>,
 }
 
@@ -580,6 +589,206 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         (UPPER_R, [0.0, 0.0, 10.0]),
     ]);
 
+    // Dribbles, timed to their touch. A fast cut loads low, plants the left foot and pushes the ball
+    // on with the right at 17f, then runs out of it.
+    let dribble_forward = (
+        OneShot(vec![
+            (0.0, stand.with(&[
+                (PELVIS, [0.0, -10.0, 0.0]),
+                (SPINE_J, [20.0, 0.0, 0.0]),
+                (CHEST_J, [4.0, 0.0, 0.0]),
+                (NECK_J, [-12.0, 0.0, 0.0]),
+                (THIGH_L, [24.0, 0.0, -10.0]),
+                (SHIN_L, [50.0, 0.0, 0.0]),
+                (FOOT_L, [-26.0, 0.0, 10.0]),
+                (THIGH_R, [-18.0, 0.0, 6.0]),
+                (SHIN_R, [55.0, 0.0, 0.0]),
+                (FOOT_R, [-58.0, 0.0, -6.0]),
+                (UPPER_L, [30.0, 0.0, -35.0]),
+                (FORE_L, [50.0, 0.0, 0.0]),
+                (UPPER_R, [-25.0, 0.0, 30.0]),
+                (FORE_R, [45.0, 0.0, 0.0]),
+            ])),
+            (0.38, stand.with(&[
+                (PELVIS, [0.0, 8.0, 0.0]),
+                (SPINE_J, [18.0, 0.0, 0.0]),
+                (CHEST_J, [4.0, -10.0, 0.0]),
+                (NECK_J, [-10.0, 0.0, 0.0]),
+                (THIGH_L, [-4.0, 0.0, -8.0]),
+                (SHIN_L, [38.0, 0.0, 0.0]),
+                (FOOT_L, [-30.0, 0.0, 8.0]),
+                (THIGH_R, [38.0, 0.0, 10.0]),
+                (SHIN_R, [30.0, 0.0, 0.0]),
+                (FOOT_R, [28.0, 0.0, -10.0]),
+                (UPPER_L, [35.0, 0.0, -40.0]),
+                (FORE_L, [55.0, 0.0, 0.0]),
+                (UPPER_R, [-30.0, 0.0, 25.0]),
+                (FORE_R, [50.0, 0.0, 0.0]),
+            ])),
+            (0.7, run_contact),
+            (1.0, run_stance),
+        ]),
+        0.38,
+    );
+    // A side dribble (to the right): lean and load, the right foot sweeps the ball across at 8f,
+    // the left follows, back to the stance.
+    let side_load = stance.with(&[
+        (PELVIS, [0.0, 0.0, 8.0]),
+        (SPINE_J, [12.0, 0.0, 10.0]),
+        (CHEST_J, [4.0, 0.0, 4.0]),
+        (NECK_J, [-8.0, 0.0, -8.0]),
+        (THIGH_L, [12.0, 0.0, -20.0]),
+        (SHIN_L, [40.0, 0.0, 0.0]),
+        (FOOT_L, [-28.0, 0.0, 20.0]),
+        (THIGH_R, [16.0, 0.0, 18.0]),
+        (SHIN_R, [48.0, 0.0, 0.0]),
+        (FOOT_R, [-26.0, 0.0, -18.0]),
+        (UPPER_L, [20.0, 0.0, -40.0]),
+        (FORE_L, [45.0, 0.0, 0.0]),
+        (UPPER_R, [10.0, 0.0, 45.0]),
+        (FORE_R, [40.0, 0.0, 0.0]),
+    ]);
+    let dribble_side = (
+        OneShot(vec![
+            (0.0, side_load),
+            (0.14, side_load.with(&[
+                (PELVIS, [0.0, 0.0, 10.0]),
+                (SPINE_J, [12.0, 0.0, 12.0]),
+                (THIGH_L, [10.0, 0.0, -14.0]),
+                (SHIN_L, [36.0, 0.0, 0.0]),
+                (FOOT_L, [-26.0, 0.0, 14.0]),
+                (THIGH_R, [20.0, 0.0, 30.0]),
+                (SHIN_R, [26.0, 0.0, 0.0]),
+                (FOOT_R, [-6.0, 0.0, -30.0]),
+            ])),
+            (0.5, stance.with(&[
+                (PELVIS, [0.0, 0.0, 4.0]),
+                (THIGH_L, [14.0, 0.0, 10.0]),
+                (SHIN_L, [50.0, 0.0, 0.0]),
+                (FOOT_L, [-36.0, 0.0, -10.0]),
+                (THIGH_R, [12.0, 0.0, 12.0]),
+                (SHIN_R, [36.0, 0.0, 0.0]),
+                (FOOT_R, [-24.0, 0.0, -12.0]),
+            ])),
+            (1.0, stance),
+        ]),
+        0.14,
+    );
+    // A drag back: the right sole on the ball at once, pulling it back, then the stance.
+    let dribble_back = (
+        OneShot(vec![
+            (0.0, stance.with(&[
+                (SPINE_J, [-4.0, 0.0, 0.0]),
+                (THIGH_L, [-4.0, 0.0, -6.0]),
+                (SHIN_L, [34.0, 0.0, 0.0]),
+                (FOOT_L, [-30.0, 0.0, 6.0]),
+                (THIGH_R, [28.0, 0.0, 4.0]),
+                (SHIN_R, [36.0, 0.0, 0.0]),
+                (FOOT_R, [-28.0, 0.0, -4.0]),
+                (UPPER_L, [10.0, 0.0, -30.0]),
+                (UPPER_R, [10.0, 0.0, 30.0]),
+            ])),
+            (0.35, stance.with(&[
+                (SPINE_J, [6.0, 0.0, 0.0]),
+                (THIGH_L, [6.0, 0.0, -6.0]),
+                (SHIN_L, [40.0, 0.0, 0.0]),
+                (FOOT_L, [-34.0, 0.0, 6.0]),
+                (THIGH_R, [-10.0, 0.0, 4.0]),
+                (SHIN_R, [55.0, 0.0, 0.0]),
+                (FOOT_R, [-50.0, 0.0, -4.0]),
+            ])),
+            (1.0, stance),
+        ]),
+        0.0,
+    );
+    // A feint (to the right): the weight goes left, the right leg steps over the ball at its
+    // touch, then pushes off to the right.
+    let feint = (
+        OneShot(vec![
+            (0.0, stance.with(&[
+                (PELVIS, [0.0, 0.0, -8.0]),
+                (SPINE_J, [10.0, 0.0, -8.0]),
+                (THIGH_L, [14.0, 0.0, -16.0]),
+                (SHIN_L, [40.0, 0.0, 0.0]),
+                (FOOT_L, [-26.0, 0.0, 16.0]),
+                (THIGH_R, [10.0, 0.0, 8.0]),
+                (SHIN_R, [40.0, 0.0, 0.0]),
+                (FOOT_R, [-30.0, 0.0, -8.0]),
+            ])),
+            (0.22, stance.with(&[
+                (PELVIS, [0.0, 0.0, -6.0]),
+                (SPINE_J, [10.0, 0.0, -6.0]),
+                (THIGH_L, [12.0, 0.0, -14.0]),
+                (SHIN_L, [42.0, 0.0, 0.0]),
+                (FOOT_L, [-30.0, 0.0, 14.0]),
+                (THIGH_R, [30.0, -25.0, 10.0]),
+                (SHIN_R, [70.0, 0.0, 0.0]),
+                (FOOT_R, [-40.0, 0.0, -10.0]),
+            ])),
+            (0.55, side_load),
+            (1.0, stance),
+        ]),
+        0.22,
+    );
+    // Dashes: forward an explosive first stride; sideways a long step out and a landing; back a hop.
+    let dash_front = OneShot(vec![
+        (0.0, stand.with(&[
+            (PELVIS, [0.0, -8.0, 0.0]),
+            (SPINE_J, [24.0, 0.0, 0.0]),
+            (NECK_J, [-14.0, 0.0, 0.0]),
+            (THIGH_L, [50.0, 0.0, -4.0]),
+            (SHIN_L, [80.0, 0.0, 0.0]),
+            (FOOT_L, [-20.0, 0.0, 4.0]),
+            (THIGH_R, [-28.0, 0.0, 4.0]),
+            (SHIN_R, [24.0, 0.0, 0.0]),
+            (FOOT_R, [-30.0, 0.0, -4.0]),
+            (UPPER_L, [-45.0, 0.0, -10.0]),
+            (FORE_L, [80.0, 0.0, 0.0]),
+            (UPPER_R, [55.0, 0.0, 10.0]),
+            (FORE_R, [95.0, 0.0, 0.0]),
+        ])),
+        (0.5, sprint_contact.mirror()),
+        (1.0, run_contact),
+    ]);
+    let dash_side = OneShot(vec![
+        (0.0, stance.with(&[
+            (PELVIS, [0.0, 0.0, 6.0]),
+            (SPINE_J, [16.0, 0.0, 12.0]),
+            (THIGH_L, [14.0, 0.0, -14.0]),
+            (SHIN_L, [30.0, 0.0, 0.0]),
+            (FOOT_L, [-16.0, 0.0, 14.0]),
+            (THIGH_R, [14.0, 0.0, 34.0]),
+            (SHIN_R, [36.0, 0.0, 0.0]),
+            (FOOT_R, [-22.0, 0.0, -34.0]),
+            (UPPER_L, [20.0, 0.0, -50.0]),
+            (UPPER_R, [10.0, 0.0, 40.0]),
+        ])),
+        (0.45, stance.with(&[
+            (PELVIS, [0.0, 0.0, 2.0]),
+            (THIGH_L, [18.0, 0.0, 6.0]),
+            (SHIN_L, [50.0, 0.0, 0.0]),
+            (FOOT_L, [-32.0, 0.0, -6.0]),
+            (THIGH_R, [16.0, 0.0, 10.0]),
+            (SHIN_R, [44.0, 0.0, 0.0]),
+            (FOOT_R, [-28.0, 0.0, -10.0]),
+        ])),
+        (1.0, stance),
+    ]);
+    let dash_back = OneShot(vec![
+        (0.0, stance.with(&[
+            (SPINE_J, [16.0, 0.0, 0.0]),
+            (THIGH_L, [-8.0, 0.0, -8.0]),
+            (SHIN_L, [44.0, 0.0, 0.0]),
+            (FOOT_L, [-36.0, 0.0, 8.0]),
+            (THIGH_R, [10.0, 0.0, 8.0]),
+            (SHIN_R, [40.0, 0.0, 0.0]),
+            (FOOT_R, [-30.0, 0.0, -8.0]),
+            (UPPER_L, [30.0, 0.0, -30.0]),
+            (UPPER_R, [30.0, 0.0, 30.0]),
+        ])),
+        (1.0, stance),
+    ]);
+
     Clips {
         stand,
         kick,
@@ -587,6 +796,13 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         stop,
         turn,
         control,
+        dribble_forward,
+        dribble_side,
+        dribble_back,
+        feint,
+        dash_front,
+        dash_side,
+        dash_back,
         cycles: vec![
             (Cycle::Idle, Clip::held(stand)),
             (Cycle::Walk, walk),
@@ -682,6 +898,11 @@ pub struct Animator {
     /// The ball control's weight, and the lean, both eased.
     control: f32,
     roll: f32,
+    /// The move on top (a dribble or a dash): its pose, weight, side and when it began.
+    move_pose: Pose,
+    move_w: f32,
+    move_mirror: bool,
+    move_t: f32,
 }
 
 impl Animator {
@@ -980,6 +1201,65 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     if let Some((key, kind, _)) = kick_pose {
         pose = pose.lerp(&clips.stand.lerp(&key, kick_size(kind)), anim.action);
     }
+    // Dribbles and dashes on top (the game's move montages): in over 0.05 s (dashes 0.1 s), out over
+    // 0.25 s. A dribble's touch lands on its contact frame; the side is picked as the move starts.
+    let local_dir = |d: Vec3| root.rotation.inverse() * d;
+    let mut moving = None;
+    if let Some(d) = p.dribble {
+        if d.t < anim.move_t || anim.move_w <= 0.0 {
+            anim.move_mirror = local_dir(d.dir).x < 0.0;
+        }
+        anim.move_t = d.t;
+        let (shot, contact_at) = match (d.feint, d.heading) {
+            (true, _) => &clips.feint,
+            (_, Heading::Forward) => &clips.dribble_forward,
+            (_, Heading::Side) => &clips.dribble_side,
+            (_, Heading::Back) => &clips.dribble_back,
+        };
+        let contact = dribble_contact(&d);
+        let u = if d.t < contact {
+            contact_at * d.t / contact
+        } else {
+            contact_at + (1.0 - contact_at) * ((d.t - contact) / (DRIBBLE_SPEED_TIME - contact).max(0.05)).min(1.0)
+        };
+        moving = Some((shot.sample(u), 0.05));
+    } else if let Some(d) = p.dash {
+        if d.t < anim.move_t || anim.move_w <= 0.0 {
+            anim.move_mirror = local_dir(d.dir).x < 0.0;
+        }
+        anim.move_t = d.t;
+        let shot = match d.heading {
+            Heading::Forward => &clips.dash_front,
+            Heading::Side => &clips.dash_side,
+            Heading::Back => &clips.dash_back,
+        };
+        moving = Some((shot.sample((d.t / d.free()).min(1.0)), 0.1));
+    } else {
+        anim.move_t = 0.0;
+    }
+    if let Some((target, blend_in)) = moving {
+        anim.move_pose = if anim.move_mirror { target.mirror() } else { target };
+        anim.move_w = (anim.move_w + dt / blend_in).min(1.0);
+    } else {
+        anim.move_w = (anim.move_w - dt / 0.25).max(0.0);
+    }
+    if anim.move_w > 0.0 {
+        let w = anim.move_w;
+        pose = pose.lerp(&anim.move_pose, w * w * (3.0 - 2.0 * w));
+    }
+
+    // Running with the ball, the right foot meets it at each touch (the game's touch layer).
+    if p.has_ball
+        && p.dribble.is_none()
+        && p.kick.is_none()
+        && let Some(c) = p.carry
+    {
+        let now = time.elapsed_secs();
+        let w = (1.0 - (c.next - now) / 0.15).max(1.0 - (now - c.start) / 0.2).clamp(0.0, 1.0);
+        let w = w * w * (3.0 - 2.0 * w) * 0.7;
+        pose = pose.plus(&Pose(clips.control.0.map(|a| a * w)));
+    }
+
     // Ball control: in over 0.1 s, back out over 0.25 s, on top of the cycle so the legs keep
     // running.
     let receiving = p.receiving.is_some_and(|t| t < CONTROL_ACT);

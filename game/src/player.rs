@@ -60,10 +60,27 @@ pub struct Player {
 #[derive(Clone, Copy, Debug)]
 pub struct Carry {
     from: Vec3,
-    start: f32,
-    next: f32,
+    /// The last touch and the next one (seconds, the app's clock).
+    pub start: f32,
+    pub next: f32,
     target: Vec3,
     touches: u32,
+    /// When the dribble that owns the touches began.
+    move_start: f32,
+}
+
+/// When a dribble's foot touches the ball, from its start (responsiveness.md): a fast cut at 17f,
+/// side 8f, back at once; a feint 10f forward, 8f otherwise; a tired dribble 8f.
+pub fn dribble_contact(d: &DribbleState) -> f32 {
+    let frames = match (d.exhausted, d.feint, d.heading) {
+        (true, ..) => 8.0,
+        (_, true, Heading::Forward) => 10.0,
+        (_, true, _) => 8.0,
+        (_, _, Heading::Forward) => 17.0,
+        (_, _, Heading::Side) => 8.0,
+        (_, _, Heading::Back) => 0.0,
+    };
+    frames / 60.0
 }
 
 #[derive(Clone, Copy)]
@@ -79,7 +96,7 @@ pub struct DashState {
 
 impl DashState {
     /// When you're free (the animation's blend-out).
-    fn free(&self) -> f32 {
+    pub fn free(&self) -> f32 {
         (if self.second { SECOND_DASH_FREE } else { DASH_FREE })[self.heading as usize]
     }
 }
@@ -142,7 +159,7 @@ impl DribbleState {
         lengths[self.heading as usize]
     }
 
-    fn free(&self) -> f32 {
+    pub fn free(&self) -> f32 {
         let free = if self.exhausted { EXHAUSTED_DRIBBLE_FREE } else if self.feint { FEINT_FREE } else { DRIBBLE_FREE };
         free[self.heading as usize]
     }
@@ -885,19 +902,33 @@ fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3
         let jitter = ((n as f32 * 12.9898).sin() * 43758.545).fract().abs() * 0.06 - 0.01;
         every / (speed / own).clamp(0.7, 1.5) / (1.0 + turning) + jitter
     };
+    // Touches go the way you move (a dribble's way while it lasts), a little ahead of you.
+    let way = p.dribble.map_or_else(|| Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or(forward(p.facing)), |d| d.dir);
     let predict = |at: f32| {
-        let spot = root + Vec3::new(p.vel.x, 0.0, p.vel.z) * (at - now).max(0.0) + forward(p.facing) * ahead;
+        let spot = root + Vec3::new(p.vel.x, 0.0, p.vel.z) * (at - now).max(0.0) + way * ahead;
         Vec3::new(spot.x, BALL_RADIUS, spot.z)
     };
     let mut c = p.carry.unwrap_or_else(|| {
         let next = now + gap(0);
-        Carry { from: ball, start: now, next, target: predict(next), touches: 0 }
+        Carry { from: ball, start: now, next, target: predict(next), touches: 0, move_start: -1.0 }
     });
+    // A dribble or feint owns the touches: the ball goes from where it is to your foot by the move's
+    // contact frame, then is pushed its way until the move ends.
+    let dribble_end = p.dribble.map(|d| now - d.t + DRIBBLE_SPEED_TIME);
+    if let Some(d) = p.dribble
+        && (now - d.t - c.move_start).abs() > 1e-3
+    {
+        c.move_start = now - d.t;
+        c.from = ball;
+        c.start = now;
+        c.next = (c.move_start + dribble_contact(&d)).max(now + 1.0 / 60.0);
+        c.target = predict(c.next);
+    }
     if now >= c.next {
         c.touches += 1;
         c.from = c.target;
         c.start = now;
-        c.next = now + gap(c.touches);
+        c.next = now + dribble_end.map_or_else(|| gap(c.touches), |end| (end - now).max(0.25));
         c.target = predict(c.next);
     }
     let alpha = ((now - c.start) / (c.next - c.start)).clamp(0.0, 1.0);
@@ -905,8 +936,8 @@ fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3
     p.carry = Some(c);
     let eased = 1.0 - (1.0 - alpha).powf(TOUCH_LAUNCH);
     let pos = c.from.lerp(c.target, eased);
-    // Keep it within reach to the side.
-    let fwd = forward(p.facing);
+    // Keep it within reach to the side of the way you're going.
+    let fwd = way;
     let right = fwd.cross(Vec3::Y);
     let rel = pos - root;
     let (front, side) = (rel.dot(fwd), rel.dot(right));
@@ -1345,7 +1376,7 @@ mod tests {
     #[test]
     fn carried_ball_goes_from_touch_to_touch_ahead_of_you() {
         // Running straight at 4.5 m/s: the ball leads and falls back into each touch, never behind
-        // you or off to the side.
+        // you or off to the side. A dribble then takes the ball its way at its contact frame.
         let mut p = Player { has_ball: true, vel: Vec3::NEG_Z * BALL_RUN_SPEED, ..default() };
         let (mut root, mut ball) = (Vec3::new(0.0, 0.9, 0.0), Vec3::new(0.0, BALL_RADIUS, -0.7));
         let (mut nearest, mut furthest) = (f32::MAX, 0.0f32);
@@ -1362,6 +1393,19 @@ mod tests {
         }
         assert!(nearest > 0.1 && nearest < 0.35, "closest {nearest}");
         assert!(furthest > 0.6 && furthest < 1.3, "furthest {furthest}");
+        // A side dribble to the right: the ball comes to the foot by its contact frame, then goes
+        // right with you.
+        p.vel = Vec3::X * 6.0;
+        p.dribble = Some(DribbleState { t: 0.0, feint: false, exhausted: false, heading: Heading::Side, dir: Vec3::X, facing: 0.0 });
+        for i in 240..300 {
+            let dt = 1.0 / 60.0;
+            root += p.vel * dt;
+            if let Some(d) = p.dribble.as_mut() {
+                d.t += dt;
+            }
+            ball = carry_ball(&mut p, root, ball, i as f32 * dt, dt);
+        }
+        assert!(ball.x > root.x + 0.1 && (ball.z - root.z).abs() < 0.5, "ball {ball} root {root}");
     }
 
     #[test]
