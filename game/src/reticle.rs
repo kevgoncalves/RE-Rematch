@@ -71,7 +71,8 @@ fn centered(size: f32) -> Node {
 pub fn spawn_reticle(mut commands: Commands, mut materials: ResMut<Assets<ReticleMaterial>>) {
     commands.spawn((
         Reticle,
-        centered(RETICLE_PX),
+        // Centred on the camera's sight point, above the middle of the screen (camera.md).
+        Node { top: Val::Percent(CROSSHAIR_SCREEN_Y * 100.0), ..centered(RETICLE_PX) },
         MaterialNode(materials.add(ReticleMaterial { shape: Vec4::new(IDLE_OPENING, 1.0, 0.0, 0.0), ..default() })),
     ));
 

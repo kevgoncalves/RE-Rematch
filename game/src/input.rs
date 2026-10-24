@@ -7,11 +7,10 @@ use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::tuning::{CURVE_STICK_DEAD_ZONE, FOV, MAGNUS_ACCUMULATOR_SENSITIVITY, MOUSE_AXIS_SCALE, MOUSE_SENSITIVITY};
+use crate::tuning::{CURVE_STICK_DEAD_ZONE, FOV, MAGNUS_ACCUMULATOR_SENSITIVITY, MOUSE_AXIS_SCALE};
 
 const SAVE_PATH: &str = "keybinds.ron";
 const DOUBLE_TAP_WINDOW: f32 = 0.3; // TUNE: Rematch's "quick press and hold" window is not in the files
-const STICK_LOOK_SPEED: Vec2 = Vec2::new(160.0, 80.0); // degrees/s, aim camera speed (match-camera-network.md)
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub enum Input {
@@ -398,11 +397,11 @@ pub fn read_input(
             if pad.left_stick().length() > CURVE_STICK_DEAD_ZONE {
                 stick_curve += pad.left_stick();
             }
-            look_pad += pad.right_stick() * STICK_LOOK_SPEED * time.delta_secs();
+            look_pad += pad.right_stick();
         }
         if window.cursor_options.grab_mode != bevy::window::CursorGrabMode::None {
             let delta = Vec2::new(motion.delta.x, -motion.delta.y);
-            look_mouse = delta * MOUSE_SENSITIVITY;
+            look_mouse = delta;
             // The accumulator is held inside a circle: full curve and full dip can't both max out.
             axes.curve_mouse += delta * MOUSE_AXIS_SCALE * MAGNUS_ACCUMULATOR_SENSITIVITY * bindings.magnus_sensitivity;
             axes.curve_mouse = axes.curve_mouse.clamp_length_max(1.0);

@@ -3,6 +3,7 @@
 mod arena;
 mod ball;
 mod body;
+mod camera;
 mod gauges;
 mod input;
 mod menu;
@@ -51,7 +52,7 @@ fn main() {
                 // Capture before clicks, so the click that opens a capture isn't bound.
                 (menu::capture_binding, menu::menu_clicks, menu::drag_sliders, menu::refresh_labels).chain(),
                 player::grab_cursor,
-                player::camera_look,
+                camera::camera_look,
                 player::player_move,
                 player::kicking,
                 player::ball_call,
@@ -59,7 +60,7 @@ fn main() {
                 ball::ball_physics,
                 on_goal,
                 body::animate_body,
-                player::camera_follow,
+                camera::camera_follow,
                 update_hud,
                 reticle::update_reticle,
                 pass_line::update_pass_line,
@@ -117,6 +118,7 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials
         Camera3d::default(),
         Projection::from(PerspectiveProjection { fov: FOV.to_radians(), ..default() }),
         CameraRig::default(),
+        camera::CameraState::default(),
         Transform::default(),
     ));
     commands.spawn((

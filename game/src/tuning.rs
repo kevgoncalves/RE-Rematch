@@ -355,11 +355,24 @@ pub const NO_RECONTROL_TIME: f32 = 0.5; // GE_LostBall: no control of your own k
 pub const FEED_DISTANCE: f32 = 15.0; // TUNE
 pub const FEED_SPEED: f32 = 16.0; // TUNE
 
-// Camera (match-camera-network.md)
-pub const CAMERA_DISTANCE: f32 = 5.0;
-pub const CAMERA_RIGHT: f32 = 0.6;
-pub const CAMERA_HEIGHT: f32 = 2.0;
+// Camera (camera.md). Each state's geometry is in camera.rs.
+/// Default's FOV: horizontal at 16:9 (the FOV option shifts every state from it).
 pub const FOV: f32 = 80.0;
+/// Pitch limits: 22 deg down, 15 deg up.
+pub const CAMERA_PITCH_DOWN: f32 = 22.0;
+pub const CAMERA_PITCH_UP: f32 = 15.0;
+/// Mouse: degrees of yaw / pitch per look unit = scale x the state's turn speed x pi/180.
+pub const CAMERA_MOUSE_YAW: f32 = 0.35;
+pub const CAMERA_MOUSE_PITCH: f32 = 0.55;
+/// Gamepad boost: held past 0.9 it ramps up over 0.2 s, and back down over 0.1 s.
+pub const CAMERA_BOOST_THRESHOLD: f32 = 0.9;
+pub const CAMERA_BOOST_UP: f32 = 0.2;
+pub const CAMERA_BOOST_DOWN: f32 = 0.1;
+/// The movement's sideways offset freezes when you stop, then eases back after 0.2 s at 0.5 /s.
+pub const CAMERA_SIDE_IDLE: f32 = 0.2;
+pub const CAMERA_SIDE_RETURN: f32 = 0.5;
+/// The crosshair (the camera's sight point) sits at this share of the screen's height.
+pub const CROSSHAIR_SCREEN_Y: f32 = 0.38;
 /// The FOV option's range (players report a 90 deg maximum; the minimum is a guess: TUNE).
 pub const FOV_OPTION_RANGE: (f32, f32) = (70.0, 90.0);
 /// The "Magnus sensitivity" option multiplies the mouse curve accumulator (default 1; the
@@ -367,10 +380,6 @@ pub const FOV_OPTION_RANGE: (f32, f32) = (70.0, 90.0);
 pub const MAGNUS_SENSITIVITY_RANGE: (f32, f32) = (0.1, 2.0);
 /// Gamepad: the curve stick ignores small tilts (InputShootRotationForceComputation's dead zone).
 pub const CURVE_STICK_DEAD_ZONE: f32 = 0.2;
-pub const SPRINT_FOV: f32 = 85.0;
-pub const PITCH_UP_LIMIT: f32 = 22.0;
-pub const PITCH_DOWN_LIMIT: f32 = 15.0;
-pub const MOUSE_SENSITIVITY: f32 = 0.12; // degrees per pixel: TUNE
 
 #[cfg(test)]
 mod tests {

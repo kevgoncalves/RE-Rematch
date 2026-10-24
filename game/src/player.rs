@@ -315,24 +315,6 @@ pub fn grab_cursor(
     }
 }
 
-pub fn camera_look(
-    mut rig: Single<&mut CameraRig>,
-    axes: Res<Axes>,
-    actions: Res<Actions>,
-    player: Single<(&Transform, &Player)>,
-    ball: Single<&Transform, With<Ball>>,
-    bindings: Res<Bindings>,
-) {
-    let (ptf, p) = *player;
-    if actions.just_pressed(Action::LookAtBall) {
-        let to_ball = ball.translation - ptf.translation;
-        rig.yaw = (-to_ball.x).atan2(-to_ball.z).to_degrees();
-    }
-    let look = if p.mouse_steers_kick(bindings.pass_aim) { axes.look_pad } else { axes.look_pad + axes.look_mouse };
-    rig.yaw -= look.x;
-    rig.pitch = (rig.pitch + look.y).clamp(-PITCH_DOWN_LIMIT, PITCH_UP_LIMIT);
-}
-
 pub fn player_move(
     mut player: Single<(&mut Transform, &mut Player)>,
     rig: Single<&CameraRig>,
@@ -758,8 +740,7 @@ pub fn kicking(
     }
     if k.kind == Kick::Shot {
         // The gamepad's right stick keeps aiming a charging shot; the mouse curves it instead.
-        k.aim.x -= axes.look_pad.x;
-        k.aim.y = (k.aim.y + axes.look_pad.y).clamp(-PITCH_DOWN_LIMIT, PITCH_UP_LIMIT);
+        k.aim = Vec2::new(rig.yaw, rig.pitch);
     }
     // The ball leaves on release, but never before the kick's contact frame (ShootDataTable):
     // a shot under 29.41 m/s uses the quicker low-power kick (20 frames, not 32).
@@ -920,27 +901,6 @@ pub fn ball_call(
     btf.translation = from;
     // A low arc that lands at your feet: enough vertical speed to come back down after `flight`.
     b.vel = (to - from).normalize_or_zero() * FEED_SPEED + Vec3::Y * GRAVITY * BALL_MASS * flight / 2.0;
-}
-
-pub fn camera_follow(
-    player: Single<(&Transform, &Player), Without<Camera3d>>,
-    rig: Single<&CameraRig>,
-    bindings: Res<Bindings>,
-    mut camera: Single<(&mut Transform, &mut Projection), With<Camera3d>>,
-    time: Res<Time>,
-) {
-    let (ptf, p) = *player;
-    let rot = Quat::from_euler(EulerRot::YXZ, rig.yaw.to_radians(), rig.pitch.to_radians(), 0.0);
-    let pivot = ptf.translation + Vec3::Y * CAMERA_HEIGHT;
-    let (ctf, proj) = &mut *camera;
-    ctf.translation = pivot + rot * Vec3::new(CAMERA_RIGHT, 0.0, CAMERA_DISTANCE);
-    ctf.rotation = rot;
-    if let Projection::Perspective(persp) = &mut **proj {
-        // The FOV option moves every state's FOV by the same amount (assumed).
-        let state = if p.sprint_running || p.extra_active { SPRINT_FOV } else { FOV };
-        let target = (state + bindings.fov - FOV).to_radians();
-        persp.fov += (target - persp.fov) * (time.delta_secs() * 5.0).min(1.0);
-    }
 }
 
 #[cfg(test)]
