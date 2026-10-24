@@ -141,7 +141,15 @@ pub const STANCE_MIN_TIME: f32 = 0.15;
 pub const LOCK_SPEED_BY_ANGLE: [(f32, f32); 3] = [(0.0, 1.0), (90.0, 1.0), (180.0, 0.9)];
 pub const LOCK_BALL_SPEED_BY_ANGLE: [(f32, f32); 4] = [(0.0, 1.0), (90.0, 0.95), (135.0, 0.88), (180.0, 0.88)];
 // Dash (mechanics.md §8): speed (m/s) over the dash's normalised time
-pub const DASH_DURATION: f32 = 50.0 / 60.0;
+/// Dash animation lengths and when you're free (blend-out), by sector: forward, side, back.
+pub const DASH_LENGTH: [f32; 3] = [50.0 / 60.0, 41.0 / 60.0, 50.0 / 60.0];
+pub const DASH_FREE: [f32; 3] = [32.0 / 60.0, 23.0 / 60.0, 32.0 / 60.0];
+pub const SECOND_DASH_LENGTH: [f32; 3] = [60.0 / 60.0, 42.0 / 60.0, 43.0 / 60.0];
+pub const SECOND_DASH_FREE: [f32; 3] = [42.0 / 60.0, 24.0 / 60.0, 29.0 / 60.0];
+/// Keeping the stick within 15 deg of the dash's way leaves it early from these frames.
+pub const DASH_EXIT_FROM: f32 = 14.4 / 60.0;
+pub const SECOND_DASH_EXIT_FROM: f32 = 25.2 / 60.0;
+pub const DASH_EXIT_ANGLE: f32 = 15.0;
 pub const DASH_SPEED: [(f32, f32); 6] = [(0.0, 6.0), (0.1, 8.5), (0.233, 8.5), (0.331, 6.5), (0.5, 4.5), (1.0, 4.5)];
 pub const SECOND_DASH_SPEED: [(f32, f32); 5] = [(0.0, 6.0), (0.1, 7.2), (0.3, 7.2), (0.7, 2.0), (1.0, 2.0)];
 pub const DASH_COOLDOWN: f32 = 0.8;
@@ -167,6 +175,20 @@ pub const EXHAUSTED_DRIBBLE_BACK: [(f32, f32); 6] = [(0.0, 4.0), (0.1, 6.5), (0.
 pub const DRIBBLE_LENGTH: [f32; 3] = [54.0 / 60.0, 50.0 / 60.0, 64.0 / 60.0];
 pub const FEINT_LENGTH: [f32; 3] = [65.0 / 60.0, 50.0 / 60.0, 53.0 / 60.0];
 pub const EXHAUSTED_DRIBBLE_LENGTH: [f32; 3] = [65.0 / 60.0, 63.0 / 60.0, 67.0 / 60.0];
+/// You get the stick back when a dribble's animation starts to blend out, 15 frames before its
+/// end; its permissions (feint, dribble push ball, no new dribble) last to the end
+/// (responsiveness.md §2). Feints to the side: 35f right, 41f left (averaged here).
+pub const DRIBBLE_FREE: [f32; 3] = [39.0 / 60.0, 35.0 / 60.0, 49.0 / 60.0];
+pub const FEINT_FREE: [f32; 3] = [56.0 / 60.0, 38.0 / 60.0, 38.0 / 60.0];
+pub const EXHAUSTED_DRIBBLE_FREE: [f32; 3] = [50.0 / 60.0, 48.0 / 60.0, 52.0 / 60.0];
+/// Animations blend out over 15 frames: push ball chases hand back then at the latest.
+pub const BLEND_OUT: f32 = 15.0 / 60.0;
+/// A move's direction needs this much stick tilt; less is no direction (forward).
+pub const MOVE_DIRECTION_DEAD_ZONE: f32 = 0.3;
+/// Push balls ignore stick tilts under this.
+pub const PUSH_BALL_DEAD_ZONE: f32 = 0.1;
+/// For 0.1 s after a push ball or pass starts, a longer chord can still take over.
+pub const CHORD_WINDOW: f32 = 0.1;
 pub const DRIBBLE_COST: f32 = 0.5;
 pub const DRIBBLE_REGEN_DELAY: f32 = 0.9;
 /// No new dribble until this long after a feint starts (our reading of the game's 1 s tag time).

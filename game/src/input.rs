@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::tuning::{CURVE_STICK_DEAD_ZONE, FOV, MAGNUS_ACCUMULATOR_SENSITIVITY, MOUSE_AXIS_SCALE};
 
 const SAVE_PATH: &str = "keybinds.ron";
-const DOUBLE_TAP_WINDOW: f32 = 0.3; // TUNE: Rematch's "quick press and hold" window is not in the files
+const DOUBLE_TAP_WINDOW: f32 = 0.15; // extra effort: release, then press again within 0.15 s (QuickPressAndHold)
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub enum Input {
@@ -83,6 +83,12 @@ impl Action {
     /// Only fires when tapped twice quickly and held (Rematch's QuickPressAndHold).
     fn double_tap(self) -> bool {
         self == Action::ExtraEffort
+    }
+
+    /// Tap moves count on the press, or on the release if they weren't allowed at the press
+    /// (responsiveness.md §1). Other kicks count while held.
+    fn tap(self) -> bool {
+        matches!(self, Action::PushBall | Action::Dash)
     }
 }
 
@@ -261,6 +267,8 @@ pub struct Actions {
     /// Actions with an input of their chord pressed this frame. Only these count as just pressed,
     /// so letting go of a longer chord (LT + A) doesn't fire the shorter one it hid (A).
     fresh: HashSet<Action>,
+    /// Presses not used yet (see `pending`).
+    pending: HashSet<Action>,
 }
 
 impl Actions {
@@ -275,6 +283,21 @@ impl Actions {
     pub fn held(&self, a: Action) -> bool {
         self.raw_prev.contains(&a) // already this frame's chords once read_input has run
     }
+    /// A press not used yet: tap moves until the frame they're released, other kicks while held.
+    /// A move that isn't allowed at the press fires as soon as it is, within that time.
+    pub fn pending(&self, a: Action) -> bool {
+        self.pending.contains(&a)
+    }
+    /// Uses up a pending press.
+    pub fn consume(&mut self, a: Action) {
+        self.pending.remove(&a);
+    }
+    fn update_pending(&mut self) {
+        let fresh: Vec<Action> = Action::ALL.into_iter().filter(|a| self.just_pressed(*a)).collect();
+        self.pending.extend(fresh);
+        let (now, prev) = (&self.now, &self.prev);
+        self.pending.retain(|a| now.contains(a) || (a.tap() && prev.contains(a)));
+    }
 
     /// For tests: start a frame with exactly these actions held.
     #[cfg(test)]
@@ -282,6 +305,7 @@ impl Actions {
         self.prev = std::mem::replace(&mut self.now, held.iter().copied().collect());
         self.raw_prev = self.now.clone();
         self.fresh = self.now.difference(&self.prev).copied().collect();
+        self.update_pending();
     }
 }
 
@@ -386,6 +410,7 @@ pub fn read_input(
     }
     actions.raw_prev = raw_now;
     actions.prev = std::mem::replace(&mut actions.now, now);
+    actions.update_pending();
 
     // Analog: keyboard directions plus the left stick; mouse plus the right stick for the camera.
     let key_axis = |pos: Action, neg: Action| actions.pressed(pos) as i32 as f32 - actions.pressed(neg) as i32 as f32;

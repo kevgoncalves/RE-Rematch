@@ -180,7 +180,7 @@ pub fn animate_body(
         }
     }
     // Dribble: lean into the move.
-    if let Some(d) = p.dribble {
+    if let Some(d) = p.dribble.filter(|d| d.moving()) {
         let dir = to_local * d.dir;
         set(&mut poses, Part::Body, &|q| {
             q.pitch = 0.2 * dir.z;
