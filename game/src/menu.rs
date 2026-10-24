@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use bevy::ui::RelativeCursorPosition;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 
+use crate::fx::{Cheat, Cheats};
 use crate::input::{Action, Bindings, Device, Input, InputBlocked, chord_name};
 use crate::tuning::{FOV_OPTION_RANGE, MAGNUS_SENSITIVITY_RANGE};
 
@@ -29,6 +30,8 @@ pub enum MenuButton {
     ModifierPreset,
     /// Cycles the keyboard-and-mouse pass aiming mode.
     PassAim,
+    /// Turns a practice cheat on or off.
+    Cheat(Cheat),
 }
 
 /// A slider option, saved with the bindings.
@@ -147,6 +150,12 @@ pub fn spawn_menu(mut commands: Commands) {
                             .with_child(text(label.into(), 15.0));
                     }
                 });
+                panel.spawn(Node { margin: UiRect::top(Val::Px(8.0)), column_gap: Val::Px(8.0), ..default() }).with_children(|row| {
+                    for cheat in Cheat::ALL {
+                        row.spawn((Button, MenuButton::Cheat(cheat), Node { padding: UiRect::all(Val::Px(6.0)), ..default() }, BackgroundColor(BUTTON)))
+                            .with_child(text(String::new(), 15.0));
+                    }
+                });
                 // Options: click or drag on a bar.
                 for setting in Setting::ALL {
                     panel
@@ -189,6 +198,7 @@ pub fn toggle_menu(
 pub fn menu_clicks(
     mut menu: ResMut<Menu>,
     mut bindings: ResMut<Bindings>,
+    mut cheats: ResMut<Cheats>,
     binds: Query<(&Interaction, &BindButton), Changed<Interaction>>,
     buttons: Query<(&Interaction, &MenuButton), Changed<Interaction>>,
 ) {
@@ -205,12 +215,17 @@ pub fn menu_clicks(
         if *interaction != Interaction::Pressed {
             continue;
         }
+        if let MenuButton::Cheat(cheat) = button {
+            cheats.toggle(*cheat);
+            continue;
+        }
         // Presets swap the buttons but keep the pass aiming choice.
         let aim = bindings.pass_aim;
         match button {
             MenuButton::Defaults => *bindings = Bindings { pass_aim: aim, ..Bindings::default() },
             MenuButton::ModifierPreset => *bindings = Bindings { pass_aim: aim, ..Bindings::rematch_modifier_preset() },
             MenuButton::PassAim => bindings.pass_aim = aim.next(),
+            MenuButton::Cheat(_) => {}
         }
         bindings.save();
     }
@@ -299,8 +314,9 @@ pub fn capture_binding(
 pub fn refresh_labels(
     menu: Res<Menu>,
     bindings: Res<Bindings>,
+    cheats: Res<Cheats>,
     mut buttons: Query<(&BindButton, &Children, &mut BackgroundColor)>,
-    menu_buttons: Query<(&MenuButton, &Children)>,
+    mut menu_buttons: Query<(&MenuButton, &Children, &mut BackgroundColor), Without<BindButton>>,
     mut texts: Query<&mut Text, Without<SliderLabel>>,
     mut fills: Query<(&SliderFill, &mut Node)>,
     mut slider_labels: Query<(&SliderLabel, &mut Text)>,
@@ -335,12 +351,19 @@ pub fn refresh_labels(
             }
         }
     }
-    for (button, children) in &menu_buttons {
-        if let (MenuButton::PassAim, Some(mut text)) = (button, children.first().and_then(|c| texts.get_mut(*c).ok())) {
-            let label = format!("Pass aim: {:?}", bindings.pass_aim);
-            if text.0 != label {
-                text.0 = label;
+    for (button, children, mut bg) in &mut menu_buttons {
+        let label = match button {
+            MenuButton::PassAim => format!("Pass aim: {:?}", bindings.pass_aim),
+            MenuButton::Cheat(cheat) => {
+                bg.0 = if cheats.on(*cheat) { BUTTON_ACTIVE } else { BUTTON };
+                format!("{}: {}", cheat.label(), if cheats.on(*cheat) { "on" } else { "off" })
             }
+            _ => continue,
+        };
+        if let Some(mut text) = children.first().and_then(|c| texts.get_mut(*c).ok())
+            && text.0 != label
+        {
+            text.0 = label;
         }
     }
 }

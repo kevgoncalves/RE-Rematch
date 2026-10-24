@@ -6,7 +6,7 @@ use bevy::prelude::*;
 
 use crate::tuning::*;
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct Ball {
     pub vel: Vec3,
     /// Spin in the flight frame (x along the path, y to its right, z up from both): z curves the

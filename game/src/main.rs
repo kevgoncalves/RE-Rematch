@@ -4,6 +4,7 @@ mod arena;
 mod ball;
 mod body;
 mod camera;
+mod fx;
 mod gauges;
 mod input;
 mod menu;
@@ -42,8 +43,9 @@ fn main() {
         .init_resource::<Axes>()
         .init_resource::<InputBlocked>()
         .init_resource::<menu::Menu>()
+        .init_resource::<fx::Cheats>()
         .add_event::<GoalScored>()
-        .add_systems(Startup, (arena::spawn_arena, setup, menu::spawn_menu, reticle::spawn_reticle, gauges::spawn_gauges, pass_line::spawn_pass_line))
+        .add_systems(Startup, (arena::spawn_arena, setup, menu::spawn_menu, reticle::spawn_reticle, gauges::spawn_gauges, pass_line::spawn_pass_line, fx::spawn_fx))
         .add_systems(
             Update,
             (
@@ -58,6 +60,7 @@ fn main() {
                 player::ball_call,
                 player::ball_control,
                 ball::ball_physics,
+                (fx::apply_cheats, fx::kick_marker, fx::dribble_fx, fx::fade_glows, fx::ball_lines).chain(),
                 on_goal,
                 body::animate_body,
                 camera::camera_follow,
