@@ -445,11 +445,11 @@ pub const TOUCH_TURN_RATES: (f32, f32) = (20.0, 180.0);
 pub const CONTROL_MAX_HEIGHT: f32 = 2.0;
 pub const DRIBBLE_OFFSET: f32 = 0.7; // TUNE: where a control settles the ball, in front
 /// Lock move with the ball: where the ball sits under the right sole (m ahead, m right), how far
-/// it rolls ahead the way you move (seconds of your velocity), and how fast it eases there. TUNE:
-/// matched to our stance pose.
+/// it rolls ahead the way you move (seconds of your velocity), and how fast it eases there (the
+/// stance's snap lands at 17f, so most of the way in about 0.3 s). TUNE: matched to our stance pose.
 pub const STANCE_BALL: (f32, f32) = (0.27, 0.15);
 pub const STANCE_BALL_LEAD: f32 = 0.03;
-pub const STANCE_BALL_TIME: f32 = 0.06;
+pub const STANCE_BALL_TIME: f32 = 0.1;
 /// Where a push ball's touch draws the ball to, ahead of you the way you push (m). TUNE.
 pub const PUSH_TOUCH_REACH: f32 = 0.4;
 /// While an extra-effort chop is possible, the ridden ball sits this far ahead of you (m), under
