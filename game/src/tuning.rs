@@ -156,14 +156,15 @@ pub const TURN_RATE_BALL_RUN: f32 = 180.0; // with-ball speed table's max angula
 pub const TURN_RATE_SPRINT: f32 = 180.0;
 pub const TURN_RATE_BALL_SPRINT: f32 = 90.0;
 /// Out of lock move the body turns to face where you're going this fast, without changing your heading (TUNE).
-pub const FACE_HEADING_TURN_RATE: f32 = 720.0;
+/// Past 90 deg behind your heading, the body turns this much faster (deg/s).
+pub const BODY_CATCH_UP: f32 = 60.0;
 pub const LOCK_SPEED: f32 = 5.25;
 pub const LOCK_BALL_SPEED: f32 = 4.0;
 pub const LOCK_ACCEL: f32 = LOCK_SPEED / 0.2; // full speed in 0.2 s
 pub const LOCK_BALL_ACCEL: f32 = LOCK_BALL_SPEED / 0.2;
 /// Turning to face the camera in lock move. The speed table says 400 deg/s for outfielders (nothing
 /// with the ball), but players find the turn to the front much quicker (TUNE).
-pub const LOCK_TURN_RATE: f32 = 720.0;
+pub const LOCK_TURN_RATE: f32 = 400.0; // the lock-move speed table's rotation rate
 /// Stance (lock move with the ball) lasts at least this long from the press (GA_DribbleStance).
 pub const STANCE_MIN_TIME: f32 = 0.15;
 /// Angle between facing and movement (degrees) to speed multiplier.
@@ -222,7 +223,10 @@ pub const DRIBBLE_REGEN_DELAY: f32 = 0.9;
 /// No new dribble until this long after a feint starts (our reading of the game's 1 s tag time).
 pub const FEINT_LOCKOUT: f32 = 12.0 / 60.0 + 1.0;
 /// How fast a fast cut turns you (and the ball) to its direction, degrees per second.
-pub const DRIBBLE_TURN_RATE: f32 = 1440.0;
+/// Dribbles and dashes turn the body to their way linearly over these (BP_RedirectCardinalsToForward
+/// 12f; the dash's redirection 9f).
+pub const DRIBBLE_TURN_TIME: f32 = 12.0 / 60.0;
+pub const DASH_TURN_TIME: f32 = 9.0 / 60.0;
 pub const EXHAUSTED_SPRINT: f32 = 6.0;
 pub const EXHAUSTED_BALL_SPRINT: f32 = 5.0;
 
@@ -407,7 +411,25 @@ pub const CONTROL_AWAY_ANGLE: f32 = 75.0;
 pub const CONTROL_SNAP: f32 = 12.0 / 60.0;
 pub const CONTROL_ACT: f32 = 16.0 / 60.0;
 pub const CONTROL_MAX_HEIGHT: f32 = 2.0;
-pub const DRIBBLE_OFFSET: f32 = 0.7; // TUNE: ball distance in front while carrying
+pub const DRIBBLE_OFFSET: f32 = 0.7; // TUNE: where a control settles the ball, in front
+/// Running with the ball, it travels from touch to touch (TouchBallComponent and the run-with-ball
+/// cycles' touch data): each touch is aimed this far ahead of you, every few steps.
+pub const TOUCH_AHEAD_RUN: f32 = 0.20;
+pub const TOUCH_AHEAD_SPRINT: f32 = 0.25;
+/// Seconds between touches at the cycles' own speeds: a touch every 3 steps of the 0.6 s run cycle,
+/// every 2 of the 0.567 s sprint cycle.
+pub const TOUCH_EVERY_RUN: f32 = 3.0 * 0.6 / 2.0;
+pub const TOUCH_EVERY_SPRINT: f32 = 2.0 * 0.567 / 2.0;
+/// The ball leaves the foot at this many times the average speed to the next touch, slowing to
+/// meet it.
+pub const TOUCH_LAUNCH: f32 = 1.6;
+/// How hard the next touch's spot is pulled to the newest prediction: 15 early in the touch, 5 from
+/// halfway.
+pub const TOUCH_SPRING: [(f32, f32); 2] = [(0.35, 15.0), (0.5, 5.0)];
+/// How far to the side the ball may be, by how far ahead it is (m).
+pub const TOUCH_SIDE_LIMIT: [(f32, f32); 3] = [(0.0, 0.4), (0.2, 0.6), (0.8, 2.4)];
+/// A control blends the ball to the foot (sine-out) unless it is this close.
+pub const CONTROL_SNAP_NEAR: f32 = 0.1;
 pub const NO_RECONTROL_TIME: f32 = 0.5; // GE_LostBall: no control of your own kick for 0.5 s
 
 // Freeplay ball call

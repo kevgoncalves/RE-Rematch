@@ -49,6 +49,21 @@ pub struct Player {
     pub freeze: f32,
     /// Seconds riding on the ball in extra effort, before it is tapped on.
     pub effort_ride: f32,
+    /// Where a control took the ball from.
+    pub receive_from: Vec3,
+    /// Running with the ball: its travel from one touch to the next.
+    pub carry: Option<Carry>,
+}
+
+/// The ball between two touches while you run with it: it leaves the last touch's spot and slows
+/// into the next touch's, a spot sprung toward where your foot will be.
+#[derive(Clone, Copy, Debug)]
+pub struct Carry {
+    from: Vec3,
+    start: f32,
+    next: f32,
+    target: Vec3,
+    touches: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -171,6 +186,19 @@ impl Turn {
 
 /// Starts a turn toward `dir` (turns.md §2). Entering slower than top speed, the game treats you
 /// as at top speed and starts the brake where its curve gives your speed, at most 20% in.
+/// How fast your body turns to face your heading, deg/s (the speed tables' rotation rates): without
+/// the ball 600, 400 at full stick, 360 sprinting; with it 720 barely tilting the stick, else 360,
+/// 180 sprinting; in extra effort 600, 450 at full stick.
+fn body_turn_rate(p: &Player, stick: f32) -> f32 {
+    match (p.extra_active, p.sprinting, p.has_ball) {
+        (true, ..) => if stick >= 0.95 { 450.0 } else { 600.0 },
+        (_, true, true) => 180.0,
+        (_, true, false) => 360.0,
+        (_, false, true) => if stick < 0.3 { 720.0 } else { 360.0 },
+        (_, false, false) => if stick >= 0.95 { 400.0 } else { 600.0 },
+    }
+}
+
 fn start_turn(p: &Player, dir: Vec3, big: bool, speed: f32, top: f32) -> Turn {
     let (brake, accel, share) = turn_data(p.sprint_running, p.has_ball, big);
     let pivot = share * top;
@@ -262,6 +290,8 @@ impl Default for Player {
             last_input: Vec3::ZERO,
             freeze: 0.0,
             effort_ride: 0.0,
+            receive_from: Vec3::ZERO,
+            carry: None,
         }
     }
 }
@@ -605,9 +635,8 @@ pub fn player_move(
         p.vel = Vec3::new(k.entry.x, 0.0, k.entry.z);
     } else if let Some(mut d) = p.dribble.filter(|d| d.moving()) {
         d.t += dt;
-        let diff = (d.facing - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
-        let max_turn = DRIBBLE_TURN_RATE.to_radians() * dt;
-        p.facing += diff.clamp(-max_turn, max_turn);
+        // The body turns to the dribble's way linearly over its redirect time.
+        p.facing += angle_diff(d.facing, p.facing) * (dt / (DRIBBLE_TURN_TIME - (d.t - dt)).max(dt)).min(1.0);
         p.vel = d.dir * curve(d.speeds(), (d.t / DRIBBLE_SPEED_TIME).min(1.0));
         p.dribble = Some(d);
     } else if let Some(k) = p.kick.filter(|k| k.kind == Kick::Shot) {
@@ -625,8 +654,7 @@ pub fn player_move(
         // Turn as a dribble would. Dashing onto the ball controls it and carries it on in front,
         // the way you dash, like a fast cut (players confirm): then the body faces the dash.
         let target = if p.has_ball { yaw_of(d.dir) } else { d.facing };
-        let max_turn = DRIBBLE_TURN_RATE.to_radians() * dt;
-        p.facing += angle_diff(target, p.facing).clamp(-max_turn, max_turn);
+        p.facing += angle_diff(target, p.facing) * (dt / (DASH_TURN_TIME - (d.t - dt)).max(dt)).min(1.0);
         let speeds: &[(f32, f32)] = if d.second { &SECOND_DASH_SPEED } else { &DASH_SPEED };
         p.vel = d.dir * curve(speeds, d.t);
         // Free at the blend-out; earlier if you keep the stick within 15 deg of the dash's way
@@ -724,8 +752,11 @@ pub fn player_move(
         let heading = heading_now + angle_diff(yaw_of(wish), heading_now).clamp(-max_turn, max_turn);
         let new_speed = (speed + accel * input.length() * dt).min(top * input.length());
         p.vel = forward(heading) * new_speed.max(speed.min(top) - STOP_DECEL * dt);
-        let body_turn = FACE_HEADING_TURN_RATE.to_radians() * dt;
-        p.facing += angle_diff(heading, p.facing).clamp(-body_turn, body_turn);
+        let lag = angle_diff(heading, p.facing);
+        // Past 90 deg behind your heading the body catches up a little faster.
+        let catch_up = if lag.abs() > std::f32::consts::FRAC_PI_2 { BODY_CATCH_UP } else { 0.0 };
+        let body_turn = (body_turn_rate(p, input.length()) + catch_up).to_radians() * dt;
+        p.facing += lag.clamp(-body_turn, body_turn);
     } else {
         // Stopping takes the state's stop time from its top speed (stop transitions).
         let (state, full) = match (speed > RUN_SPEED + 0.25, p.has_ball) {
@@ -779,24 +810,29 @@ pub fn ball_control(
         let t = t + time.delta_secs();
         p.receiving = (t < CONTROL_ACT).then_some(t);
         if !p.has_ball {
+            // The ball never jumps to the foot: it blends there from where it was, eased sine-out,
+            // by the control's touch frame (TouchBallComponent); only within 10 cm does it snap.
             let target = ptf.translation + forward(p.facing) * DRIBBLE_OFFSET;
             let target = Vec3::new(target.x, BALL_RADIUS, target.z);
-            btf.translation = btf.translation.lerp(target, (t / CONTROL_SNAP).min(1.0));
+            let u = if p.receive_from.distance(target) < CONTROL_SNAP_NEAR { 1.0 } else { (t / CONTROL_SNAP).min(1.0) };
+            btf.translation = p.receive_from.lerp(target, (u * std::f32::consts::FRAC_PI_2).sin());
             b.vel = p.vel;
             if t >= CONTROL_SNAP {
                 p.has_ball = true;
                 b.held = true;
+                p.carry = None;
             }
             return;
         }
     }
     if p.has_ball {
-        // ponytail: ball glued in front of the feet; real dribble touches come later
-        let target = ptf.translation + forward(p.facing) * DRIBBLE_OFFSET;
-        btf.translation = Vec3::new(target.x, BALL_RADIUS, target.z);
-        b.vel = p.vel;
+        let now = time.elapsed_secs();
+        let before = btf.translation;
+        btf.translation = carry_ball(p, ptf.translation, btf.translation, now, time.delta_secs());
+        b.vel = (btf.translation - before) / time.delta_secs().max(1e-4);
         return;
     }
+    p.carry = None;
     let flat = Vec2::new(btf.translation.x - ptf.translation.x, btf.translation.z - ptf.translation.z);
     // Into your own frame: x forward, y up (from the pitch), z right.
     let fwd = forward(p.facing);
@@ -830,8 +866,53 @@ pub fn ball_control(
     }
     if in_reach {
         p.receiving = Some(0.0);
+        p.receive_from = btf.translation;
         b.spin = Vec3::ZERO;
     }
+}
+
+/// Where the ball is this frame while you run with it (TouchBallComponent): it leaves each touch's
+/// spot fast and slows into the next one's, aimed a little ahead of where you'll be then. That spot
+/// is sprung toward the newest prediction, hard just after a touch and softly later, so late stick
+/// changes bend the ball's path; and the ball never strays far to your side.
+fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3 {
+    let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
+    let (ahead, every, own) = if p.sprinting { (TOUCH_AHEAD_SPRINT, TOUCH_EVERY_SPRINT, BALL_SPRINT_SPEED) } else { (TOUCH_AHEAD_RUN, TOUCH_EVERY_RUN, BALL_RUN_SPEED) };
+    // Touches come with the steps: faster when you run faster (as the cycle's play rate), up to
+    // 20% more often on sharp turns, each a little off the beat.
+    let turning = p.turn.is_some() as u8 as f32 * 0.2;
+    let gap = |n: u32| {
+        let jitter = ((n as f32 * 12.9898).sin() * 43758.545).fract().abs() * 0.06 - 0.01;
+        every / (speed / own).clamp(0.7, 1.5) / (1.0 + turning) + jitter
+    };
+    let predict = |at: f32| {
+        let spot = root + Vec3::new(p.vel.x, 0.0, p.vel.z) * (at - now).max(0.0) + forward(p.facing) * ahead;
+        Vec3::new(spot.x, BALL_RADIUS, spot.z)
+    };
+    let mut c = p.carry.unwrap_or_else(|| {
+        let next = now + gap(0);
+        Carry { from: ball, start: now, next, target: predict(next), touches: 0 }
+    });
+    if now >= c.next {
+        c.touches += 1;
+        c.from = c.target;
+        c.start = now;
+        c.next = now + gap(c.touches);
+        c.target = predict(c.next);
+    }
+    let alpha = ((now - c.start) / (c.next - c.start)).clamp(0.0, 1.0);
+    c.target += (predict(c.next) - c.target) * (curve(&TOUCH_SPRING, alpha) * dt).min(1.0);
+    p.carry = Some(c);
+    let eased = 1.0 - (1.0 - alpha).powf(TOUCH_LAUNCH);
+    let pos = c.from.lerp(c.target, eased);
+    // Keep it within reach to the side.
+    let fwd = forward(p.facing);
+    let right = fwd.cross(Vec3::Y);
+    let rel = pos - root;
+    let (front, side) = (rel.dot(fwd), rel.dot(right));
+    let limit = curve(&TOUCH_SIDE_LIMIT, front.max(0.0));
+    let pos = pos - right * (side - side.clamp(-limit, limit));
+    Vec3::new(pos.x, BALL_RADIUS, pos.z)
 }
 
 #[derive(Debug, PartialEq)]
@@ -1259,6 +1340,28 @@ mod tests {
         assert_eq!(auto_tap_factor(run, Vec3::NEG_Z, BALL_RADIUS), 1.0);
         assert_eq!(auto_tap_factor(run, Vec3::Z, BALL_RADIUS), EXTRA_EFFORT_TAP_IN_180_TURN);
         assert_eq!(auto_tap_factor(run, Vec3::new(0.7, 0.0, 0.7).normalize(), BALL_RADIUS), EXTRA_EFFORT_TAP_IN_135_TURN);
+    }
+
+    #[test]
+    fn carried_ball_goes_from_touch_to_touch_ahead_of_you() {
+        // Running straight at 4.5 m/s: the ball leads and falls back into each touch, never behind
+        // you or off to the side.
+        let mut p = Player { has_ball: true, vel: Vec3::NEG_Z * BALL_RUN_SPEED, ..default() };
+        let (mut root, mut ball) = (Vec3::new(0.0, 0.9, 0.0), Vec3::new(0.0, BALL_RADIUS, -0.7));
+        let (mut nearest, mut furthest) = (f32::MAX, 0.0f32);
+        for i in 0..240 {
+            let dt = 1.0 / 60.0;
+            root += p.vel * dt;
+            ball = carry_ball(&mut p, root, ball, i as f32 * dt, dt);
+            let ahead = root.z - ball.z;
+            if i > 60 {
+                nearest = nearest.min(ahead);
+                furthest = furthest.max(ahead);
+            }
+            assert!((ball.x - root.x).abs() < 1e-3);
+        }
+        assert!(nearest > 0.1 && nearest < 0.35, "closest {nearest}");
+        assert!(furthest > 0.6 && furthest < 1.3, "furthest {furthest}");
     }
 
     #[test]
