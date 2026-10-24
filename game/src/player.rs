@@ -217,6 +217,9 @@ pub struct KickState {
     pub released: bool,
     /// Shot aim (yaw, pitch in degrees), locked at the press so the mouse can curve the ball.
     pub aim: Vec2,
+    /// The camera's position at the press. The aim is traced from it, so sliding on through the
+    /// kick doesn't move where you aimed (players confirm the aim locks as the kick starts).
+    pub eye: Vec3,
     /// Your velocity at the press: a shot slides on from it.
     pub entry: Vec3,
     pub from_dribble: bool,
@@ -892,7 +895,7 @@ pub fn kicking(
             } else {
                 camera_relative(axes.movement.normalize(), rig.yaw).normalize()
             };
-            p.kick = Some(KickState { kind, elapsed: 0.0, held: 0.0, released, aim: Vec2::new(rig.yaw, rig.pitch), entry: p.vel, from_dribble, steer });
+            p.kick = Some(KickState { kind, elapsed: 0.0, held: 0.0, released, aim: Vec2::new(rig.yaw, rig.pitch), eye: camera.translation, entry: p.vel, from_dribble, steer });
         }
     }
     // For 0.1 s after a push ball or pass starts, the longer chord can still take over, so a
@@ -921,8 +924,9 @@ pub fn kicking(
         // the gauge fills).
         k.released = charge(k.kind, k.held) >= 1.0 || !k.kind.charge_action().is_some_and(|a| actions.pressed(a));
     }
-    if k.kind == Kick::Shot {
-        // The gamepad's right stick keeps aiming a charging shot; the mouse curves it instead.
+    if k.kind == Kick::Shot && !k.released {
+        // The gamepad's right stick keeps aiming a charging shot (the mouse curves it instead);
+        // once released, the aim is fixed.
         k.aim = Vec2::new(rig.yaw, rig.pitch);
     }
     // The ball leaves on release, but never before the kick's contact frame (ShootDataTable):
@@ -980,8 +984,8 @@ pub fn kicking(
         Kick::PushBall | Kick::DribblePushBall => (-push_dir.x).atan2(-push_dir.z),
         // Toward the crosshair's point on the walls (aim locked at the press), turned a little
         // against the curve so the ball bends back toward it.
-        Kick::Shot => crosshair_yaw(camera.translation, k.aim.x, ball_tf.translation) + (side * AIM_NUDGE).to_radians(),
-        _ => pass_yaw(bindings.pass_aim, &axes, &rig, crosshair_yaw(camera.translation, rig.yaw, ball_tf.translation)),
+        Kick::Shot => crosshair_yaw(k.eye, k.aim.x, ball_tf.translation) + (side * AIM_NUDGE).to_radians(),
+        _ => pass_yaw(bindings.pass_aim, &axes, &rig, crosshair_yaw(k.eye, rig.yaw, ball_tf.translation)),
     };
     let flat = forward(yaw);
     let dir = (flat * elevation.to_radians().cos() + Vec3::Y * elevation.to_radians().sin()).normalize();
