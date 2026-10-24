@@ -236,22 +236,36 @@ impl Player {
     }
 }
 
-/// Where a pass goes right now, for the chosen aim mode (yaw in radians).
-pub fn pass_yaw(aim: PassAim, axes: &Axes, rig: &CameraRig) -> f32 {
+/// Where the crosshair meets the arena walls: the game traces up to 150 m from the camera along
+/// its view, ignoring the floor, and kicks fly from the ball toward that point.
+fn crosshair_point(camera: Vec3, yaw_rad: f32) -> Vec3 {
+    let dir = forward(yaw_rad);
+    let to_wall = |from: f32, d: f32, half: f32| if d.abs() < 1e-6 { f32::INFINITY } else { (half * d.signum() - from) / d };
+    let t = to_wall(camera.x, dir.x, HALF_WIDTH).min(to_wall(camera.z, dir.z, HALF_LENGTH)).min(SHOT_TRACE_RANGE);
+    camera + dir * t
+}
+
+/// The yaw (radians) from the ball to the crosshair's point, for a camera looking along `yaw_deg`.
+pub fn crosshair_yaw(camera: Vec3, yaw_deg: f32, ball: Vec3) -> f32 {
+    yaw_of(crosshair_point(camera, yaw_deg.to_radians()) - ball)
+}
+
+/// Where a pass goes right now, for the chosen aim mode (yaw in radians). Without a stick
+/// direction it goes toward the crosshair (`crosshair`, from `crosshair_yaw`).
+pub fn pass_yaw(aim: PassAim, axes: &Axes, rig: &CameraRig, crosshair: f32) -> f32 {
     let (stick, dead_zone) = match aim {
         PassAim::CrosshairOnly => (Vec2::ZERO, 1.0),
         PassAim::DirectionalAiming => (axes.movement, PASS_STICK_DEAD_ZONE),
         PassAim::JoystickEmulation => (axes.curve, PASS_MOUSE_DEAD_ZONE),
     };
-    let camera = rig.yaw.to_radians();
     if stick.length() < dead_zone {
-        return camera;
+        return crosshair;
     }
     let dir = camera_relative(stick.normalize(), rig.yaw);
     let yaw = (-dir.x).atan2(-dir.z);
-    // Straight ahead snaps to the camera within a few degrees (the "Top" tolerance).
-    let off = (yaw - camera + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
-    if off.abs() < PASS_FORWARD_SNAP.to_radians() { camera } else { yaw }
+    // Straight ahead snaps to the crosshair within a few degrees (the "Top" tolerance).
+    let off = (yaw - rig.yaw.to_radians() + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+    if off.abs() < PASS_FORWARD_SNAP.to_radians() { crosshair } else { yaw }
 }
 
 /// Camera orbit angles, in degrees. Pitch + is up.
@@ -671,6 +685,8 @@ pub fn ball_control(
 pub fn kicking(
     mut player: Single<&mut Player>,
     mut ball: Single<&mut Ball>,
+    ball_tf: Single<&Transform, With<Ball>>,
+    camera: Single<&Transform, (With<Camera3d>, Without<Ball>)>,
     rig: Single<&CameraRig>,
     actions: Res<Actions>,
     mut axes: ResMut<Axes>,
@@ -772,7 +788,13 @@ pub fn kicking(
     };
     let sprint = |factor: f32| if p.sprinting { factor } else { 1.0 };
     let (speed, elevation, friction, no_control) = match k.kind {
-        Kick::Shot => (shot_speed(&k), curve(&ELEVATION_BY_PITCH, k.aim.y), SHOT_FRICTION, NO_RECONTROL_TIME),
+        // Height from the camera's pitch; a dip launches a little higher to make up for it.
+        Kick::Shot => (
+            shot_speed(&k),
+            curve(&ELEVATION_BY_PITCH, k.aim.y) + SHOT_DIP_PITCH_CORRECTION * (-axes.curve.y).max(0.0),
+            SHOT_FRICTION,
+            NO_RECONTROL_TIME,
+        ),
         Kick::Pass => (curve(&PASS_FORCE, t), curve(&PASS_LIFT_BY_HOLD, t), PASS_FRICTION, NO_RECONTROL_TIME),
         Kick::ShortPass => (SHORT_PASS_SPEED, 0.0, SHORT_PASS_FRICTION, NO_RECONTROL_TIME),
         Kick::Lob => (curve(&LOB_FORCE, t), curve(&LOB_ANGLE_BY_HOLD, t), SHOT_FRICTION, NO_RECONTROL_TIME),
@@ -791,24 +813,25 @@ pub fn kicking(
     };
     let yaw = match k.kind {
         Kick::PushBall | Kick::DribblePushBall => (-push_dir.x).atan2(-push_dir.z),
-        Kick::Shot => (k.aim.x - side * AIM_NUDGE).to_radians(), // locked at the press
-        _ => pass_yaw(bindings.pass_aim, &axes, &rig),
+        // Toward the crosshair's point on the walls (aim locked at the press), turned a little
+        // against the curve so the ball bends back toward it.
+        Kick::Shot => crosshair_yaw(camera.translation, k.aim.x, ball_tf.translation) + (side * AIM_NUDGE).to_radians(),
+        _ => pass_yaw(bindings.pass_aim, &axes, &rig, crosshair_yaw(camera.translation, rig.yaw, ball_tf.translation)),
     };
     let flat = forward(yaw);
     let dir = (flat * elevation.to_radians().cos() + Vec3::Y * elevation.to_radians().sin()).normalize();
-    let right = flat.cross(Vec3::Y);
 
     p.has_ball = false;
     ball.held = false;
     ball.vel = dir * speed;
     ball.spin = if k.kind == Kick::Shot {
-        // Spin around -Y curves the ball to the right of travel; `right` spin lifts it.
-        // Pulling the curve input down dips the ball, pushing it up lifts it (confirmed in-game).
-        let lift = -curve(&TOP_SPIN, axes.curve.y) * curve(&TOP_SPIN_BY_CHARGE, ratio) + SHOT_BASE_SPIN;
-        Vec3::NEG_Y * curve(&SIDE_SPIN, side) * curve(&SIDE_SPIN_BY_CHARGE, ratio) + right * lift
+        // Flight-frame spin: z curves right, y dips. Pulling the curve input down dips the ball,
+        // pushing it up lifts it (confirmed in-game); every shot also carries a small lift.
+        let dip = curve(&TOP_SPIN, axes.curve.y) * curve(&TOP_SPIN_BY_CHARGE, ratio) + SHOT_BASE_SPIN;
+        Vec3::new(0.0, dip, curve(&SIDE_SPIN, side) * curve(&SIDE_SPIN_BY_CHARGE, ratio))
     } else {
         // Passes and lobs carry the game's forced spin; low-power passes and push balls none.
-        right
+        Vec3::Y
             * match k.kind {
                 Kick::Pass => PASS_FORCED_SPIN,
                 Kick::Lob => LOB_FORCED_SPIN,
@@ -816,6 +839,8 @@ pub fn kicking(
                 _ => 0.0,
             }
     };
+    ball.fall_time = 0.0;
+    ball.drag = DRAG_FORCE;
     ball.friction = friction;
     ball.no_control = no_control;
     if k.kind == Kick::Shot {
@@ -873,7 +898,7 @@ pub fn ball_call(
     **b = Ball { friction: PASS_FRICTION, ..default() };
     btf.translation = from;
     // A low arc that lands at your feet: enough vertical speed to come back down after `flight`.
-    b.vel = (to - from).normalize_or_zero() * FEED_SPEED + Vec3::Y * GRAVITY * flight / 2.0;
+    b.vel = (to - from).normalize_or_zero() * FEED_SPEED + Vec3::Y * GRAVITY * BALL_MASS * flight / 2.0;
 }
 
 pub fn camera_follow(
@@ -1044,18 +1069,26 @@ mod tests {
     }
 
     #[test]
+    fn crosshair_point_is_on_the_walls() {
+        // From the centre looking at the -z goal, and from the right side angled across.
+        assert!(crosshair_point(Vec3::new(0.0, 3.0, 0.0), 0.0).distance(Vec3::new(0.0, 3.0, -HALF_LENGTH)) < 1e-3);
+        let p = crosshair_point(Vec3::new(10.0, 3.0, 0.0), std::f32::consts::FRAC_PI_2);
+        assert!((p.x + HALF_WIDTH).abs() < 1e-3 && p.z.abs() < 1e-3, "{p:?}");
+    }
+
+    #[test]
     fn pass_aim_modes() {
         let rig = CameraRig::default();
         let camera = rig.yaw.to_radians();
         let mut axes = Axes::default();
         axes.movement = Vec2::X;
         // Crosshair ignores the keys; directional sends the pass to the right.
-        assert_eq!(pass_yaw(PassAim::CrosshairOnly, &axes, &rig), camera);
-        assert!(forward(pass_yaw(PassAim::DirectionalAiming, &axes, &rig)).dot(forward(camera - std::f32::consts::FRAC_PI_2)) > 0.99);
+        assert_eq!(pass_yaw(PassAim::CrosshairOnly, &axes, &rig, camera), camera);
+        assert!(forward(pass_yaw(PassAim::DirectionalAiming, &axes, &rig, camera)).dot(forward(camera - std::f32::consts::FRAC_PI_2)) > 0.99);
         // Inside the dead zone, or a few degrees off straight ahead, it goes where the camera looks.
         axes.movement = Vec2::new(0.05, 0.2);
-        assert_eq!(pass_yaw(PassAim::DirectionalAiming, &axes, &rig), camera);
+        assert_eq!(pass_yaw(PassAim::DirectionalAiming, &axes, &rig, camera), camera);
         axes.movement = Vec2::new(0.05, 1.0);
-        assert_eq!(pass_yaw(PassAim::DirectionalAiming, &axes, &rig), camera);
+        assert_eq!(pass_yaw(PassAim::DirectionalAiming, &axes, &rig, camera), camera);
     }
 }
