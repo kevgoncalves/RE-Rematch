@@ -113,40 +113,35 @@ pub fn ball_lines(
     gizmos.linestrip_gradient(path.0.iter().enumerate().map(|(i, p)| (*p, cyan.with_alpha(fade * (1.0 - 0.6 * i as f32 / n)))));
 }
 
-/// Kicks this fast or faster get a marker (players confirm: a full pass or a shot shows one, a push
-/// ball doesn't).
-const MARKER_MIN_SPEED: f32 = 15.0;
+/// A ground marker is this size against a wall's (Kev: the same look, smaller).
+const MARKER_GROUND_SCALE: f32 = 0.7;
 
-/// Where a marker goes: the surface point, its normal, when the ball gets there and the way it is
-/// going then.
+/// Where a marker goes: the surface point, its normal and when the ball gets there.
 struct MarkerSpot {
     at: Vec3,
     normal: Vec3,
     t: f32,
-    way: Vec3,
 }
 
-/// Where a kicked ball first hits a wall, post or crossbar (the game marks every such bounce), or
+/// Where a kicked ball first hits a goal end's wall (the backboard), a post or the crossbar, or
 /// else comes to rest: its own physics run on until it rolls slower than 0.5 m/s on the ground
-/// (the game's prediction stop speed), up to 10 s. None if it is slower than `min_speed` (a marker
-/// is for fast kicks), or it goes in.
-fn marker_for(pos: Vec3, ball: &Ball, min_speed: f32) -> Option<MarkerSpot> {
-    if ball.vel.length() < min_speed {
-        return None;
-    }
+/// (the game's prediction stop speed), up to 10 s. The side walls get no marker (Kev). None if it
+/// goes in.
+fn marker_for(pos: Vec3, ball: &Ball) -> Option<MarkerSpot> {
     let (mut pos, mut ball) = (pos, ball.clone());
     let dt = 1.0 / 240.0;
     for i in 1..=(10.0 / dt) as usize {
-        let way = ball.vel.normalize_or_zero();
         if step(&mut pos, &mut ball, dt).is_some() {
             return None;
         }
         let t = i as f32 * dt;
-        if let Some((at, normal)) = ball.hit {
-            return Some(MarkerSpot { at, normal, t, way });
+        if let Some((at, normal)) = ball.hit
+            && (at.x.abs() - HALF_WIDTH).abs() > 0.05
+        {
+            return Some(MarkerSpot { at, normal, t });
         }
         if pos.y <= BALL_RADIUS + 0.01 && Vec2::new(ball.vel.x, ball.vel.z).length() < 0.5 && ball.vel.y.abs() < 0.5 {
-            return Some(MarkerSpot { at: Vec3::new(pos.x, 0.0, pos.z), normal: Vec3::Y, t, way });
+            return Some(MarkerSpot { at: Vec3::new(pos.x, 0.0, pos.z), normal: Vec3::Y, t });
         }
     }
     None
@@ -160,9 +155,6 @@ pub struct Marker {
     chain: bool,
 }
 
-/// The marker's arrow: the way the ball comes into it, on the ground only.
-#[derive(Component)]
-pub struct MarkerArrow;
 
 /// The volley diamond on the ball (GC_VolleyPredict).
 #[derive(Component)]
@@ -332,34 +324,9 @@ fn glow_disc() -> Mesh {
         .with_inserted_indices(Indices::U32(indices))
 }
 
-/// The marker's arrow: a thin streak from the ring out along local -Z, fading toward its tip, with
-/// a chevron head.
-fn marker_arrow() -> Mesh {
-    let (start, length, half) = (MARKER_RADII.1 + 0.08, 1.1, 0.035);
-    let bright = (MARKER_CYAN * 1.3).extend(1.0).to_array();
-    let dim = (MARKER_BLUE * 0.25).extend(1.0).to_array();
-    let positions = vec![
-        [-half, 0.0, -start],
-        [half, 0.0, -start],
-        [-half * 0.4, 0.0, -start - length],
-        [half * 0.4, 0.0, -start - length],
-        // The head, at the near end, pointing on.
-        [-0.12, 0.0, -start - 0.02],
-        [0.12, 0.0, -start - 0.02],
-        [0.0, 0.0, -start - 0.2],
-    ];
-    let colours = vec![bright, bright, dim, dim, bright, bright, bright];
-    let indices = vec![0, 2, 1, 1, 2, 3, 4, 6, 5];
-    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; positions.len()])
-        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colours)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_indices(Indices::U32(indices))
-}
-
 pub fn spawn_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
-    // The marker (NS_Bounce): a glowing blue ring, a soft glow inside it and an arrow the way the
-    // ball comes in, all added light drawn over the ground.
+    // The marker (NS_Bounce): a glowing blue ring and a soft glow inside it, added light drawn over
+    // the ground or the wall.
     let flat = |c: Color, mode: AlphaMode| StandardMaterial { base_color: c, unlit: true, alpha_mode: mode, double_sided: true, cull_mode: None, depth_bias: 50.0, ..default() };
     let mesh = meshes.add(ring());
     let light = materials.add(flat(Color::WHITE, AlphaMode::Add));
@@ -367,8 +334,7 @@ pub fn spawn_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
         .spawn((Marker { left: 0.0, chain: false }, Transform::default(), Visibility::Hidden))
         .with_children(|m| {
             m.spawn((NotShadowCaster, Mesh3d(mesh), MeshMaterial3d(light.clone()), Transform::from_xyz(0.0, 0.02, 0.0)));
-            m.spawn((NotShadowCaster, Mesh3d(meshes.add(glow_disc())), MeshMaterial3d(light.clone()), Transform::from_xyz(0.0, 0.015, 0.0)));
-            m.spawn((MarkerArrow, NotShadowCaster, Mesh3d(meshes.add(marker_arrow())), MeshMaterial3d(light), Transform::from_xyz(0.0, 0.02, 0.0)));
+            m.spawn((NotShadowCaster, Mesh3d(meshes.add(glow_disc())), MeshMaterial3d(light), Transform::from_xyz(0.0, 0.015, 0.0)));
         });
     commands.spawn((
         VolleyDiamond,
@@ -495,30 +461,29 @@ pub fn trails(
     }
 }
 
-/// The kick marker: placed where a fast kick will first hit a wall or post (lying on it), or else
-/// where it will stop, until the ball gets there. At a wall or post the next
-/// one follows from the bounce; it is gone when the ball has nearly stopped on it, when anyone
-/// gains the ball, or at the next kick.
+/// The kick marker: every shot, pass and lob gets one, push balls none (the game's rule): placed
+/// where the ball will first hit the backboard or the goal frame (lying on it), or else where it
+/// will stop, until the ball gets there. At the backboard or the frame the next one follows from
+/// the bounce; it is gone when the ball has nearly stopped on it, when anyone gains the ball, or at
+/// the next kick.
 pub fn kick_marker(
     time: Res<Time>,
     player: Single<&Player>,
     ball: Single<(&Transform, &Ball)>,
     mut marker: Single<(&mut Marker, &mut Transform, &mut Visibility), Without<Ball>>,
-    mut arrow: Single<(&mut Transform, &mut Visibility), (With<MarkerArrow>, Without<Marker>, Without<Ball>)>,
     mut last_kick: Local<Option<Kick>>,
 ) {
     let (btf, b) = *ball;
     let (m, tf, vis) = &mut *marker;
-    let (atf, avis) = &mut *arrow;
-    let kicked = last_kick.is_some() && player.kick.is_none() && !b.held;
+    let kicked = last_kick.is_some_and(|k| !matches!(k, Kick::PushBall | Kick::DribblePushBall)) && player.kick.is_none() && !b.held;
     *last_kick = player.kick.map(|k| k.kind);
     let arrived = m.chain && m.left > 0.0 && m.left <= time.delta_secs();
     let spot = if kicked {
         m.left = 0.0;
-        marker_for(btf.translation, b, MARKER_MIN_SPEED)
+        marker_for(btf.translation, b)
     } else if arrived {
         m.left = 0.0;
-        marker_for(btf.translation, b, 0.0)
+        marker_for(btf.translation, b)
     } else {
         None
     };
@@ -526,9 +491,7 @@ pub fn kick_marker(
         tf.translation = s.at + s.normal * 0.01;
         tf.rotation = Quat::from_rotation_arc(Vec3::Y, s.normal);
         (m.left, m.chain) = (s.t, s.normal != Vec3::Y);
-        let flat = Vec3::new(s.way.x, 0.0, s.way.z);
-        **avis = if m.chain || flat.length() < 0.1 { Visibility::Hidden } else { Visibility::Inherited };
-        atf.rotation = Quat::from_rotation_y((-flat.x).atan2(-flat.z));
+        tf.scale = Vec3::splat(if m.chain { 1.0 } else { MARKER_GROUND_SCALE });
     }
     if b.held || player.kick.is_some() {
         m.left = 0.0;
@@ -709,19 +672,22 @@ mod tests {
         let at = Vec3::new(0.0, BALL_RADIUS, 0.0);
         // A full pass: marked where it stops, a while later.
         let pass = Ball { vel: Vec3::new(0.0, 0.0, -25.0), friction: PASS_FRICTION, ..default() };
-        let s = marker_for(at, &pass, MARKER_MIN_SPEED).expect("a full pass is marked");
+        let s = marker_for(at, &pass).expect("a full pass is marked");
         let (mut pos, mut rolled) = (at, pass.clone());
         for _ in 0..(s.t * 240.0) as usize {
             step(&mut pos, &mut rolled, 1.0 / 240.0);
         }
         assert!(Vec2::new(pos.x - s.at.x, pos.z - s.at.z).length() < 0.05 && s.t > 1.0 && s.normal == Vec3::Y, "{} at {}", s.at, s.t);
-        // A push ball is too slow to get one, and a ball going in gets none.
-        assert!(marker_for(at, &Ball { vel: Vec3::new(0.0, 0.0, -PUSH_BALL_SPEED), friction: PUSH_BALL_FRICTION, ..default() }, MARKER_MIN_SPEED).is_none());
+        // A ball going in gets none.
         let shot = Ball { vel: Vec3::new(0.0, 1.0, -35.0), ..default() };
-        assert!(marker_for(Vec3::new(0.0, BALL_RADIUS, -30.0), &shot, MARKER_MIN_SPEED).is_none());
+        assert!(marker_for(Vec3::new(0.0, BALL_RADIUS, -30.0), &shot).is_none());
         // A shot wide of the goal is marked on the end wall, lying on it.
         let wide = Ball { vel: Vec3::new(0.0, 1.0, -35.0), ..default() };
-        let s = marker_for(Vec3::new(GOAL_HALF_WIDTH + 3.0, BALL_RADIUS, -20.0), &wide, MARKER_MIN_SPEED).expect("marked on the wall");
+        let s = marker_for(Vec3::new(GOAL_HALF_WIDTH + 3.0, BALL_RADIUS, -20.0), &wide).expect("marked on the wall");
         assert!(s.normal == Vec3::Z && (s.at.z + HALF_LENGTH).abs() < 0.01, "{} {}", s.at, s.normal);
+        // A ball across to a side wall is marked past it, not on it.
+        let across = Ball { vel: Vec3::new(30.0, 0.0, -2.0), friction: PASS_FRICTION, ..default() };
+        let s = marker_for(Vec3::new(0.0, BALL_RADIUS, 0.0), &across).expect("marked");
+        assert!((s.at.x.abs() - HALF_WIDTH).abs() > 0.05, "{}", s.at);
     }
 }
