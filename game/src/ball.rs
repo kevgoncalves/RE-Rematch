@@ -92,7 +92,7 @@ fn collide(pos: &mut Vec3, vel: &mut Vec3) {
     }
     if pos.y > CEILING - r {
         pos.y = CEILING - r;
-        bounce(vel, Vec3::NEG_Y, WALL_BOUNCE);
+        bounce(vel, Vec3::NEG_Y, CEILING_BOUNCE);
     }
     if pos.x.abs() > HALF_WIDTH - r {
         pos.x = pos.x.signum() * (HALF_WIDTH - r);
@@ -112,13 +112,24 @@ fn collide(pos: &mut Vec3, vel: &mut Vec3) {
                 pos.x = pos.x.signum() * (GOAL_HALF_WIDTH - r);
                 bounce(vel, Vec3::new(-pos.x.signum(), 0.0, 0.0), NET_BOUNCE);
             }
-            if pos.y > GOAL_HEIGHT - r {
-                pos.y = GOAL_HEIGHT - r;
-                bounce(vel, Vec3::NEG_Y, NET_BOUNCE);
+            // Roof: flat at the side nets' height, then sloping 45 degrees down to the back.
+            let depth = pos.z.abs() - HALF_LENGTH;
+            if depth < NET_ROOF_FLAT {
+                if pos.y > NET_HEIGHT - r {
+                    pos.y = NET_HEIGHT - r;
+                    bounce(vel, Vec3::NEG_Y, NET_BOUNCE);
+                }
+            } else {
+                let normal = Vec3::new(0.0, -1.0, -pos.z.signum()).normalize();
+                let gap = (NET_HEIGHT - (depth - NET_ROOF_FLAT) - pos.y) / std::f32::consts::SQRT_2;
+                if gap < r {
+                    *pos += normal * (r - gap);
+                    bounce(vel, normal, NET_BOUNCE);
+                }
             }
         } else {
             pos.z = pos.z.signum() * (HALF_LENGTH - r);
-            bounce(vel, Vec3::new(0.0, 0.0, -pos.z.signum()), WALL_BOUNCE);
+            bounce(vel, Vec3::new(0.0, 0.0, -pos.z.signum()), END_WALL_BOUNCE);
         }
     }
 
@@ -184,13 +195,14 @@ mod tests {
 
     #[test]
     fn shot_into_mouth_scores_and_wide_shot_rebounds() {
-        let mut pos = Vec3::new(0.0, 1.0, 30.0);
+        let mut pos = Vec3::new(0.0, 1.0, 40.0);
         let mut ball = Ball { vel: Vec3::new(0.0, 0.0, 30.0), ..default() };
         assert_eq!(run(&mut pos, &mut ball, 1.0), Some(1.0));
 
-        let mut pos = Vec3::new(10.0, 1.0, 30.0);
+        let mut pos = Vec3::new(10.0, 1.0, 40.0);
         let mut ball = Ball { vel: Vec3::new(0.0, 0.0, 30.0), ..default() };
         assert_eq!(run(&mut pos, &mut ball, 0.5), None);
         assert!(ball.vel.z < 0.0, "the end wall sends it back");
     }
+
 }

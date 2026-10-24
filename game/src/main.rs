@@ -1,6 +1,8 @@
-//! RE Rematch prototype: one player, the ball and a 73 x 49 arena, tuned with Rematch's own values.
+//! RE Rematch prototype: one player, the ball and the 5v5 arena, tuned with Rematch's own values.
 
+mod arena;
 mod ball;
+mod body;
 mod gauges;
 mod input;
 mod menu;
@@ -32,7 +34,7 @@ fn main() {
                 .set(bevy::log::LogPlugin { filter: "wgpu=error,naga=warn,wgpu_hal::vulkan::instance=off".into(), ..default() }),
         )
         .add_plugins((UiMaterialPlugin::<reticle::ReticleMaterial>::default(), UiMaterialPlugin::<gauges::GaugeMaterial>::default(), MaterialPlugin::<pass_line::PassLineMaterial>::default()))
-        .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)))
+        .insert_resource(ClearColor(Color::srgb(0.56, 0.68, 0.8)))
         .init_resource::<Score>()
         .insert_resource(Bindings::load())
         .init_resource::<Actions>()
@@ -40,7 +42,7 @@ fn main() {
         .init_resource::<InputBlocked>()
         .init_resource::<menu::Menu>()
         .add_event::<GoalScored>()
-        .add_systems(Startup, (setup, menu::spawn_menu, reticle::spawn_reticle, gauges::spawn_gauges, pass_line::spawn_pass_line))
+        .add_systems(Startup, (arena::spawn_arena, setup, menu::spawn_menu, reticle::spawn_reticle, gauges::spawn_gauges, pass_line::spawn_pass_line))
         .add_systems(
             Update,
             (
@@ -58,6 +60,7 @@ fn main() {
                 player::ball_control,
                 ball::ball_physics,
                 on_goal,
+                body::animate_body,
                 player::camera_follow,
                 update_hud,
                 reticle::update_reticle,
@@ -71,8 +74,22 @@ fn main() {
 }
 
 /// For checking visuals: `RE_SCREENSHOT=out.png` saves a frame after 2 s, then quits.
-fn auto_screenshot(mut commands: Commands, time: Res<Time>, mut taken: Local<bool>, mut exit: EventWriter<AppExit>) {
+/// `RE_VIEW=x,y,z[,tx,ty,tz]` looks from that point at the centre spot (or the target) instead.
+fn auto_screenshot(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut taken: Local<bool>,
+    mut exit: EventWriter<AppExit>,
+    mut camera: Single<&mut Transform, With<Camera3d>>,
+) {
     let Ok(path) = std::env::var("RE_SCREENSHOT") else { return };
+    if let Ok(view) = std::env::var("RE_VIEW") {
+        let v: Vec<f32> = view.split(',').filter_map(|n| n.trim().parse().ok()).collect();
+        let target = if v.len() == 6 { Vec3::new(v[3], v[4], v[5]) } else { Vec3::ZERO };
+        if v.len() >= 3 {
+            **camera = Transform::from_xyz(v[0], v[1], v[2]).looking_at(target, Vec3::Y);
+        }
+    }
     if !*taken && time.elapsed_secs() > 2.0 {
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
         *taken = true;
@@ -83,88 +100,8 @@ fn auto_screenshot(mut commands: Commands, time: Res<Time>, mut taken: Local<boo
 }
 
 fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
-    let (w, l) = (HALF_WIDTH * 2.0, HALF_LENGTH * 2.0);
-
-    // Pitch, with a halfway line and the goalkeeper areas painted on (arena.md).
-    commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(w, l))),
-        MeshMaterial3d(materials.add(Color::srgb(0.16, 0.42, 0.2))),
-    ));
-    let line = materials.add(Color::srgba(1.0, 1.0, 1.0, 0.7));
-    commands.spawn((Mesh3d(meshes.add(Cuboid::new(w, 0.01, 0.12))), MeshMaterial3d(line.clone()), Transform::from_xyz(0.0, 0.005, 0.0)));
-    for end in [-1.0f32, 1.0] {
-        let (gk_w, gk_d) = (33.2, 15.7);
-        let z = end * (HALF_LENGTH - gk_d);
-        commands.spawn((Mesh3d(meshes.add(Cuboid::new(gk_w, 0.01, 0.12))), MeshMaterial3d(line.clone()), Transform::from_xyz(0.0, 0.005, z)));
-        for side in [-1.0f32, 1.0] {
-            commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(0.12, 0.01, gk_d))),
-                MeshMaterial3d(line.clone()),
-                Transform::from_xyz(side * gk_w / 2.0, 0.005, end * (HALF_LENGTH - gk_d / 2.0)),
-            ));
-        }
-    }
-
-    // Glass walls: sides full length, ends with the goal mouth cut out.
-    let glass = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.6, 0.8, 1.0, 0.12),
-        alpha_mode: AlphaMode::Blend,
-        ..default()
-    });
-    let wall_h = 6.0; // visual only: physics walls go to the 20.5 m ceiling
-    for side in [-1.0f32, 1.0] {
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(0.1, wall_h, l))),
-            MeshMaterial3d(glass.clone()),
-            Transform::from_xyz(side * HALF_WIDTH, wall_h / 2.0, 0.0),
-        ));
-    }
-    let post = materials.add(Color::srgb(0.95, 0.95, 0.95));
-    for end in [-1.0f32, 1.0] {
-        let z = end * HALF_LENGTH;
-        let side_w = HALF_WIDTH - GOAL_HALF_WIDTH;
-        for side in [-1.0f32, 1.0] {
-            commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(side_w, wall_h, 0.1))),
-                MeshMaterial3d(glass.clone()),
-                Transform::from_xyz(side * (GOAL_HALF_WIDTH + side_w / 2.0), wall_h / 2.0, z),
-            ));
-            commands.spawn((
-                Mesh3d(meshes.add(Cylinder::new(POST_RADIUS, GOAL_HEIGHT))),
-                MeshMaterial3d(post.clone()),
-                Transform::from_xyz(side * GOAL_HALF_WIDTH, GOAL_HEIGHT / 2.0, z),
-            ));
-        }
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(GOAL_HALF_WIDTH * 2.0, wall_h - GOAL_HEIGHT, 0.1))),
-            MeshMaterial3d(glass.clone()),
-            Transform::from_xyz(0.0, GOAL_HEIGHT + (wall_h - GOAL_HEIGHT) / 2.0, z),
-        ));
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(GOAL_HALF_WIDTH * 2.0, POST_RADIUS * 2.0, POST_RADIUS * 2.0))),
-            MeshMaterial3d(post.clone()),
-            Transform::from_xyz(0.0, GOAL_HEIGHT, z),
-        ));
-        // Net: back panel behind the line.
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(GOAL_HALF_WIDTH * 2.0, GOAL_HEIGHT, 0.05))),
-            MeshMaterial3d(materials.add(Color::srgba(1.0, 1.0, 1.0, 0.25))),
-            Transform::from_xyz(0.0, GOAL_HEIGHT / 2.0, end * (HALF_LENGTH + GOAL_DEPTH)),
-        ));
-    }
-
-    commands.spawn((
-        DirectionalLight { illuminance: 8000.0, shadows_enabled: true, ..default() },
-        Transform::from_xyz(10.0, 30.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-    commands.insert_resource(AmbientLight { brightness: 400.0, ..default() });
-
-    commands.spawn((
-        Player::default(),
-        Mesh3d(meshes.add(Capsule3d::new(0.35, 1.1))),
-        MeshMaterial3d(materials.add(Color::srgb(0.9, 0.35, 0.2))),
-        Transform::from_xyz(0.0, 0.9, 6.0),
-    ));
+    let player = commands.spawn((Player::default(), Transform::from_xyz(0.0, 0.9, 6.0), Visibility::default())).id();
+    body::spawn_body(&mut commands, player, &mut meshes, &mut materials);
     commands.spawn((
         Ball::default(),
         Mesh3d(meshes.add(Sphere::new(BALL_RADIUS))),

@@ -16,13 +16,20 @@ pub fn curve(points: &[(f32, f32)], x: f32) -> f32 {
     last.1
 }
 
-// Arena: 73 x 49 pitch (arena.md). Bevy axes: x = width, y = up, z = goal-to-goal.
-pub const HALF_WIDTH: f32 = 24.5;
-pub const HALF_LENGTH: f32 = 36.5;
-pub const CEILING: f32 = 20.5;
+// Arena: the 94 x 64 pitch, the largest of the three, used here for 5v5 (arena.md).
+// Bevy axes: x = width, y = up, z = goal-to-goal.
+pub const HALF_WIDTH: f32 = 32.0;
+pub const HALF_LENGTH: f32 = 47.0;
+pub const CEILING: f32 = 26.75;
+/// Goalkeeper area painted in front of each goal: width x depth into the pitch.
+pub const KEEPER_AREA: (f32, f32) = (40.6, 16.7);
 pub const GOAL_HALF_WIDTH: f32 = 4.1;
 pub const GOAL_HEIGHT: f32 = 2.77;
-pub const GOAL_DEPTH: f32 = 3.8;
+pub const GOAL_DEPTH: f32 = 3.78;
+/// The net's roof (from the goal's collision panels): flat at 2.8 m up to this depth, then
+/// sloping 45 degrees down towards the back net.
+pub const NET_ROOF_FLAT: f32 = 2.2;
+pub const NET_HEIGHT: f32 = 2.8;
 pub const GOAL_SCORE_DEPTH: f32 = 0.4; // ball centre this far past the line scores (unconfirmed)
 pub const POST_RADIUS: f32 = 0.08;
 
@@ -40,7 +47,10 @@ pub const MAGNUS_SIDE: f32 = 0.0006; // side-spin to curve strength: TUNE
 pub const MAGNUS_VERTICAL: f32 = 0.0012; // top/back-spin to dip/lift strength: TUNE
 pub const SPIN_DECAY: f32 = 0.6; // per second: TUNE
 pub const GRASS_BOUNCE: (f32, f32) = (0.475, 0.95); // (perpendicular, parallel)
+/// The 5v5 cage: glass side walls, "repulsive" glass end walls, "absorbent" glass ceiling.
 pub const WALL_BOUNCE: (f32, f32) = (0.675, 0.675);
+pub const END_WALL_BOUNCE: (f32, f32) = (0.425, 0.625);
+pub const CEILING_BOUNCE: (f32, f32) = (0.3, 0.6);
 pub const NET_BOUNCE: (f32, f32) = (0.08, 0.15);
 pub const POST_BOUNCE: f32 = 0.875;
 

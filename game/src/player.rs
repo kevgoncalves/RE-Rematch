@@ -206,7 +206,7 @@ impl Kick {
     }
 
     /// The force uses at least this much hold time.
-    fn buildup(self) -> f32 {
+    pub fn buildup(self) -> f32 {
         match self {
             Kick::Shot => SHOT_BUILDUP,
             Kick::Pass => PASS_BUILDUP,
@@ -568,9 +568,7 @@ pub fn player_move(
     tf.translation += p.vel * dt;
     tf.translation.x = tf.translation.x.clamp(-HALF_WIDTH + 0.4, HALF_WIDTH - 0.4);
     tf.translation.z = tf.translation.z.clamp(-HALF_LENGTH + 0.4, HALF_LENGTH - 0.4);
-    // ponytail: no animations yet, so a dribble leans the body into its move to make it readable.
-    let lean = p.dribble.map_or(Quat::IDENTITY, |d| Quat::from_axis_angle(Vec3::Y.cross(d.dir).normalize(), 0.035 * p.vel.length()));
-    tf.rotation = lean * Quat::from_rotation_y(p.facing);
+    tf.rotation = Quat::from_rotation_y(p.facing);
 }
 
 /// Whether a ball at `rel` (relative to you: x forward, y up, z right) moving at `vel` (same frame)
