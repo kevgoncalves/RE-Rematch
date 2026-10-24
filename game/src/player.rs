@@ -41,6 +41,8 @@ pub struct Player {
     pub run: Option<Run>,
     /// Seconds into receiving the ball (the ball becomes yours at CONTROL_SNAP; you act from CONTROL_ACT).
     pub receiving: Option<f32>,
+    /// A turn transition in progress.
+    pub turn: Option<Turn>,
 }
 
 #[derive(Clone, Copy)]
@@ -109,6 +111,18 @@ impl DribbleState {
     }
 }
 
+/// A big change of direction: brake along `from`, then re-accelerate along `to`.
+#[derive(Clone, Copy)]
+pub struct Turn {
+    t: f32,
+    from: Vec3,
+    to: Vec3,
+    entry: f32,
+    target: f32,
+    brake: TurnPhase,
+    accel: TurnPhase,
+}
+
 /// Moving on a scripted speed curve (m/s over the run's normalised time).
 #[derive(Clone, Copy)]
 pub struct Run {
@@ -163,6 +177,7 @@ impl Default for Player {
             push_buffered: false,
             run: None,
             receiving: None,
+            turn: None,
         }
     }
 }
@@ -324,6 +339,9 @@ pub fn player_move(
     p.locked = (held && !p.relock_needed) || min_stance;
     p.lock_time = if p.locked { p.lock_time + dt } else { 0.0 };
     p.had_ball = p.has_ball;
+    if p.locked || p.extra_active || p.dribble.is_some() || p.dash.is_some() {
+        p.turn = None; // other movement takes over from a turn transition
+    }
 
     // Dribble (notes/dribble.md): the dash you do with the ball, from lock move, on the push ball
     // or dash button. From 0.2 s into it the same press chains the feint; nothing chains after a
@@ -498,6 +516,32 @@ pub fn player_move(
         let diff = (yaw - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
         let max_turn = turn.to_radians() * dt;
         p.facing += diff.clamp(-max_turn, max_turn);
+    } else if let Some(mut tr) = p.turn.filter(|_| !p.locked) {
+        // Turn transition: brake along the old direction, then re-accelerate along the new one
+        // (the direction can still change until the re-acceleration starts).
+        tr.t += dt;
+        let (brake, accel_phase) = (tr.brake, tr.accel);
+        if tr.t < brake.0 {
+            p.vel = tr.from * tr.entry * curve(brake.1, tr.t / brake.0);
+            if wish != Vec3::ZERO {
+                tr.to = wish.normalize();
+            }
+        } else {
+            p.vel = tr.to * tr.target * curve(accel_phase.1, ((tr.t - brake.0) / accel_phase.0).min(1.0));
+        }
+        let body_turn = FACE_HEADING_TURN_RATE.to_radians() * dt;
+        p.facing += angle_diff(yaw_of(tr.to), p.facing).clamp(-body_turn, body_turn);
+        p.turn = (tr.t < brake.0 + accel_phase.0).then_some(tr);
+    } else if wish != Vec3::ZERO && speed > 1.0 && {
+        // A big change of direction starts a turn transition (the game's code-driven turns).
+        let bucket = turn_bucket(p.vel.angle_between(wish).to_degrees());
+        let sprinting = p.sprint_running && speed > RUN_SPEED;
+        if let Some((brake, accel_phase, exit)) = (bucket > 0).then(|| turn_data(sprinting, p.has_ball, bucket)).flatten() {
+            p.turn = Some(Turn { t: 0.0, from: p.vel.normalize(), to: wish.normalize(), entry: speed, target: top * exit, brake, accel: accel_phase });
+        }
+        p.turn.is_some()
+    } {
+        // Started a turn this frame: the next frames run it.
     } else if wish != Vec3::ZERO {
         // Your heading turns toward the input at the turn rate (standing still: at once). The body
         // then turns to face your heading on its own, without dragging it: leaving lock move while
@@ -511,7 +555,14 @@ pub fn player_move(
         let body_turn = FACE_HEADING_TURN_RATE.to_radians() * dt;
         p.facing += angle_diff(heading, p.facing).clamp(-body_turn, body_turn);
     } else {
-        p.vel = p.vel.normalize_or_zero() * (speed - STOP_DECEL * dt).max(0.0);
+        // Stopping takes the state's stop time from its top speed (stop transitions).
+        let (state, full) = match (speed > RUN_SPEED + 0.25, p.has_ball) {
+            (false, false) => (0, RUN_SPEED),
+            (false, true) => (1, BALL_RUN_SPEED),
+            (true, false) => (2, SPRINT_SPEED),
+            (true, true) => (3, BALL_SPRINT_SPEED),
+        };
+        p.vel = p.vel.normalize_or_zero() * (speed - full / STOP_TIME[state] * dt).max(0.0);
     }
 
     tf.translation += p.vel * dt;
@@ -969,6 +1020,29 @@ mod tests {
         // Moving, the zone reaches further ahead; lock move catches from any side.
         assert!(in_control_zone(ground(1.25), toward, 4.0, false));
         assert!(in_control_zone(Vec3::new(0.0, BALL_RADIUS, 0.7), away, 0.0, true));
+    }
+
+    #[test]
+    fn running_reversal_brakes_then_reaccelerates() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+        app.world_mut().resource_mut::<Axes>().movement = Vec2::Y; // run forward (-Z)
+        app.world_mut().spawn((Transform::default(), Player::default()));
+        app.world_mut().spawn(CameraRig::default());
+        frames(&mut app, &[], 60, 1.0 / 60.0);
+        app.world_mut().resource_mut::<Axes>().movement = Vec2::NEG_Y; // reverse
+        let mut max_side: f32 = 0.0;
+        for _ in 0..30 {
+            frames(&mut app, &[], 1, 1.0 / 60.0);
+            let v = app.world_mut().query::<&Player>().single(app.world()).unwrap().vel;
+            max_side = max_side.max(v.x.abs());
+        }
+        let v = app.world_mut().query::<&Player>().single(app.world()).unwrap().vel;
+        // No sideways arc; after the 0.3 s brake and 0.3 s re-acceleration you go back at 60% of 5 m/s.
+        assert!(max_side < 0.01, "sideways {max_side}");
+        frames(&mut app, &[], 10, 1.0 / 60.0);
+        let v2 = app.world_mut().query::<&Player>().single(app.world()).unwrap().vel;
+        assert!(v.z >= 0.0 && v2.z > 2.5, "speed back {v2:?}");
     }
 
     #[test]
