@@ -588,7 +588,7 @@ pub fn kicking(
         return;
     }
 
-    // No kicks during a dash or the first 0.2 s of a dribble (frame-data.md). Lock move (defence
+    // Kicks wait for the first 0.2 s of a dribble, except shots, passes and lobs. Lock move (defence
     // stance) can shoot: the game's lock-move layer forbids it in the files, but players confirm
     // you can shoot from stance.
     // Shots, passes and lobs are open at any moment of a dribble (players confirm); the dribble
@@ -602,7 +602,8 @@ pub fn kicking(
         p.push_buffered = true;
     }
     let buffered_push = p.push_buffered && dribble_open;
-    if p.has_ball && p.kick.is_none() && p.dash.is_none() {
+    // A dash that picked up the ball doesn't block kicks (players confirm).
+    if p.has_ball && p.kick.is_none() {
         let charged = [(Action::Shoot, Kick::Shot), (Action::Pass, Kick::Pass), (Action::Lob, Kick::Lob)];
         // In lock move the push ball button dribbles instead (player_move); inside a dribble,
         // released from lock move, it's the dribble push ball.
@@ -628,6 +629,7 @@ pub fn kicking(
             // (players confirm), so the dribble runs on under it.
             if !kind.is_pass() {
                 p.dribble = None;
+                p.dash = None;
             }
             p.push_buffered = false;
             let released = kind.charge_action().is_none();
