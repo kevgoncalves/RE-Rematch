@@ -244,8 +244,8 @@ A shot keeps your run-up instead of stopping you:
 - **The run-up bonus** to shot speed (+1.25 m/s at 6 m/s, +4 m/s at 9.5 m/s) only counts for stronger shots: none up to 27.85 m/s, all of it from 38 m/s.
 - **Passes leave flat.** Holding past the 0.6 s sweet spot lifts them by 3.9°, rising to 6° at 1 s. Low-power passes stay flat.
 - **Lobs leave at 44°**, flattening to **30.26°** as you hold to 1 s (longer lobs are flatter and faster). The low-power lob leaves at **52°**.
-- **Roll:** players' passes use a friction override of **1.2** (0.3 belongs to the bots' pass); low-power passes 1.5× the base.
-- **Forced spin:** shots 210 and passes 200 one way, lobs 300 and low-power lobs 420 the other way.
+- **Roll:** players' passes use a friction multiplier of **1.2** (0.3 belongs to the bots' pass); low-power passes 1.5× the base, weighted 1.675 (2.01 in all).
+- **Forced spin:** shots (210) and passes (200) get a small **lift**; lobs (300) and low-power lobs (420) **dip**. The native code subtracts the forced axis from the spin, so the files' positive 210/200 lift and the lobs' negative values dip.
 - **Curve input to spin:** side ±350 at 0.5, ±650 at 0.9, ±825 at full (dead zone 0.1); pulling back +330/+660/+780, pushing up −40/−80/−120. Scaled by charge: side ×1.02 → ×0.8, top ×0.95 → ×0.85 from a tap to full power.
 
 ### Fixed-force kicks
@@ -285,11 +285,15 @@ All times are from the press. Charged kicks wait for your release if you hold pa
 | fully pressed | 100% | 100% |
 
 ### Direction, height and curve
-- **Height comes from the camera:**
+- **Direction: the ball goes toward the crosshair's point, not along the camera.** The game traces up to 150 m from the camera through the crosshair (the trace ignores the floor and players, so it stops on the arena walls or the goal) and shoots from the ball toward that point, horizontally. With the camera to one side of the player, this is what makes the ball land under the crosshair.
+- **The side curve input turns the shot 3° the other way** (±3° at full input), so a curving ball starts off to one side and bends back toward the crosshair.
+- **Height comes from the camera's pitch, not from the trace:**
   - camera pitched well down: ~3° (driven along the floor);
   - level camera: ~17°;
   - camera up: ~20°.
-- **Direction:** the stick only nudges the aim by **±3°**. The camera/crosshair does the rest.
+
+  Pulling the curve input down (dip) adds up to **+4°** to make up for the dip; pushing it up adds nothing. The data also carries a pitch range whose top is 2°, which would flatten every shot; it cannot be in effect given the camera curve, so it is ignored here (open question).
+- **At 30 m/s from a level camera** the ball passes 20 m at about 3 m high; with the camera slightly down (9°) it lands at 20 m.
 - **Keyboard and mouse:**
   - **The shot direction locks the moment you start charging.**
   - From then on, **moving the mouse curves the ball instead of turning the camera.** Mouse movement feeds a spin accumulator with a sensitivity of 0.2, adjustable in the options ("Magnus sensitivity").
@@ -304,22 +308,10 @@ All times are from the press. Charged kicks wait for your release if you hold pa
   - pushing up lifts it, but only up to 120.
 
   The dip is about 6× stronger than the lift (confirmed in-game).
-- **Spin scales with how long you held**, as a share of the stick's spin:
-
-| Held | Side spin | Top/back spin |
-|---|---|---|
-| 0.1 s | 50% | 35% |
-| 1.0 s | 90% | 50% |
-
-  A weak shot curves much less than a full-power one.
-- **Built-in spin:** every shot carries a fixed spin of 210 on one axis on top of what you add (the file calls it "forced Magnus"; unconfirmed whether it is dip or rise).
-- **Trajectory model:** the ball's flight is the sum of four pieces, recomputed every 3 physics steps for the Magnus part:
-  1. gravity;
-  2. air drag;
-  3. Magnus (spin);
-  4. ground friction.
-
-  Each shot type swaps in its own version of these pieces.
+- **Spin scales with how long you held** (the external curves, which override the editor keys): side ×1.02 for a tap down to ×0.8 at full power, top/back ×0.95 down to ×0.85. A weak shot curves slightly more for its speed, not less.
+- **Built-in spin:** every shot carries a small **lift** of 210 on top of what you add.
+- **How strong spin is:** see §11. At 30 m/s a full side curve bends the ball about 3 m by 20 m.
+- **Trajectory model:** the ball's flight is the sum of four pieces (§11): gravity, air drag, Magnus and ground friction. Each piece has a mask of when it applies (in flight, rolling or both); the "3" in the Magnus files is that mask (both), not a step count. Each kick swaps in its own version of some pieces, sometimes only for a range of bounces.
 
 ### Fake shot
 - **Cost:** 1.5 stamina.
@@ -501,8 +493,22 @@ It stays live for **1.5 s**, the same in the centre and on the sides. Unconfirme
 | Radius | ~11–12 cm |
 | Mass (gameplay) | 1.625 |
 | Base ground friction | 0.8 |
-| Magnus effect | yes: spin curves the ball in flight |
-| Gravity multiplier | 0.5× on the ball's own gravity value |
+| Air drag coefficient | 0.45 |
+| Magnus effect | yes: spin curves the ball in flight and while rolling |
+
+### Forces (native code)
+Each piece gives an **acceleration** directly; nothing is divided by the mass. In metres:
+- **Gravity (in flight):** g × (1.625 + 0.5 × seconds spent falling since the last bounce), with g the world's 9.8 m/s². So a ball rises against **15.9 m/s²** and comes down faster the longer it falls. The 1.625 is the ball's Mass attribute; the 0.5 is the "free fall multiplier".
+- **Air drag (in flight):** coefficient × 0.0228 × speed², weaker the more vertical the flight (× (1 − the vertical share of the velocity)). 0.0228 is half the air density times the ball's cross-section. With the default 0.45, a 30 m/s shot slows to about 24 m/s over 20 m.
+- **Magnus (flying and rolling):** 0.0007986 × speed × spin.
+  - The spin is kept in the ball's flight frame, so it turns with the path: the side part curves the ball, the other part dips or lifts it.
+  - Rolling, the dip/lift part pushes along the path instead: a dipping ball brakes, a lifting one runs on. The side part keeps curving a rolling ball.
+  - At 30 m/s a spin of 660 (full side curve at full power) gives about 16 m/s² sideways.
+- **Spin fades** by 100% per second (exponentially), flying or rolling.
+- **Ground friction (rolling):** deceleration = friction × speed, so the ball slows exponentially and rolls **speed ÷ friction** metres. The friction is the base 0.8 × the touch's multiplier × the override's weight. Examples:
+  - push ball: 11.5 m/s with 2.24, so about 5.1 m;
+  - 25 m/s pass with 0.96: about 26 m;
+  - 30 m/s rolling shot with 0.8: about 37 m.
 
 ### Bounce by surface
 "Perpendicular" is how much speed is kept on a head-on hit; "parallel" is how much is kept on a glancing hit.
@@ -518,22 +524,26 @@ It stays live for **1.5 s**, the same in the centre and on the sides. Unconfirme
 | 1v1 net | 0.05 | 0.05 | |
 
 ### How far it rolls after a touch (friction multiplier)
-| Touch | Friction | Effect |
+The ball rolls speed ÷ (0.8 × multiplier × weight) metres.
+
+| Touch | Multiplier | Effect |
 |---|---|---|
-| Normal pass | **0.3×** | rolls very far |
-| Analog-power pass | 1.2× | normal |
-| Low-power pass | 1.5× | stops sooner |
+| Bots' pass | **0.3×** | rolls very far |
+| Players' pass (analog power) | 1.2× | normal |
+| Low-power pass | 1.5×, weight 1.675 | stops sooner |
 | During extra effort | 1.5× | stops sooner |
 | Volley push ball | 1.6× | stops sooner |
-| Fast tap | 2.8× | dies quickly |
+| Fast tap (push balls) | 2.8× | dies quickly |
 | Goalkeeper push | **6×** | stops almost at once |
 
 ### Air drag by touch
-| Touch | Air drag |
+| Touch | Air drag coefficient |
 |---|---|
-| Default | 2.54 |
-| Low-power pass | 1.4 |
-| Analog-power pass | 0.75 (much less slowdown in the air) |
+| Default (the ball's attribute) | 0.45 |
+| Players' pass, from its first bounce | 0.75 × weight 1.25 |
+| Goalkeeper low-power pass from the hand | 1.4 |
+
+The 2.54 in the default drag file is only a fallback: that file reads the ball's attribute (0.45) instead.
 
 ### Roll or bounce (unconfirmed)
 - **Slow balls** start rolling at almost any landing angle.
@@ -566,3 +576,4 @@ Which touch wins over the network is in [match-camera-network.md](match-camera-n
 2. Does a standing tackle cost half the stamina of a sliding tackle?
 3. When does an "instant" reception (0.083 s instead of 0.2 s) happen?
 4. Is the dribble protection window (0.25 s, or 1 s when feinted) tackle immunity?
+5. Does raising the camera make shots fly higher? The shot data carries a 2° cap on the launch angle that would make every shot almost flat; the notes assume it is not in effect.

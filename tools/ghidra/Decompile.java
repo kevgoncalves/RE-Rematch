@@ -1,11 +1,15 @@
 // Decompile functions from an already analysed Ghidra project, for studying the game's rules.
 //
 //   analyzeHeadless <projectDir> <project> -process rc.exe -noanalysis -readOnly
-//       -scriptPath tools/ghidra -postScript Decompile.java <outFile> <addr|str:Text> ...
+//       -scriptPath tools/ghidra -postScript Decompile.java <outFile> <arg> ...
 //
-// An address decompiles the function containing it. "str:Text" finds UTF-16/ASCII strings
-// containing Text and lists the functions that reference them. The output is derived from the
-// game's code: keep it local and write any rule found in it in your own words.
+// Arguments:
+//   <addr>          decompile the function containing addr
+//   str:Text        find strings containing Text and list the functions that reference them
+//   vt:<addr>:<n>   list n vtable slots starting at addr (function address and name)
+//   refs:<addr>     list the places that reference addr
+// The output is derived from the game's code: keep it local and write any rule found in it in
+// your own words.
 //@category RE Rematch
 
 import java.io.File;
@@ -32,6 +36,23 @@ public class Decompile extends GhidraScript {
                 String arg = args[i];
                 if (arg.startsWith("str:")) {
                     findString(out, arg.substring(4));
+                    continue;
+                }
+                if (arg.startsWith("vt:")) {
+                    String[] p = arg.split(":");
+                    Address base = toAddr(p[1]);
+                    for (int k = 0; k < Integer.parseInt(p[2]); k++) {
+                        Address fa = toAddr(getLong(base.add(k * 8L)));
+                        Function f = getFunctionAt(fa);
+                        out.println("// vt[" + k + "] " + fa + " " + (f == null ? "?" : f.getName()));
+                    }
+                    continue;
+                }
+                if (arg.startsWith("refs:")) {
+                    for (Reference ref : getReferencesTo(toAddr(arg.substring(5)))) {
+                        Function f = getFunctionContaining(ref.getFromAddress());
+                        out.println("// ref from " + ref.getFromAddress() + (f == null ? "" : " in " + f.getName() + " @ " + f.getEntryPoint()));
+                    }
                     continue;
                 }
                 Address addr = toAddr(arg);
