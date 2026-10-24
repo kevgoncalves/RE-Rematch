@@ -455,7 +455,9 @@ It stays live for **1.5 s**, the same in the centre and on the sides. Unconfirme
   - push balls let you act much sooner (0.2 s instead of 0.38 s).
 - **Recharge:**
   - normal: 0.0625 per second, so **16 s** to fill;
-  - with a 3× bonus: **5.3 s** (unconfirmed when the bonus applies).
+  - **with stamina full: 3× faster, 5.3 s** (the table's multiplier threshold is 1.0; players confirm it applies at full stamina).
+- **Each activation costs a quarter of the gauge** and needs that much to start, on top of the 0.5/s hold drain, so a full gauge gives **three direction cuts** (players confirm).
+- **Touches on a sharp turn are weaker:** ×0.8 at 135°, ×0.5 at 180°.
 
 ---
 
