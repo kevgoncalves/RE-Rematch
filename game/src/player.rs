@@ -332,6 +332,8 @@ pub struct Run {
     soft: bool,
     /// A control's carry: it stops when you let go of the stick (Kev: no sliding on after a control).
     control: bool,
+    /// The body's turn over the run: from, by how much (radians), over which stretch (s).
+    face: Option<(f32, f32, f32, f32)>,
 }
 
 /// A kick from button press to ball contact. The build-up runs while the button is held.
@@ -743,6 +745,10 @@ pub fn player_move(
         r.t += dt;
         // A push ball's chase reads your sprint live (its ball's speed was set at the press).
         let speeds = r.tables.map_or(r.speeds, |t| t[if p.exhausted { 2 } else if p.sprinting { 1 } else { 0 }]);
+        if let Some((from, by, start, end)) = r.face {
+            let u = ((r.t - start) / (end - start)).clamp(0.0, 1.0);
+            p.facing = from + by * u * u * (3.0 - 2.0 * u);
+        }
         p.vel = r.dir * curve(speeds, (r.t / r.length).min(1.0)) * r.scale;
         // Once free, steering within the turn limit leaves the chase at once; with no stick or a
         // sharper turn it runs on to the blend-out (responsiveness.md §5).
@@ -1069,7 +1075,7 @@ pub fn ball_control(
             p.turn = None;
             if entry > 0.1 && free {
                 let length = if entry <= CONTROL_V0_SPEED { CONTROL_HAND_BACK.0 } else { CONTROL_HAND_BACK.1 };
-                p.run = Some(Run { t: 0.0, length, free_at: CONTROL_EXIT_FROM, dir: flat / entry, speeds: &CONTROL_CARRY, tables: None, scale: entry.min(CONTROL_CARRY_MAX), exit: CONTROL_EXIT_ANGLE, soft: false, control: true });
+                p.run = Some(Run { t: 0.0, length, free_at: CONTROL_EXIT_FROM, dir: flat / entry, speeds: &CONTROL_CARRY, tables: None, scale: entry.min(CONTROL_CARRY_MAX), exit: CONTROL_EXIT_ANGLE, soft: false, control: true, face: None });
             }
         }
     }
@@ -1293,7 +1299,8 @@ pub fn kicking(
     k.elapsed += dt;
     // Extra effort's auto tap turns you to where you push by its touch (as the game's 135/180 deg
     // weakening implies), so starting it any way, even out of a dribble, takes the ball with you.
-    if k.kind == Kick::PushBall && p.extra_active && k.steer != Vec3::ZERO {
+    // A dribble push ball turns you to the push before its touch, over its first 9 frames.
+    if (k.kind == Kick::DribblePushBall || (k.kind == Kick::PushBall && p.extra_active)) && k.steer != Vec3::ZERO {
         let left = (contact_time(k) - (k.elapsed - dt)).max(dt);
         p.facing += angle_diff(yaw_of(k.steer), p.facing) * (dt / left).min(1.0);
     }
@@ -1392,20 +1399,33 @@ pub fn kicking(
     p.freeze = ball.freeze;
     if k.kind == Kick::Shot {
         let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
-        p.run = Some(Run { t: 0.0, length: SHOT_FOLLOW_THROUGH, free_at: SHOT_FOLLOW_THROUGH, dir: k.entry.normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: speed, exit: RUN_TURN_LIMIT, soft: true, control: false });
+        p.run = Some(Run { t: 0.0, length: SHOT_FOLLOW_THROUGH, free_at: SHOT_FOLLOW_THROUGH, dir: k.entry.normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: speed, exit: RUN_TURN_LIMIT, soft: true, control: false, face: None });
     }
     // After the touch a pass or lob keeps dragging you until its move interrupt; steering the
     // same way leaves it at once.
     let entry = Vec3::new(k.entry.x, 0.0, k.entry.z);
     if k.kind.is_pass() && entry.length() > PASS_DRAG_MIN_SPEED {
-        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: PASS_DRAG_FREE, dir: entry.normalize(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: entry.length(), exit: 180.0, soft: true, control: false });
+        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: PASS_DRAG_FREE, dir: entry.normalize(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: entry.length(), exit: 180.0, soft: true, control: false, face: None });
     }
     // After a push ball you chase it on the move's own speed (extra effort keeps its running).
     if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) && !p.extra_active {
         let cost = if k.kind == Kick::PushBall { PUSH_BALL_COST } else { DRIBBLE_PUSH_BALL_COST };
         p.stamina = (p.stamina - cost).max(0.0);
         p.regen_wait = PUSH_BALL_REGEN_DELAY;
-        p.facing = yaw;
+        // A normal push ball turns you to the push after its touch, over the clip's window: forward
+        // at once, sideways a little later and longer, back later still (frames from the touch).
+        let by = angle_diff(yaw, p.facing);
+        let by = if by.abs() > std::f32::consts::PI - 0.05 { by.abs() * swing_side(p.facing, forward(yaw)) } else { by };
+        let window = match push_angle {
+            a if a <= 60.0 => (0.0, 7.0),
+            a if a <= 120.0 => (3.0, 18.0),
+            a if a <= 150.0 => (12.0, 24.0),
+            _ => (6.0, 22.0),
+        };
+        let face = (k.kind == Kick::PushBall).then_some((p.facing, by, window.0 / 60.0, window.1 / 60.0));
+        if k.kind == Kick::DribblePushBall {
+            p.facing = yaw;
+        }
         let state = if p.exhausted { 2 } else if p.sprinting { 1 } else { 0 };
         let (tables, length) = if k.kind == Kick::DribblePushBall {
             (DRIBBLE_PUSH_BALL_RUN, DRIBBLE_PUSH_BALL_LENGTH[Heading::of(push_angle, 60.0, 135.0) as usize])
@@ -1415,7 +1435,7 @@ pub fn kicking(
         };
         let speeds = tables[state];
         // The chase runs to the animation's blend-out, or ends earlier on a stick exit.
-        p.run = Some(Run { t: 0.0, length: length - BLEND_OUT - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, dir: flat, speeds, tables: Some(tables), scale: 1.0, exit: RUN_TURN_LIMIT, soft: false, control: false });
+        p.run = Some(Run { t: 0.0, length: length - BLEND_OUT - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, dir: flat, speeds, tables: Some(tables), scale: 1.0, exit: RUN_TURN_LIMIT, soft: false, control: false, face });
     }
 }
 
