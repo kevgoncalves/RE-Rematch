@@ -371,6 +371,9 @@ pub const PIVOT_SPEED: f32 = 0.6;
 /// The ippy's quick turn starts when your push ball is this close ahead (m) with the stick turned
 /// back, so you slide into it mid-turn. TUNE.
 pub const IPPY_TURN_GAP: f32 = 0.9;
+/// Kev: a push ball just after a dribble ends still counts as the dribble's (no direction
+/// falloff), for this long (s).
+pub const DRIBBLE_PUSH_GRACE: f32 = 0.3;
 // Push ball during a dribble: no direction falloff; x1.35 when sprinting.
 pub const DRIBBLE_PUSH_BALL_SPEED: f32 = 11.0;
 pub const DRIBBLE_PUSH_BALL_SPRINT_FACTOR: f32 = 1.35;
