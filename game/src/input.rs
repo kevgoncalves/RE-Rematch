@@ -408,6 +408,10 @@ pub fn read_input(
             axes.curve_mouse = axes.curve_mouse.clamp_length_max(1.0);
         }
     }
+    // For screenshots: RE_RUN=1 holds forward.
+    if std::env::var("RE_RUN").is_ok() {
+        movement = Vec2::Y;
+    }
     axes.movement = movement.clamp_length_max(1.0);
     axes.look_mouse = look_mouse;
     axes.look_pad = look_pad;
