@@ -8,7 +8,7 @@ use bevy::prelude::*;
 
 use crate::ball::Ball;
 use crate::input::{Action, Actions, Axes, Bindings};
-use crate::player::{CameraRig, Kick, Player};
+use crate::player::{CameraRig, Kick, Player, crosshair_point, yaw_of};
 use crate::tuning::*;
 
 /// Which camera data is active (the camera behaviour tree's choice).
@@ -241,6 +241,7 @@ fn pick_state(p: &Player) -> CamState {
 pub fn camera_look(
     mut rig: Single<&mut CameraRig>,
     mut cam: Single<&mut CameraState>,
+    camera: Single<&Transform, With<Camera3d>>,
     axes: Res<Axes>,
     actions: Res<Actions>,
     player: Single<(&Transform, &Player)>,
@@ -272,6 +273,13 @@ pub fn camera_look(
     let lim = cam.blended();
     rig.yaw -= d.x;
     rig.pitch = (rig.pitch + d.y).clamp(-lim.down, lim.up);
+    // A charged kick locks the aim at the press. The camera keeps following you as you slide on
+    // and turns to keep the crosshair on that point (the lock shot; players confirm the aim locks
+    // as the kick starts).
+    if let Some(k) = p.kick.filter(|k| matches!(k.kind, Kick::Shot | Kick::Pass | Kick::Lob)) {
+        rig.yaw = yaw_of(crosshair_point(k.eye, k.aim.x.to_radians()) - camera.translation).to_degrees();
+        rig.pitch = k.aim.y;
+    }
 }
 
 pub fn camera_follow(
@@ -307,17 +315,15 @@ pub fn camera_follow(
     let d = cam.blended();
 
     // Pivot: the capsule centre, trailing by the state's smoothing (frame-rate dependent, as in
-    // the game). Through a charged kick it holds still, so the crosshair stays on the locked aim
-    // while you slide on (players confirm the aim locks as the kick starts); it catches up after.
-    let kicking = p.kick.is_some_and(|k| matches!(k.kind, Kick::Shot | Kick::Pass | Kick::Lob));
-    let pivot = cam.pivot.unwrap_or(ptf.translation);
-    let target = if kicking { pivot } else { ptf.translation };
+    // the game).
+    let target = ptf.translation;
+    let pivot = cam.pivot.unwrap_or(target);
     let pivot = pivot + (target - pivot) * (d.k * dt).min(1.0);
     cam.pivot = Some(pivot);
 
     // Sideways offset from movement.
     let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
-    if let Some(o) = side_offset(cam.state).filter(|_| !kicking) {
+    if let Some(o) = side_offset(cam.state) {
         if speed > 1.0 {
             cam.moved = true;
             cam.still = 0.0;

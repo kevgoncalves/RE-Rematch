@@ -329,7 +329,7 @@ impl Player {
 
 /// Where the crosshair meets the arena walls: the game traces up to 150 m from the camera along
 /// its view, ignoring the floor, and kicks fly from the ball toward that point.
-fn crosshair_point(camera: Vec3, yaw_rad: f32) -> Vec3 {
+pub fn crosshair_point(camera: Vec3, yaw_rad: f32) -> Vec3 {
     let dir = forward(yaw_rad);
     let to_wall = |from: f32, d: f32, half: f32| if d.abs() < 1e-6 { f32::INFINITY } else { (half * d.signum() - from) / d };
     let t = to_wall(camera.x, dir.x, HALF_WIDTH).min(to_wall(camera.z, dir.z, HALF_LENGTH)).min(SHOT_TRACE_RANGE);
@@ -367,7 +367,7 @@ pub struct CameraRig {
 }
 
 /// Yaw (radians) a horizontal direction points at; the inverse of `forward`.
-fn yaw_of(dir: Vec3) -> f32 {
+pub fn yaw_of(dir: Vec3) -> f32 {
     (-dir.x).atan2(-dir.z)
 }
 
@@ -924,11 +924,6 @@ pub fn kicking(
         // the gauge fills).
         k.released = charge(k.kind, k.held) >= 1.0 || !k.kind.charge_action().is_some_and(|a| actions.pressed(a));
     }
-    if k.kind == Kick::Shot && !k.released {
-        // The gamepad's right stick keeps aiming a charging shot (the mouse curves it instead);
-        // once released, the aim is fixed.
-        k.aim = Vec2::new(rig.yaw, rig.pitch);
-    }
     // The ball leaves on release, but never before the kick's contact frame (ShootDataTable):
     // a shot under 29.41 m/s uses the quicker low-power kick (20 frames, not 32).
     let contact = contact_time(k);
@@ -985,7 +980,7 @@ pub fn kicking(
         // Toward the crosshair's point on the walls (aim locked at the press), turned a little
         // against the curve so the ball bends back toward it.
         Kick::Shot => crosshair_yaw(k.eye, k.aim.x, ball_tf.translation) + (side * AIM_NUDGE).to_radians(),
-        _ => pass_yaw(bindings.pass_aim, &axes, &rig, crosshair_yaw(k.eye, rig.yaw, ball_tf.translation)),
+        _ => pass_yaw(bindings.pass_aim, &axes, &rig, crosshair_yaw(k.eye, k.aim.x, ball_tf.translation)),
     };
     let flat = forward(yaw);
     let dir = (flat * elevation.to_radians().cos() + Vec3::Y * elevation.to_radians().sin()).normalize();
