@@ -238,6 +238,9 @@ struct Clips {
     dribble_side: (OneShot, f32),
     dribble_back: (OneShot, f32),
     feint: (OneShot, f32),
+    roulette: (OneShot, f32),
+    /// Lock move with the ball: the right sole on it.
+    sole: Pose,
     dash_front: OneShot,
     dash_side: OneShot,
     dash_back: OneShot,
@@ -874,6 +877,50 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         ]),
         0.22,
     );
+    // The roulette (the forward feint): the right sole stops the ball at 10f and you turn half
+    // round over it with your back to the way you go, the ball rolling past, the left sole takes it
+    // on, and you turn back and come out running. The turn itself is added on top (animate_body).
+    let roulette = (
+        OneShot(vec![
+            (0.0, run_stance),
+            (0.15, stance.with(&[
+                (SPINE_J, [8.0, 0.0, 0.0]),
+                (THIGH_L, [10.0, 0.0, -8.0]),
+                (SHIN_L, [30.0, 0.0, 0.0]),
+                (FOOT_L, [-20.0, 0.0, 8.0]),
+                (THIGH_R, [45.0, 0.0, 6.0]),
+                (SHIN_R, [62.0, 0.0, 0.0]),
+                (FOOT_R, [-12.0, 0.0, -6.0]),
+                (UPPER_L, [10.0, 0.0, -60.0]),
+                (UPPER_R, [10.0, 0.0, 60.0]),
+            ])),
+            (0.5, stance.with(&[
+                (SPINE_J, [10.0, 0.0, 0.0]),
+                (THIGH_L, [40.0, 0.0, -6.0]),
+                (SHIN_L, [62.0, 0.0, 0.0]),
+                (FOOT_L, [-12.0, 0.0, 6.0]),
+                (THIGH_R, [4.0, 0.0, 8.0]),
+                (SHIN_R, [30.0, 0.0, 0.0]),
+                (FOOT_R, [-18.0, 0.0, -8.0]),
+                (UPPER_L, [0.0, 0.0, -70.0]),
+                (UPPER_R, [0.0, 0.0, 70.0]),
+            ])),
+            (0.8, run_contact),
+            (1.0, run_stance),
+        ]),
+        10.0 / 65.0,
+    );
+    // Lock move with the ball: the right sole up on the ball, the weight on a bent left leg.
+    let sole = stance.with(&[
+        (PELVIS, [0.0, 0.0, -4.0]),
+        (SPINE_J, [16.0, 0.0, -4.0]),
+        (THIGH_L, [16.0, 0.0, -8.0]),
+        (SHIN_L, [36.0, 0.0, 0.0]),
+        (FOOT_L, [-20.0, 0.0, 8.0]),
+        (THIGH_R, [50.0, 0.0, 4.0]),
+        (SHIN_R, [72.0, 0.0, 0.0]),
+        (FOOT_R, [-14.0, 0.0, -4.0]),
+    ]);
     // Dashes: forward an explosive first stride; sideways a long step out and a landing; back a hop.
     let dash_front = OneShot(vec![
         (0.0, stand.with(&[
@@ -944,6 +991,8 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         dribble_side,
         dribble_back,
         feint,
+        roulette,
+        sole,
         dash_front,
         dash_side,
         dash_back,
@@ -1044,6 +1093,9 @@ pub struct Animator {
     roll: f32,
     /// The move on top (a dribble or a dash): its pose, weight, side and when it began.
     move_pose: Pose,
+    /// The roulette's spin (degrees), and the sole-on-the-ball weight.
+    spin: f32,
+    sole: f32,
     move_w: f32,
     move_mirror: bool,
     move_t: f32,
@@ -1311,6 +1363,27 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     pose.0[CHEST_J].z += roll * 0.3;
     pose.0[SPINE_J].x += (1.0 - p.stamina / MAX_STAMINA).max(0.0) * 6.0;
 
+    // Lock move with the ball: the right sole goes up onto the ball and rolls it the way you move,
+    // the left foot shuffling underneath (the game's own lock-move ball cycles; players confirm the
+    // foot goes on the ball).
+    let on_ball = p.locked && p.has_ball && p.dribble.is_none() && p.dash.is_none() && p.kick.is_none() && p.receiving.is_none();
+    anim.sole += (if on_ball { 1.0 } else { 0.0 } - anim.sole).clamp(-dt / 0.15, dt / 0.15);
+    if anim.sole > 0.0 {
+        let (ahead, side) = (-local.z / LOCK_BALL_SPEED, local.x / LOCK_BALL_SPEED);
+        let (s, c) = (anim.phase * TAU).sin_cos();
+        let mut sole = clips.sole;
+        // The sole rolls the ball on and draws it back each step; sideways it sweeps across.
+        sole.0[THIGH_R] += Vec3::new(10.0 * ahead * s, 0.0, 8.0 * side * s);
+        sole.0[FOOT_R] += Vec3::new(-8.0 * ahead * s, 0.0, -8.0 * side * s);
+        // The left foot hops under you in time.
+        let hop = c.abs() * (ahead.abs() + side.abs()).min(1.0);
+        sole.0[THIGH_L] += Vec3::new(8.0 * ahead * c + 6.0 * hop, 0.0, -6.0 * side * c);
+        sole.0[SHIN_L] += Vec3::new(18.0 * hop, 0.0, 0.0);
+        sole.0[FOOT_L] += Vec3::new(-10.0 * hop, 0.0, 0.0);
+        let w = anim.sole * anim.sole * (3.0 - 2.0 * anim.sole);
+        pose = pose.lerp(&sole, w);
+    }
+
     // Kicks on top: wind up while charging, swing to the contact frame, follow through.
     match (anim.kick, p.kick) {
         (Some(was), None) => anim.follow = Some((0.0, was.kind)),
@@ -1375,6 +1448,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         }
         anim.move_t = d.t;
         let (shot, contact_at) = match (d.feint, d.heading) {
+            (true, Heading::Forward) => &clips.roulette,
             (true, _) => &clips.feint,
             (_, Heading::Forward) => &clips.dribble_forward,
             (_, Heading::Side) => &clips.dribble_side,
@@ -1387,6 +1461,15 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             contact_at + (1.0 - contact_at) * ((d.t - contact) / (DRIBBLE_SPEED_TIME - contact).max(0.05)).min(1.0)
         };
         moving = Some((shot.sample(u), 0.05));
+        // The roulette turns you half round over the ball as it rolls past, then back to face on
+        // (players: a 180 on the ball, not a full turn).
+        if d.feint && d.heading == Heading::Forward {
+            let ease = |a: f32, b: f32| {
+                let s = ((u - a) / (b - a)).clamp(0.0, 1.0);
+                s * s * (3.0 - 2.0 * s)
+            };
+            anim.spin = 180.0 * (ease(*contact_at, 0.45) - ease(0.5, 0.85)) * if anim.move_mirror { 1.0 } else { -1.0 };
+        }
     } else if let Some(d) = p.dash {
         if d.t < anim.move_t || anim.move_w <= 0.0 {
             anim.move_mirror = local_dir(d.dir).x < 0.0;
@@ -1432,6 +1515,12 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         let w = anim.control * anim.control * (3.0 - 2.0 * anim.control);
         pose = pose.plus(&Pose(clips.control.0.map(|a| a * w)));
     }
+
+    // The roulette's turn is on the whole body; cut short, it turns back over 0.1 s.
+    if !p.dribble.is_some_and(|d| d.feint && d.heading == Heading::Forward) {
+        anim.spin -= anim.spin * (dt / 0.1).min(1.0);
+    }
+    pose.0[PELVIS].y += anim.spin;
 
     anim.drop += (ground_drop(&pose) - anim.drop) * (6.0 * dt).min(1.0);
     let drop = anim.drop;

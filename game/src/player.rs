@@ -909,6 +909,14 @@ pub fn ball_control(
 /// is sprung toward the newest prediction, hard just after a touch and softly later, so late stick
 /// changes bend the ball's path; and the ball never strays far to your side.
 fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3 {
+    // Lock move with the ball: the right sole goes onto the ball (players confirm) and rolls it
+    // with you, a little ahead the way you move; it eases there as you lock.
+    if p.locked && p.dribble.is_none() {
+        let fwd = forward(p.facing);
+        let spot = root + fwd * STANCE_BALL.0 + fwd.cross(Vec3::Y) * STANCE_BALL.1 + Vec3::new(p.vel.x, 0.0, p.vel.z) * STANCE_BALL_LEAD;
+        p.carry = None;
+        return ball.lerp(Vec3::new(spot.x, BALL_RADIUS, spot.z), 1.0 - (-dt / STANCE_BALL_TIME).exp());
+    }
     let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
     let (ahead, every, own) = if p.sprinting { (TOUCH_AHEAD_SPRINT, TOUCH_EVERY_SPRINT, BALL_SPRINT_SPEED) } else { (TOUCH_AHEAD_RUN, TOUCH_EVERY_RUN, BALL_RUN_SPEED) };
     // Touches come with the steps: faster when you run faster (as the cycle's play rate), up to

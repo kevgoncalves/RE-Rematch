@@ -249,10 +249,6 @@ pub fn volley_diamond(
     }
 }
 
-/// The ball's shadow on the ground.
-#[derive(Component)]
-pub struct BallShadow;
-
 #[derive(Resource)]
 pub struct FxAssets {
     sphere: Handle<Mesh>,
@@ -302,17 +298,6 @@ pub fn spawn_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
         Transform::default(),
         Visibility::Hidden,
     ));
-    // The ball's shadow, always on: a soft dark disc under it (NS_Shadow_Ball; its faint ring is
-    // left out, players don't see one).
-    commands
-        .spawn((BallShadow, Transform::default(), Visibility::default()))
-        .with_children(|s| {
-            s.spawn((NotShadowCaster, 
-                Mesh3d(meshes.add(Circle::new(0.18))),
-                MeshMaterial3d(materials.add(flat(Color::srgba(0.0, 0.0, 0.0, 0.5), AlphaMode::Blend))),
-                Transform::from_xyz(0.0, 0.012, 0.0).with_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
-            ));
-        });
     commands.insert_resource(FxAssets { sphere: meshes.add(Sphere::new(BALL_RADIUS)), ring: meshes.add(Annulus::new(0.88, 1.0)) });
     // The trails: vertex-coloured ribbons added onto the scene.
     let glow = materials.add(StandardMaterial { base_color: Color::WHITE, unlit: true, alpha_mode: AlphaMode::Add, double_sided: true, cull_mode: None, ..default() });
@@ -320,16 +305,6 @@ pub fn spawn_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
         let mesh = meshes.add(ribbon(&[], Vec3::ZERO, 0.0, 1.0, Vec3::ZERO));
         commands.spawn((NotShadowCaster, Trail { source, effect, points: Vec::new(), mesh: mesh.clone() }, Mesh3d(mesh), MeshMaterial3d(glow.clone()), Transform::default(), Visibility::default()));
     }
-}
-
-/// The ball's shadow follows it on the ground, growing with its height (x2.5) and fading out
-/// between 1.5 and 8 m up.
-pub fn ball_shadow(ball: Single<&Transform, With<Ball>>, mut shadow: Single<(&mut Transform, &mut Visibility), (With<BallShadow>, Without<Ball>)>) {
-    let height = (ball.translation.y - BALL_RADIUS).max(0.0);
-    let (tf, vis) = &mut *shadow;
-    tf.translation = Vec3::new(ball.translation.x, 0.0, ball.translation.z);
-    tf.scale = Vec3::splat(1.0 + 1.5 * (height / 8.0).min(1.0));
-    **vis = if height < 8.0 { Visibility::Inherited } else { Visibility::Hidden };
 }
 
 /// What a trail follows: the ball, or a foot (-1 left, +1 right).

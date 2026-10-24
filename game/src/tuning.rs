@@ -414,6 +414,12 @@ pub const CONTROL_SNAP: f32 = 12.0 / 60.0;
 pub const CONTROL_ACT: f32 = 16.0 / 60.0;
 pub const CONTROL_MAX_HEIGHT: f32 = 2.0;
 pub const DRIBBLE_OFFSET: f32 = 0.7; // TUNE: where a control settles the ball, in front
+/// Lock move with the ball: where the ball sits under the right sole (m ahead, m right), how far
+/// it rolls ahead the way you move (seconds of your velocity), and how fast it eases there. TUNE:
+/// matched to our stance pose.
+pub const STANCE_BALL: (f32, f32) = (0.27, 0.15);
+pub const STANCE_BALL_LEAD: f32 = 0.03;
+pub const STANCE_BALL_TIME: f32 = 0.06;
 /// Running with the ball, it travels from touch to touch (TouchBallComponent and the run-with-ball
 /// cycles' touch data): each touch is aimed this far ahead of you, every few steps.
 pub const TOUCH_AHEAD_RUN: f32 = 0.20;

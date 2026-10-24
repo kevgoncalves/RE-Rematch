@@ -62,7 +62,7 @@ fn main() {
                 player::ball_control,
                 ball::ball_physics,
                 (fx::apply_cheats, fx::kick_marker, fx::dribble_fx, fx::action_fx, fx::fade_glows, fx::ball_lines).chain(),
-                (fx::trails, fx::ball_shadow, fx::volley_diamond, fx::effort_legs),
+                (fx::trails, fx::volley_diamond, fx::effort_legs),
                 on_goal,
                 body::animate_body,
                 camera::camera_follow,
