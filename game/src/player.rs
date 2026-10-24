@@ -48,6 +48,9 @@ pub struct DashState {
     pub t: f32,
     pub second: bool,
     pub dir: Vec3,
+    /// The yaw you turn to, as in a dribble: the dash's own direction going forward, the camera's
+    /// for side steps and dashes back.
+    pub facing: f32,
 }
 
 /// Which way a dribble or push ball goes, against the camera (dribbles) or your facing (push balls).
@@ -460,8 +463,16 @@ pub fn player_move(
         let first = p.dash.is_none() && p.locked && p.dash_cooldown <= 0.0;
         let second = p.dash_cooldown > 0.0 && p.dash.is_none_or(|d| !d.second && d.t >= SECOND_DASH_FROM);
         if first || second {
-            let dir = if wish != Vec3::ZERO { wish.normalize() } else { -forward(p.facing) };
-            p.dash = Some(DashState { t: 0.0, second: !first, dir });
+            // Same sectors as dribbles (players confirm): forward and the W+A / W+D diagonals turn
+            // you that way, side steps and dashes back keep you facing forward. No direction
+            // dashes back.
+            let (dir, heading) = if input == Vec2::ZERO {
+                (-forward(p.facing), Heading::Back)
+            } else {
+                (camera_relative(input.normalize(), rig.yaw).normalize(), dribble_heading(input.normalize()))
+            };
+            let facing = if heading == Heading::Forward { yaw_of(dir) } else { rig.yaw.to_radians() };
+            p.dash = Some(DashState { t: 0.0, second: !first, dir, facing });
             if first {
                 p.dash_cooldown = DASH_COOLDOWN;
             } else {
@@ -498,12 +509,11 @@ pub fn player_move(
         p.vel = k.entry * (1.0 + (end - 1.0) * (k.elapsed / SHOT_BUILDUP).min(1.0));
     } else if let Some(mut d) = p.dash {
         d.t += dt;
-        // Dashing onto the ball controls it and carries it on in front, the way you dash, like a
-        // fast cut (players confirm): the body turns to the dash direction.
-        if p.has_ball {
-            let max_turn = DRIBBLE_TURN_RATE.to_radians() * dt;
-            p.facing += angle_diff(yaw_of(d.dir), p.facing).clamp(-max_turn, max_turn);
-        }
+        // Turn as a dribble would. Dashing onto the ball controls it and carries it on in front,
+        // the way you dash, like a fast cut (players confirm): then the body faces the dash.
+        let target = if p.has_ball { yaw_of(d.dir) } else { d.facing };
+        let max_turn = DRIBBLE_TURN_RATE.to_radians() * dt;
+        p.facing += angle_diff(target, p.facing).clamp(-max_turn, max_turn);
         let speeds: &[(f32, f32)] = if d.second { &SECOND_DASH_SPEED } else { &DASH_SPEED };
         p.vel = d.dir * curve(speeds, d.t / DASH_DURATION);
         p.dash = (d.t < DASH_DURATION).then_some(d);

@@ -187,14 +187,46 @@ pub fn animate_body(
             q.roll = -0.25 * dir.x;
         });
     }
-    // Dash: a long lunge.
-    if p.dash.is_some() {
-        set(&mut poses, Part::Spine, &|q| q.pitch = -0.45);
-        set(&mut poses, Part::Body, &|q| q.drop += 0.1);
-        set(&mut poses, Part::Thigh(1.0), &|q| q.pitch = 0.8);
-        set(&mut poses, Part::Thigh(-1.0), &|q| q.pitch = -0.5);
-        set(&mut poses, Part::Shin(1.0), &|q| q.pitch = -0.3);
-        set(&mut poses, Part::Shin(-1.0), &|q| q.pitch = -0.8);
+    // Dash: the body keeps facing where it faced and the move is directional, like the game's
+    // front, side and back dash animations (DashAnimPicker's sectors).
+    if let Some(d) = p.dash {
+        set(&mut poses, Part::Body, &|q| q.drop += 0.08);
+        match dash_sector(to_local * d.dir) {
+            DashSector::Front => {
+                set(&mut poses, Part::Spine, &|q| q.pitch = -0.45);
+                set(&mut poses, Part::Thigh(1.0), &|q| q.pitch = 0.8);
+                set(&mut poses, Part::Thigh(-1.0), &|q| q.pitch = -0.5);
+                set(&mut poses, Part::Shin(1.0), &|q| q.pitch = -0.3);
+                set(&mut poses, Part::Shin(-1.0), &|q| q.pitch = -0.8);
+            }
+            DashSector::Side(s) => {
+                // Lean into the step, the leading leg reaching out, the other pushing off.
+                set(&mut poses, Part::Body, &|q| q.roll = -0.3 * s);
+                set(&mut poses, Part::Spine, &|q| q.pitch = -0.15);
+                set(&mut poses, Part::Thigh(s), &|q| {
+                    q.pitch = 0.0;
+                    q.roll = 0.55;
+                });
+                set(&mut poses, Part::Thigh(-s), &|q| {
+                    q.pitch = 0.0;
+                    q.roll = -0.15;
+                });
+                for side in [-1.0f32, 1.0] {
+                    set(&mut poses, Part::Shin(side), &|q| q.pitch = -0.4);
+                    set(&mut poses, Part::UpperArm(side), &|q| q.roll = 0.4);
+                }
+            }
+            DashSector::Back => {
+                set(&mut poses, Part::Body, &|q| q.pitch = 0.25);
+                set(&mut poses, Part::Spine, &|q| q.pitch = 0.1);
+                set(&mut poses, Part::Thigh(1.0), &|q| q.pitch = -0.5);
+                set(&mut poses, Part::Thigh(-1.0), &|q| q.pitch = 0.3);
+                for side in [-1.0f32, 1.0] {
+                    set(&mut poses, Part::Shin(side), &|q| q.pitch = -0.6);
+                    set(&mut poses, Part::UpperArm(side), &|q| q.pitch = 0.4);
+                }
+            }
+        }
     }
     // Receiving: the right foot reaches for the ball.
     if p.receiving.is_some() {
@@ -236,6 +268,25 @@ pub fn animate_body(
         if *part == Part::Body {
             tf.translation.y += (-q.drop - tf.translation.y) * blend;
         }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum DashSector {
+    Front,
+    /// +1 right, -1 left.
+    Side(f32),
+    Back,
+}
+
+/// Which dash animation a direction (in the body's frame) plays: front within 45 deg, back beyond
+/// 135 deg, a side step in between.
+fn dash_sector(dir: Vec3) -> DashSector {
+    let angle = dir.x.atan2(-dir.z).to_degrees();
+    match angle.abs() {
+        a if a <= 45.0 => DashSector::Front,
+        a if a < 135.0 => DashSector::Side(angle.signum()),
+        _ => DashSector::Back,
     }
 }
 
@@ -290,6 +341,14 @@ mod tests {
     fn joint(app: &mut App, part: Part) -> (f32, f32) {
         let tf = *app.world_mut().query::<(&Part, &Transform)>().iter(app.world()).find(|(p, _)| **p == part).unwrap().1;
         (tf.rotation.to_euler(EulerRot::YZX).2, tf.translation.y)
+    }
+
+    #[test]
+    fn dash_sectors() {
+        assert_eq!(dash_sector(Vec3::NEG_Z), DashSector::Front);
+        assert_eq!(dash_sector(Vec3::X), DashSector::Side(1.0));
+        assert_eq!(dash_sector(Vec3::NEG_X), DashSector::Side(-1.0));
+        assert_eq!(dash_sector(Vec3::Z), DashSector::Back);
     }
 
     #[test]
