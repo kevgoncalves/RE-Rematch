@@ -391,6 +391,7 @@ pub fn read_input(
         .map(|(a, _)| *a)
         .collect();
     // For screenshots: RE_ACT=Pass@1.6:0.3,Shoot@3:0.5 holds an action from a time for so long.
+    let mut scripted = HashSet::new();
     if let Ok(script) = std::env::var("RE_ACT") {
         for step in script.split(',') {
             let Some((name, rest)) = step.split_once('@') else { continue };
@@ -401,6 +402,7 @@ pub fn read_input(
                 && t < at + held
             {
                 now.insert(a);
+                scripted.insert(a);
                 if !actions.now.contains(&a) {
                     actions.fresh.insert(a);
                 }
@@ -409,7 +411,7 @@ pub fn read_input(
     }
 
     // Double-tap-and-hold actions.
-    let raw_now: HashSet<Action> = raw.iter().map(|(a, _)| *a).collect();
+    let raw_now: HashSet<Action> = raw.iter().map(|(a, _)| *a).chain(scripted).collect();
     for a in Action::ALL.into_iter().filter(|a| a.double_tap()) {
         let started = raw_now.contains(&a) && !actions.raw_prev.contains(&a);
         if started && actions.released_at.get(&a).is_some_and(|r| t - r < DOUBLE_TAP_WINDOW) {
