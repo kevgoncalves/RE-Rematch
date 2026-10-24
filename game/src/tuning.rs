@@ -309,20 +309,17 @@ pub const TURN_RATE_EXTRA_EFFORT: f32 = 150.0;
 pub const EXTRA_EFFORT_TAP_SPEED: f32 = 13.0;
 pub const EXTRA_EFFORT_KNOCK_SPEED: f32 = 12.0;
 pub const EXTRA_EFFORT_FRICTION: f32 = BASE_FRICTION * 1.5;
-/// Those speeds keep the ball within ~0.8 m of you, so you can cut it again quickly: a full
-/// gauge (one ~1.5 s hold) gives three cuts, as players report.
+/// At extra effort speed you catch the ball again about half a second after each tap, so a
+/// full gauge (one ~1.5 s hold) gives three cuts, as players report.
 /// The ability's cost effect takes a quarter of the gauge at activation, but players see no
 /// instant drop in the game, so the native code must apply it differently (open question).
 /// Until that is read, activation is free and only the 0.5/s hold drain applies (~2 s full).
 pub const EXTRA_EFFORT_START_COST: f32 = 0.0;
-/// Changing direction with the ball this close (or a fresh activation near it) cuts it the new way (TUNE).
-pub const EXTRA_EFFORT_CUT_REACH: f32 = 1.0;
-/// How far your run must turn away from the ball's path to count as a cut (TUNE).
-pub const EXTRA_EFFORT_CUT_ANGLE: f32 = 30.0;
-pub const EXTRA_EFFORT_CUT_WINDOW: f32 = 0.3;
-/// Touch force by how hard you turn against your run: x0.8 at 135 deg, x0.5 at 180 deg
-/// (BP_ExtraEffortAutoTap_FastTurnModifier).
-pub const EXTRA_EFFORT_TURN_FORCE: [(f32, f32); 4] = [(0.0, 1.0), (112.5, 1.0), (135.0, 0.8), (180.0, 0.5)];
+/// The auto tap (starting extra effort with the ball) is weaker in the middle of a big turn:
+/// x0.8 in a 135 deg turn, x0.5 in a 180 deg one; x0.9 for a ball 20 cm or more off the ground.
+pub const EXTRA_EFFORT_TAP_IN_135_TURN: f32 = 0.8;
+pub const EXTRA_EFFORT_TAP_IN_180_TURN: f32 = 0.5;
+pub const EXTRA_EFFORT_TAP_HIGH_BALL: (f32, f32) = (0.2, 0.9);
 /// Ball centre distance at which the body touches it (capsule 0.35 m + ball).
 pub const EXTRA_EFFORT_KNOCK_REACH: f32 = 0.35 + BALL_RADIUS + 0.05;
 

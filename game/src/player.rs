@@ -20,8 +20,6 @@ pub struct Player {
     pub sprint_running: bool,
     pub extra_effort: f32, // gauge 0..1
     pub extra_active: bool,
-    /// A fresh extra effort activation's direction, waiting to cut the ball that way (time left).
-    pub extra_cut: Option<(Vec3, f32)>,
     pub has_ball: bool,
     pub kick: Option<KickState>,
     pub locked: bool,
@@ -162,7 +160,6 @@ impl Default for Player {
             sprint_running: false,
             extra_effort: MAX_EXTRA_EFFORT,
             extra_active: false,
-            extra_cut: None,
             has_ball: false,
             kick: None,
             locked: false,
@@ -287,6 +284,12 @@ fn angle_diff(to: f32, from: f32) -> f32 {
 
 pub fn forward(yaw_rad: f32) -> Vec3 {
     Vec3::new(-yaw_rad.sin(), 0.0, -yaw_rad.cos())
+}
+
+/// Where an extra effort touch sends the ball: the movement input relative to the camera, or
+/// the way your body faces with no input (the fallback isn't read from the game).
+fn control_tap_dir(movement: Vec2, cam_yaw_deg: f32, facing: f32) -> Vec3 {
+    if movement == Vec2::ZERO { forward(facing) } else { camera_relative(movement.normalize(), cam_yaw_deg).normalize() }
 }
 
 fn camera_relative(movement: Vec2, cam_yaw_deg: f32) -> Vec3 {
@@ -417,10 +420,7 @@ pub fn player_move(
     if actions.just_pressed(Action::ExtraEffort) && p.extra_effort > 0.05 && !p.locked {
         p.extra_effort -= EXTRA_EFFORT_START_COST;
         p.extra_active = true;
-        let dir = if wish != Vec3::ZERO { wish.normalize() } else { forward(p.facing) };
-        p.extra_cut = Some((dir, EXTRA_EFFORT_CUT_WINDOW));
     }
-    p.extra_cut = p.extra_cut.map(|(d, t)| (d, t - dt)).filter(|(_, t)| *t > 0.0 && p.extra_active);
     if p.extra_active {
         p.extra_effort -= EXTRA_EFFORT_DRAIN * dt;
         if !actions.pressed(Action::ExtraEffort) || p.extra_effort <= 0.0 {
@@ -608,6 +608,8 @@ fn in_control_zone(rel: Vec3, vel: Vec3, speed: f32, locked: bool) -> bool {
 
 pub fn ball_control(
     time: Res<Time>,
+    axes: Res<Axes>,
+    rig: Single<&CameraRig>,
     mut player: Single<(&Transform, &mut Player), Without<Ball>>,
     mut ball: Single<(&mut Transform, &mut Ball)>,
 ) {
@@ -647,32 +649,16 @@ pub fn ball_control(
     let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
     let in_reach = b.no_control <= 0.0 && in_control_zone(rel, vel, speed, p.locked);
     if p.extra_active {
-        // A fresh activation near the ball cuts it the new way, weaker on a sharp turn.
-        if let Some((dir, _)) = p.extra_cut
-            && b.no_control <= 0.0
-            && flat.length() < EXTRA_EFFORT_CUT_REACH
-            && btf.translation.y < CONTROL_MAX_HEIGHT
-        {
-            let turn = if b.vel.length() > 0.5 { b.vel.angle_between(dir).to_degrees() } else { 0.0 };
-            let force = EXTRA_EFFORT_KNOCK_SPEED * curve(&EXTRA_EFFORT_TURN_FORCE, turn);
-            b.vel = dir * force + Vec3::Y * b.vel.y.max(0.0);
+        // Extra effort can't control the ball: touching it taps it on at 12 m/s, flat, wherever
+        // your movement input points at that moment (relative to the camera), whatever way your
+        // body is still turning. Changing direction on the ball is just touching it with a new
+        // input (extra-effort.md, the control tap).
+        let dir = control_tap_dir(axes.movement, rig.yaw, p.facing);
+        let touching = btf.translation.y < CONTROL_MAX_HEIGHT && b.no_control <= 0.0 && flat.length() < EXTRA_EFFORT_KNOCK_REACH;
+        if touching && b.vel.dot(dir) < EXTRA_EFFORT_KNOCK_SPEED * 0.9 {
+            b.vel = dir * EXTRA_EFFORT_KNOCK_SPEED;
             b.friction = EXTRA_EFFORT_FRICTION;
-            p.extra_cut = None;
-            return;
-        }
-        // Extra effort can't control the ball. Running into it taps it on the way you're running,
-        // and changing direction with it at your feet cuts it the new way, weaker on a sharp turn
-        // (players confirm; three cuts per full gauge).
-        let moving = Vec3::new(p.vel.x, 0.0, p.vel.z);
-        let dir = if moving.length() > 0.5 { moving.normalize() } else { forward(p.facing) };
-        let low = btf.translation.y < CONTROL_MAX_HEIGHT && b.no_control <= 0.0;
-        let ball_flat = Vec3::new(b.vel.x, 0.0, b.vel.z);
-        let turn = if ball_flat.length() > 0.5 { ball_flat.angle_between(dir).to_degrees() } else { 0.0 };
-        let cut = low && flat.length() < EXTRA_EFFORT_CUT_REACH && turn > EXTRA_EFFORT_CUT_ANGLE;
-        let knock = low && flat.length() < EXTRA_EFFORT_KNOCK_REACH && b.vel.dot(dir) < moving.length();
-        if cut || knock {
-            b.vel = dir * EXTRA_EFFORT_KNOCK_SPEED * curve(&EXTRA_EFFORT_TURN_FORCE, turn) + Vec3::Y * b.vel.y.max(0.0);
-            b.friction = EXTRA_EFFORT_FRICTION;
+            b.spin = Vec3::ZERO;
         }
         return;
     }
@@ -800,7 +786,7 @@ pub fn kicking(
         Kick::Lob => (curve(&LOB_FORCE, t), curve(&LOB_ANGLE_BY_HOLD, t), SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::ShortLob => (SHORT_LOB_SPEED, SHORT_LOB_ANGLE, SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::PushBall if p.extra_active => (
-            EXTRA_EFFORT_TAP_SPEED,
+            EXTRA_EFFORT_TAP_SPEED * auto_tap_factor(k.entry, push_dir, ball_tf.translation.y),
             0.0,
             EXTRA_EFFORT_FRICTION,
             PUSH_BALL_NO_CONTROL_EXTRA_EFFORT,
@@ -812,6 +798,8 @@ pub fn kicking(
         Kick::DribblePushBall => (DRIBBLE_PUSH_BALL_SPEED * sprint(DRIBBLE_PUSH_BALL_SPRINT_FACTOR), 0.0, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
     };
     let yaw = match k.kind {
+        // The extra effort auto tap goes the way your body faces, not your input.
+        Kick::PushBall if p.extra_active => p.facing,
         Kick::PushBall | Kick::DribblePushBall => (-push_dir.x).atan2(-push_dir.z),
         // Toward the crosshair's point on the walls (aim locked at the press), turned a little
         // against the curve so the ball bends back toward it.
@@ -862,6 +850,20 @@ pub fn kicking(
         };
         p.run = Some(Run { t: 0.0, length: length - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, dir: flat, speeds, scale: 1.0 });
     }
+}
+
+/// The extra effort auto tap's force multiplier: weaker when starting it turns you hard (from
+/// your run at the press to where you steer), and for a ball off the ground.
+fn auto_tap_factor(entry: Vec3, steer: Vec3, ball_height: f32) -> f32 {
+    let run = Vec3::new(entry.x, 0.0, entry.z);
+    let turn = if run.length() > 1.0 { run.angle_between(steer).to_degrees() } else { 0.0 };
+    let by_turn = match turn {
+        a if a >= 157.5 => EXTRA_EFFORT_TAP_IN_180_TURN,
+        a if a >= 112.5 => EXTRA_EFFORT_TAP_IN_135_TURN,
+        _ => 1.0,
+    };
+    let (high, factor) = EXTRA_EFFORT_TAP_HIGH_BALL;
+    by_turn * if ball_height - BALL_RADIUS >= high { factor } else { 1.0 }
 }
 
 /// A shot's ball speed: the force curve by seconds held (at least the build-up), plus your run-up
@@ -1027,6 +1029,21 @@ mod tests {
         let tf = app.world_mut().query::<&Transform>().iter(app.world()).next().copied().unwrap();
         // Backing off is +Z; there should be no sideways drift.
         assert!(tf.translation.z > 3.0 && tf.translation.x.abs() < 0.3, "ended at {:?}", tf.translation);
+    }
+
+    #[test]
+    fn extra_effort_touch_follows_the_input_not_the_body() {
+        // Running forward (-Z) with the camera behind, then steering right: the touch sends the
+        // ball right at once, even though the body is still moving forward.
+        let dir = control_tap_dir(Vec2::X, 0.0, 0.0);
+        assert!(dir.x > 0.99, "right is +X: {dir:?}");
+        // With no input it goes the way the body faces.
+        assert!(control_tap_dir(Vec2::ZERO, 90.0, 0.0).z < -0.99);
+        // Starting extra effort with the ball: full force straight on, x0.5 when it turns you round.
+        let run = Vec3::new(0.0, 0.0, -6.0);
+        assert_eq!(auto_tap_factor(run, Vec3::NEG_Z, BALL_RADIUS), 1.0);
+        assert_eq!(auto_tap_factor(run, Vec3::Z, BALL_RADIUS), EXTRA_EFFORT_TAP_IN_180_TURN);
+        assert_eq!(auto_tap_factor(run, Vec3::new(0.7, 0.0, 0.7).normalize(), BALL_RADIUS), EXTRA_EFFORT_TAP_IN_135_TURN);
     }
 
     #[test]
