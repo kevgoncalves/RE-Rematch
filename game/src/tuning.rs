@@ -208,6 +208,8 @@ pub const DRIBBLE_PUSH_BALL_LENGTH: [f32; 3] = [52.0 / 60.0, 47.0 / 60.0, 74.0 /
 pub const MAX_EXTRA_EFFORT: f32 = 1.0;
 pub const EXTRA_EFFORT_DRAIN: f32 = 0.5;
 pub const EXTRA_EFFORT_REGEN: f32 = 0.0625;
+/// With stamina full, the gauge refills 3x faster (ExtraEffortRegenMultiplier 3 at threshold 1.0; players confirm).
+pub const EXTRA_EFFORT_REGEN_FULL_STAMINA: f32 = 0.1875;
 pub const EXTRA_EFFORT_SPEED: f32 = 8.75;
 pub const EXTRA_EFFORT_ACCEL: f32 = 100.0;
 pub const TURN_RATE_EXTRA_EFFORT: f32 = 150.0;

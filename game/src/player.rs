@@ -368,7 +368,8 @@ pub fn player_move(
             p.extra_active = false;
         }
     } else {
-        p.extra_effort = (p.extra_effort + EXTRA_EFFORT_REGEN * dt).min(MAX_EXTRA_EFFORT);
+        let regen = if p.stamina >= MAX_STAMINA { EXTRA_EFFORT_REGEN_FULL_STAMINA } else { EXTRA_EFFORT_REGEN };
+        p.extra_effort = (p.extra_effort + regen * dt).min(MAX_EXTRA_EFFORT);
     }
     p.extra_effort = p.extra_effort.max(0.0);
 
