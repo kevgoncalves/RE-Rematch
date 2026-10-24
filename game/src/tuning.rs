@@ -269,6 +269,8 @@ pub const SHOT_SLIDE_FROM_DRIBBLE: f32 = 0.5;
 pub const PASS_DRAG_MIN_SPEED: f32 = 2.0;
 /// The after-touch drag runs to the pass animation's move interrupt (frames 18 to 63).
 pub const PASS_AFTER_TOUCH: f32 = 45.0 / 60.0;
+/// Kev finds the drag's lock too long: from this long after the touch any stick leaves it.
+pub const PASS_DRAG_FREE: f32 = 12.0 / 60.0;
 /// After the touch you keep that speed until the move ends (can act moving at 0.75 s, standing 0.67 s).
 pub const SHOT_FOLLOW_THROUGH: f32 = 13.0 / 60.0;
 /// Extra shot speed from your own speed (ShootForceByCharaSpeed, m/s), scaled by how strong the

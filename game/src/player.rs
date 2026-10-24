@@ -216,6 +216,19 @@ impl Turn {
 /// When a move hands control back (a dash, a pass's drag, a shot's follow-through) with the stick
 /// against the way you're going, you turn as from a run: brake to the pivot and re-accelerate,
 /// instead of arcing round (players confirm a smooth change of way after a dash).
+/// Kev's softer hand-back out of a dribble, a pass or lob's drag or a shot (the game brakes and
+/// pivots, which he finds too punishing): with the stick within 90 deg of your way you go its way
+/// at once at your speed; further round you pivot onto it at half your speed, with no brake.
+fn soft_hand_back(p: &mut Player, dir_now: Vec3) {
+    let flat = Vec3::new(p.vel.x, 0.0, p.vel.z);
+    if dir_now == Vec3::ZERO || flat.length() < 0.1 {
+        return;
+    }
+    let half = flat.angle_between(dir_now).to_degrees() > 90.0;
+    p.vel = dir_now.normalize() * flat.length() * if half { 0.5 } else { 1.0 };
+    p.turn = None;
+}
+
 fn hand_back(p: &mut Player, dir_now: Vec3, walking: bool, top: f32) {
     if p.locked || dir_now == Vec3::ZERO {
         return;
@@ -281,6 +294,8 @@ pub struct Run {
     exit: f32,
     /// At its end you leave this way at once instead of handing back (a turning control).
     leave: Option<Vec3>,
+    /// Hand back softly at its end (soft_hand_back).
+    soft: bool,
 }
 
 /// A kick from button press to ball contact. The build-up runs while the button is held.
@@ -690,6 +705,7 @@ pub fn player_move(
                     p.vel = way * CONTROL_V0_SPEED;
                     p.facing = yaw_of(way);
                 }
+                None if r.soft => soft_hand_back(p, dir_now),
                 None => hand_back(p, dir_now, walking, top),
             }
         }
@@ -703,6 +719,9 @@ pub fn player_move(
         p.facing += angle_diff(d.facing, p.facing) * (dt / (DRIBBLE_TURN_TIME - (d.t - dt)).max(dt)).min(1.0);
         p.vel = d.dir * curve(d.speeds(), (d.t / DRIBBLE_SPEED_TIME).min(1.0));
         p.dribble = Some(d);
+        if !d.moving() {
+            soft_hand_back(p, dir_now);
+        }
     } else if let Some(k) = p.kick.filter(|k| k.kind == Kick::Shot) {
         // A shot keeps your run-up: no steering, sliding on at a shrinking share of your speed.
         let end = if k.from_dribble {
@@ -963,10 +982,10 @@ pub fn ball_control(
         if entry > 0.1 && !p.locked && p.dash.is_none() {
             let dir = flat / entry;
             p.run = Some(match p.receive_way {
-                Some(way) => Run { t: 0.0, length: CONTROL_HAND_BACK.0, free_at: CONTROL_HAND_BACK.0, dir, speeds: &CONTROL_TURN_SLIDE, tables: None, scale: entry.min(CONTROL_CARRY_MAX), exit: 0.0, leave: Some(way) },
+                Some(way) => Run { t: 0.0, length: CONTROL_HAND_BACK.0, free_at: CONTROL_HAND_BACK.0, dir, speeds: &CONTROL_TURN_SLIDE, tables: None, scale: entry.min(CONTROL_CARRY_MAX), exit: 0.0, leave: Some(way), soft: false },
                 None => {
                     let length = if entry <= CONTROL_V0_SPEED { CONTROL_HAND_BACK.0 } else { CONTROL_HAND_BACK.1 };
-                    Run { t: 0.0, length, free_at: CONTROL_EXIT_FROM, dir, speeds: &CONTROL_CARRY, tables: None, scale: entry.min(CONTROL_CARRY_MAX), exit: CONTROL_EXIT_ANGLE, leave: None }
+                    Run { t: 0.0, length, free_at: CONTROL_EXIT_FROM, dir, speeds: &CONTROL_CARRY, tables: None, scale: entry.min(CONTROL_CARRY_MAX), exit: CONTROL_EXIT_ANGLE, leave: None, soft: false }
                 }
             });
         }
@@ -1286,13 +1305,13 @@ pub fn kicking(
     p.freeze = ball.freeze;
     if k.kind == Kick::Shot {
         let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
-        p.run = Some(Run { t: 0.0, length: SHOT_FOLLOW_THROUGH, free_at: SHOT_FOLLOW_THROUGH, dir: k.entry.normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: speed, exit: RUN_TURN_LIMIT, leave: None });
+        p.run = Some(Run { t: 0.0, length: SHOT_FOLLOW_THROUGH, free_at: SHOT_FOLLOW_THROUGH, dir: k.entry.normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: speed, exit: RUN_TURN_LIMIT, leave: None, soft: true });
     }
     // After the touch a pass or lob keeps dragging you until its move interrupt; steering the
     // same way leaves it at once.
     let entry = Vec3::new(k.entry.x, 0.0, k.entry.z);
     if k.kind.is_pass() && entry.length() > PASS_DRAG_MIN_SPEED {
-        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: 0.0, dir: entry.normalize(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: entry.length(), exit: RUN_TURN_LIMIT, leave: None });
+        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: PASS_DRAG_FREE, dir: entry.normalize(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: entry.length(), exit: 180.0, leave: None, soft: true });
     }
     // After a push ball you chase it on the move's own speed (extra effort keeps its running).
     if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) && !p.extra_active {
@@ -1309,7 +1328,7 @@ pub fn kicking(
         };
         let speeds = tables[state];
         // The chase runs to the animation's blend-out, or ends earlier on a stick exit.
-        p.run = Some(Run { t: 0.0, length: length - BLEND_OUT - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, dir: flat, speeds, tables: Some(tables), scale: 1.0, exit: RUN_TURN_LIMIT, leave: None });
+        p.run = Some(Run { t: 0.0, length: length - BLEND_OUT - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, dir: flat, speeds, tables: Some(tables), scale: 1.0, exit: RUN_TURN_LIMIT, leave: None, soft: false });
     }
 }
 
@@ -1625,6 +1644,20 @@ mod tests {
         frames(&mut app, &[], 10, 1.0 / 60.0);
         let v2 = app.world_mut().query::<&Player>().single(app.world()).unwrap().vel;
         assert!(v.z >= 0.0 && v2.z > 2.5, "speed back {v2:?}");
+    }
+
+    #[test]
+    fn a_dribble_hands_back_softly_against_the_stick() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+        app.world_mut().resource_mut::<Axes>().movement = Vec2::NEG_X; // stick left, the dribble went right
+        let d = DribbleState { t: DRIBBLE_FREE[1] - 0.01, feint: false, exhausted: false, heading: Heading::Side, dir: Vec3::X, facing: 0.0 };
+        app.world_mut().spawn((Transform::default(), Player { has_ball: true, dribble: Some(d), vel: Vec3::X * 3.0, ..default() }));
+        app.world_mut().spawn(CameraRig::default());
+        frames(&mut app, &[], 2, 1.0 / 60.0);
+        let p = app.world_mut().query::<&Player>().single(app.world()).unwrap();
+        // No brake and pivot: you go the stick's way at once.
+        assert!(p.turn.is_none() && p.vel.x < -1.0, "{:?}", p.vel);
     }
 
     #[test]
