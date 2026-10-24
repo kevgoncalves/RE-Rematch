@@ -190,8 +190,8 @@ pub const SPEED_BY_STAMINA: [(f32, f32); 4] = [(0.0, 0.8), (5.9, 0.95), (6.0, 1.
 
 // Shooting and passing (mechanics.md §4). The force curves run on the charge, 0..1: the time held
 // since the press against the kick's build-up (less a frame and the network margins), so full
-// power comes early: ~0.37 s for shots, ~0.23 s for passes and lobs. The ball leaves on release,
-// but never before the kick's contact frame; held to the end of the build-up it goes off by itself.
+// power comes early: ~0.37 s for shots, ~0.23 s for passes and lobs. The kick waits for the
+// release, and the ball leaves then, but never before the kick's contact frame.
 pub const SHOT_FORCE: [(f32, f32); 3] = [(0.0, 24.0), (0.3, 24.0), (1.0, 38.0)];
 /// Pass peaks at 60% charge (~0.14 s held); holding longer drops it to 25.6 m/s before it climbs back to 30.65.
 pub const PASS_FORCE: [(f32, f32); 5] = [(0.0, 20.0), (0.3, 20.0), (0.6, 32.0), (0.601, 25.6), (1.0, 30.65)];
@@ -230,7 +230,7 @@ pub const SHOT_DIP_PITCH_CORRECTION: f32 = 4.0;
 /// The shot flies from the ball toward where the crosshair meets the arena walls (traced 150 m
 /// from the camera, through the floor, which the trace ignores).
 pub const SHOT_TRACE_RANGE: f32 = 150.0;
-/// Passes leave flat; charging past the 60% sweet spot lifts them (degrees by charge).
+/// Passes leave flat; holding past 0.6 s lifts them (degrees by seconds held, not by charge).
 pub const PASS_LIFT_BY_HOLD: [(f32, f32); 4] = [(0.0, 0.0), (0.6, 0.0), (0.601, 3.9), (1.0, 6.0)];
 /// The side curve input turns the shot this many degrees the other way, so the ball bends back
 /// toward the crosshair (Curve_TrajectoryYawByXAxis, applied against the input).
@@ -264,7 +264,7 @@ pub const FAKE_SHOT_COST: f32 = 1.5;
 pub const SHORT_WINDUP: f32 = 16.0 / 60.0;
 pub const SHORT_PASS_SPEED: f32 = 24.25;
 pub const SHORT_PASS_FRICTION: f32 = BASE_FRICTION * 1.5 * 1.675; // multiplier x the override's weight
-/// Lob launch angle by charge (overrides the aim): longer lobs are flatter and faster.
+/// Lob launch angle by seconds held (overrides the aim): longer holds are flatter.
 pub const LOB_ANGLE_BY_HOLD: [(f32, f32); 2] = [(0.3, 44.0), (1.0, 30.26)];
 pub const SHORT_LOB_ANGLE: f32 = 52.0;
 pub const SHORT_LOB_SPEED: f32 = 13.2;

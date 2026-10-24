@@ -751,8 +751,10 @@ pub fn kicking(
         if k.kind.charge_action().is_some_and(|a| actions.pressed(a)) {
             k.held = k.elapsed.min(MAX_HOLD);
         }
-        // Release, or the end of the build-up: a fully charged kick goes off by itself.
-        k.released = k.held >= k.kind.buildup() || !k.kind.charge_action().is_some_and(|a| actions.pressed(a));
+        // The kick waits for the release; the build-up holds meanwhile. The only limit found in
+        // the code is the kick's network sync timeout (value unread).
+        // ponytail: 1 s, the end of the hold-time curves, until that timeout is read.
+        k.released = k.held >= MAX_HOLD || !k.kind.charge_action().is_some_and(|a| actions.pressed(a));
     }
     if k.kind == Kick::Shot {
         // The gamepad's right stick keeps aiming a charging shot; the mouse curves it instead.
@@ -792,9 +794,9 @@ pub fn kicking(
             SHOT_FRICTION,
             NO_RECONTROL_TIME,
         ),
-        Kick::Pass => (curve(&PASS_FORCE, t), curve(&PASS_LIFT_BY_HOLD, t), PASS_FRICTION, NO_RECONTROL_TIME),
+        Kick::Pass => (curve(&PASS_FORCE, t), curve(&PASS_LIFT_BY_HOLD, k.held), PASS_FRICTION, NO_RECONTROL_TIME),
         Kick::ShortPass => (SHORT_PASS_SPEED, 0.0, SHORT_PASS_FRICTION, NO_RECONTROL_TIME),
-        Kick::Lob => (curve(&LOB_FORCE, t), curve(&LOB_ANGLE_BY_HOLD, t), SHOT_FRICTION, NO_RECONTROL_TIME),
+        Kick::Lob => (curve(&LOB_FORCE, t), curve(&LOB_ANGLE_BY_HOLD, k.held), SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::ShortLob => (SHORT_LOB_SPEED, SHORT_LOB_ANGLE, SHOT_FRICTION, NO_RECONTROL_TIME),
         Kick::PushBall if p.extra_active => (
             EXTRA_EFFORT_TAP_SPEED * auto_tap_factor(k.entry, push_dir, ball_tf.translation.y),
