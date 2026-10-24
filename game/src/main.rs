@@ -72,8 +72,9 @@ fn main() {
         .run();
 }
 
-/// For checking visuals: `RE_SCREENSHOT=out.png` saves a frame after 2 s, then quits.
-/// `RE_VIEW=x,y,z[,tx,ty,tz]` looks from that point at the centre spot (or the target) instead.
+/// For checking visuals: `RE_SCREENSHOT=out.png` saves a frame after 2 s (or `RE_SHOT_AT` s), then quits.
+/// `RE_VIEW=x,y,z[,tx,ty,tz]` looks from that point at the centre spot (or the target) instead;
+/// `RE_VIEW=@x,y,z` looks at the player from that offset.
 /// `RE_MENU=1` opens the F1 menu first.
 fn auto_screenshot(
     mut commands: Commands,
@@ -81,26 +82,31 @@ fn auto_screenshot(
     mut taken: Local<bool>,
     mut exit: EventWriter<AppExit>,
     mut camera: Single<&mut Transform, With<Camera3d>>,
+    player: Single<&Transform, (With<Player>, Without<Camera3d>)>,
     mut menu: ResMut<menu::Menu>,
     mut menu_root: Single<&mut Node, With<menu::MenuRoot>>,
 ) {
     let Ok(path) = std::env::var("RE_SCREENSHOT") else { return };
+    let at = std::env::var("RE_SHOT_AT").ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
     if std::env::var("RE_MENU").is_ok() && !*taken && time.elapsed_secs() > 1.0 {
         menu.open = true;
         menu_root.display = Display::Flex;
     }
     if let Ok(view) = std::env::var("RE_VIEW") {
-        let v: Vec<f32> = view.split(',').filter_map(|n| n.trim().parse().ok()).collect();
+        let v: Vec<f32> = view.trim_start_matches('@').split(',').filter_map(|n| n.trim().parse().ok()).collect();
         let target = if v.len() == 6 { Vec3::new(v[3], v[4], v[5]) } else { Vec3::ZERO };
-        if v.len() >= 3 {
+        if view.starts_with('@') && v.len() >= 3 {
+            let at = player.translation - Vec3::Y * 0.3;
+            **camera = Transform::from_translation(at + Vec3::new(v[0], v[1], v[2])).looking_at(at, Vec3::Y);
+        } else if v.len() >= 3 {
             **camera = Transform::from_xyz(v[0], v[1], v[2]).looking_at(target, Vec3::Y);
         }
     }
-    if !*taken && time.elapsed_secs() > 2.0 {
+    if !*taken && time.elapsed_secs() > at {
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
         *taken = true;
     }
-    if time.elapsed_secs() > 3.0 {
+    if time.elapsed_secs() > at + 1.0 {
         exit.write(AppExit::Success);
     }
 }

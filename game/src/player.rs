@@ -914,7 +914,7 @@ pub fn kicking(
     }
     // The ball leaves on release, but never before the kick's contact frame (ShootDataTable):
     // a shot under 29.41 m/s uses the quicker low-power kick (20 frames, not 32).
-    let contact = if k.kind == Kick::Shot && shot_speed(&k) < SHOT_HIGH_POWER_SPEED { SHOT_LOW_POWER_CONTACT } else { k.kind.buildup() };
+    let contact = contact_time(k);
     if !k.released || k.elapsed < contact {
         return;
     }
@@ -1043,6 +1043,12 @@ fn auto_tap_factor(entry: Vec3, steer: Vec3, ball_height: f32) -> f32 {
 /// network margins, so full power comes before the animation ends (mechanics.md §4).
 pub fn charge(kind: Kick, held: f32) -> f32 {
     (held / (kind.buildup() - 1.0 / 60.0 - CHARGE_NETWORK_MARGIN)).clamp(0.0, 1.0)
+}
+
+/// When the foot meets the ball, from the press (ShootDataTable): a shot under 29.41 m/s is the
+/// quicker low-power kick (20 frames, not 32). The ball leaves then or at the release, if later.
+pub fn contact_time(k: &KickState) -> f32 {
+    if k.kind == Kick::Shot && shot_speed(k) < SHOT_HIGH_POWER_SPEED { SHOT_LOW_POWER_CONTACT } else { k.kind.buildup() }
 }
 
 /// A shot's ball speed: the force curve by seconds held (at least the build-up), plus your run-up
