@@ -12,7 +12,7 @@ How the dash with the ball (the "dribble"), its second move and the push balls w
 - No direction counts as forward.
 
 ### Dribble 1: which move you get
-The direction is your input against the camera (not against the way the player faces).
+The direction is your input against the camera (not against the way the player faces). Players confirm that flicking the camera and then pressing W + dribble fast-cuts the way you flicked, and the player and ball turn that way.
 
 | Input | Move | Lasts | Ball touched |
 |---|---|---|---|
@@ -47,6 +47,7 @@ The roulette covers about the same ground as the fast cut (average 4.8 against 4
 - **First 12f (0.2 s): nothing.**
 - **From 12f to the end:**
   - allowed: the feint, passes, lobs, short lobs, a special shot ("shoot after dribble"), sprint, extra effort, lock move, and the **dribble push balls**;
+  - players say the shot after a dribble is almost instant and works at any moment of it, so the shot may be buffered from the start (unconfirmed in the data);
   - not allowed: a new dribble 1, the dash, tackles, dives, the normal push ball and the normal shot.
 
 ### Cost and exhaustion

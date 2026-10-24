@@ -195,6 +195,8 @@ The **build-up (wind-up) runs while you hold**, not after you release:
 - but never before the build-up has finished;
 - the force uses at least the build-up time.
 
+Players say a quick tap goes off much sooner than the build-up, so the build-up may only set the minimum force and the earliest contact may be earlier (unconfirmed until the code is read).
+
 | Kick | Build-up (earliest ball contact) |
 |---|---|
 | Shot | **0.53 s** |
