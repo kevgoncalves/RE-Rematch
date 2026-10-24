@@ -265,9 +265,9 @@ pub const SHOT_SLIDE_SPRINT: f32 = 0.6;
 /// ...or shooting out of a dribble (the game's 0.5; Kev wants a bigger slide).
 pub const SHOT_SLIDE_FROM_DRIBBLE: f32 = 0.7;
 /// Passes and lobs keep all of your speed at the press, in that direction, through the build-up
-/// and after the touch (BeforeTapScaleSpeedData, TapAfterShootSpeedData). Under 2 m/s the
-/// animation's own motion plays instead.
-pub const PASS_DRAG_MIN_SPEED: f32 = 2.0;
+/// and after the touch (BeforeTapScaleSpeedData, TapAfterShootSpeedData): walking drags you a
+/// little, running more, out of a dribble as running (Kev); standing still (under this) none.
+pub const PASS_DRAG_MIN_SPEED: f32 = 0.3;
 /// The after-touch drag runs to the pass animation's move interrupt (frames 18 to 63).
 pub const PASS_AFTER_TOUCH: f32 = 45.0 / 60.0;
 /// Kev finds the drag's lock too long: from this long after the touch any stick leaves it.

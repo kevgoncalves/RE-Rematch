@@ -751,10 +751,10 @@ pub fn player_move(
                 hand_back(p, dir_now, walking, top);
             }
         }
-    } else if let Some(k) = p.kick.filter(|k| k.kind.is_pass() && Vec3::new(k.entry.x, 0.0, k.entry.z).length() > PASS_DRAG_MIN_SPEED) {
+    } else if let Some(drag) = p.kick.and_then(|k| pass_drag(&k)) {
         // A pass or lob drags you on at your speed at the press, that way, with no steering
         // (players confirm: a pass out of a dribble carries you like a shot).
-        p.vel = Vec3::new(k.entry.x, 0.0, k.entry.z);
+        p.vel = drag;
     } else if let Some(mut d) = p.dribble.filter(|d| d.moving()) {
         d.t += dt;
         // The body turns to the dribble's way linearly over its redirect time.
@@ -1423,9 +1423,8 @@ pub fn kicking(
     }
     // After the touch a pass or lob keeps dragging you until its move interrupt; steering the
     // same way leaves it at once.
-    let entry = Vec3::new(k.entry.x, 0.0, k.entry.z);
-    if k.kind.is_pass() && entry.length() > PASS_DRAG_MIN_SPEED {
-        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: PASS_DRAG_FREE, dir: entry.normalize(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: entry.length(), exit: 180.0, soft: true, face: None });
+    if let Some(drag) = pass_drag(&k) {
+        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: PASS_DRAG_FREE, dir: drag.normalize(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: drag.length(), exit: 180.0, soft: true, face: None });
     }
     if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) {
         p.own_push = 0.0;
@@ -1456,6 +1455,13 @@ pub fn kicking(
         // The chase runs to the animation's blend-out, or ends earlier on a stick exit.
         p.run = Some(Run { t: 0.0, length: length - BLEND_OUT - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, dir: flat, speeds, tables: Some(tables), scale: 1.0, exit: RUN_TURN_LIMIT, soft: false, face });
     }
+}
+
+/// A pass or lob's drag: your velocity at the press, or out of a dribble your run speed with the
+/// ball that way; none standing still (PASS_DRAG_MIN_SPEED).
+fn pass_drag(k: &KickState) -> Option<Vec3> {
+    let entry = Vec3::new(k.entry.x, 0.0, k.entry.z);
+    (k.kind.is_pass() && entry.length() > PASS_DRAG_MIN_SPEED).then(|| if k.from_dribble { entry.normalize() * BALL_RUN_SPEED } else { entry })
 }
 
 /// The extra effort auto tap's force multiplier: weaker when starting it turns you hard (from
