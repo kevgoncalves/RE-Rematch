@@ -15,7 +15,7 @@ What the extra effort ability does to the gauge and to the ball. Movement speed,
 ## With the ball at the start: the auto tap
 1. Plays the extra-effort-with-ball animation. During it, everything except dribbles and move interrupts is blocked.
 2. Kicks the ball (the "auto tap"):
-   - **13 m/s** along your forward;
+   - **13 m/s** along the way **your body faces** (a fixed direction in your own frame, not your input);
    - flat;
    - with the extra effort friction override (μ = 0.8 × 1.5 = **1.2**).
 
@@ -33,9 +33,12 @@ What the extra effort ability does to the gauge and to the ball. Movement speed,
 ## Without the ball: the control tap
 - While active, a sprint-tap hitbox (BallSteal.Hitbox.Sprint.Tap) looks for the loose ball. Its parameters 0.2, 0.04 and 5 were not interpreted.
 - When it touches the ball it kicks it on (the "control tap"):
-  - **12 m/s** along your input direction;
+  - **12 m/s** along your **movement input at the moment of the touch, read relative to the camera** (the direction computation's default space is the camera; it uses the input stored with the touch, with no clamp to your body's facing);
+  - flat (vertical angle 0);
   - same friction 1.2;
-  - only the zone and sweeper modifiers apply (so, in practice, none).
+  - only the zone and sweeper modifiers apply (so, in practice, none). The 135°/180° turn multipliers belong to the auto tap only.
+- So there is no separate "cut" rule: every touch sends the ball where you point. Changing direction on the ball is just touching it with a new input, before your body has finished turning.
+- With no input at the touch, the computation doesn't keep the last direction. Where it falls back to was not read; the prototype uses your body's facing.
 
 ## How far the ball runs
 At μ = 1.2 the ball rolls speed ÷ 1.2:
@@ -49,6 +52,8 @@ Running at extra effort speed you catch it again after about half a second, whic
 2. The sprint-tap hitbox's parameters (0.2, 0.04, 5) and its exact shape.
 
 ## Sources
+**Native code:** `InputForwardShootDirectionComputation__vf89` (`FUN_14531da00`, the input direction by space: 0 = the actor's forward, 1 = the camera), its constructor `FUN_1452de730` (defaults: camera space, vertical angle 0, no clamp to the actor's forward, no keeping the last direction).
+
 **Data:**
 - GA_ExtraEffort (bytecode);
 - BP_ExtraEffortAutoTapAbilityData and BP_ExtraEffortControlTapAbilityData;
