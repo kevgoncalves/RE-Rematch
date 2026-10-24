@@ -35,6 +35,7 @@ The ball's flight is a stack of **trajectory modifiers**, each adding one force 
 | `SpeedKeeperTrajectoryModifier`, `ForceNullifierTrajectoryModifier`, `CurrentForceBonusTrajectoryModifier` | keep speed, cancel forces, bonus from the current force | |
 | `TrajectoryStatus` + activate / deactivate conditions | temporary states on the flight | on bounce, distance, duration, inside the goal, quick bounce, volley |
 
+**Coded** in the prototype after Kev approved the spec (2026-10-24).
 **Interpreted:** [ball-flight.md](ball-flight.md) covers the formulas of gravity, drag, Magnus and friction, the spin frame and fade, the per-touch stacks, and how the flight is stepped.
 **Missing:** the roll-or-bounce check, the stop speed, the world gravity setting, and the special modifiers (height and location followers, speed keeper, force nullifier, current force bonus).
 
@@ -51,6 +52,7 @@ Each kick ability (`RuntimeShootGameplayAbility`, the GA_Shoot family) carries a
 
 Other pieces: `AbilityTask_ApplyShoot`, `AbilityTask_ApplyVolleyShoot`, `AbilityTask_NetworkSyncShootData`, `AnimNotify_Shoot`, `ShootForceAnimationPicker`, `ShootHelpers`, `ShootComputationHelper`.
 **Known:** force curves, build-up and contact frames, launch angles, spin curves by charge (mechanics.md §4).
+**Coded** in the prototype after Kev approved the specs (2026-10-24).
 **Interpreted:** [shot-aim.md](shot-aim.md) covers the crosshair trace, launch angle, yaw offset, mouse accumulator and input-to-spin. [pass-lob.md](pass-lob.md) covers the shared base direction and the pass and lob flight overrides.
 **Missing:** the pass filtering (lerp, acceleration range), the 2° pitch cap question, and the force computations' charge flags.
 
@@ -100,4 +102,4 @@ The GA_* Blueprints (availability layers, buffers, windows), the input condition
 **Partly known** (match-camera-network.md).
 
 ## Order
-Parts 1 and 2 decide how the ball behaves and are what feels most wrong today, so they come first. Then 3 and 4, then 5 and 6, then 7 to 9.
+Parts 1 and 2 decide how the ball behaves, so they came first and are now coded. Next are 3 and 4, then 5 and 6, then 7 to 9.
