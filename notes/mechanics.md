@@ -179,7 +179,7 @@ A push ball during extra effort is the fastest way to move with the ball: 9.5 m/
 | Dash | 0.8 s |
 | Dash right after a tackle | 0.96 s |
 | Second dash in a row | 0.8 s |
-| Dribble | 0.2 s |
+| Dribble | none found (0.2 s unconfirmed) |
 | "Ability recovery" (unconfirmed what this is) | 1.5 s |
 | Ping | 1.0 s |
 
@@ -344,8 +344,10 @@ When each kind triggers is unconfirmed. Instant controls also exist mid-dash.
 ---
 
 ## 6. Dribbling
+Full rules (fast cut, side, drag back, the feint, push balls during a dribble): [dribble.md](dribble.md).
+
 - **Cost:** 0.5 stamina.
-- **Cooldown:** 0.2 s.
+- **Cooldown:** none on the ability in the data (the 0.2 s figure is unconfirmed).
 - **Stamina regen** waits 0.9 s after a dribble.
 - **Timing:**
   - the ball is touched at 0.13 s;
@@ -395,7 +397,8 @@ It stays live for **1.5 s**, the same in the centre and on the sides. Unconfirme
 - **Distance:** **2.25 m**.
 - **You can deflect the ball during a dash:** it carries a "deflect" hitbox.
 - **Speed:** peaks at 8.5 m/s (goalkeeper 9.5 m/s), then ends at 4.5 m/s.
-- **Second dash in a row:** peaks at only 7.2 m/s and ends at 2 m/s.
+- **Second dash in a row:** it can cut into the first from 0.24 s while the first one's cooldown runs. It peaks at only 7.2 m/s and ends at 2 m/s.
+- **Not with the ball:** with the ball the same press is a dribble ([dribble.md](dribble.md)).
 - **Cost:** 0.75 stamina. **Cooldown:** 0.8 s.
 - What you can do during a dash, and when, is in [frame-data.md](frame-data.md).
 

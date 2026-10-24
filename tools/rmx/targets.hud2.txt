@@ -1,0 +1,2 @@
+Runtime/Content/Blueprints/UI/Widgets/Match/WBP_HUD.uasset
+Runtime/Content/Blueprints/UI/Widgets/Match/WBP_MatchInfoDisplay.uasset
