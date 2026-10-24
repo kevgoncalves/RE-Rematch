@@ -271,6 +271,14 @@ pub const LOB_BUILDUP: f32 = 24.0 / 60.0;
 /// network margins (0.12 + 0.03 s) off the build-up (mechanics.md §4), and Kev finds taps slower
 /// than the game's without them. A tapped pass or lob leaves at 15f, a tapped shot at 11f.
 pub const TAP_NETWORK_MARGIN: f32 = 0.15;
+/// A shot, pass or lob draws the ball to the kicking foot by its contact (m ahead, m to that
+/// foot's side), no faster than KICK_BALL_PULL against you, so the foot meets it (the carry left it
+/// up to 0.8 m ahead and the leg kicked air).
+pub const KICK_BALL_SPOT: (f32, f32) = (0.4, 0.1);
+pub const KICK_BALL_PULL: f32 = 6.0;
+/// A kick released late (charged) leaves once its strike has had this long, so the ball doesn't
+/// fly before the leg swings through.
+pub const KICK_STRIKE_MIN: f32 = 4.0 / 60.0;
 pub const WINDUP_SPEED_SCALE: f32 = 0.5; // TUNE: how much you slow down winding up a pass or lob
 /// A shot keeps your run-up: through the build-up you slide on in the same direction at a share
 /// of your speed at the press that shrinks to this (HighPowerBeforeShootScaleSpeedData)...

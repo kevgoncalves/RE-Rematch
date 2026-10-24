@@ -1119,6 +1119,19 @@ pub fn ball_control(
 /// is sprung toward the newest prediction, hard just after a touch and softly later, so late stick
 /// changes bend the ball's path; and the ball never strays far to your side.
 fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3 {
+    // A shot, pass or lob draws the ball to the kicking foot by its contact: the right foot, or
+    // the left for a shot across to the right (the mirrored clip), even from the stance.
+    if let Some(k) = p.kick.filter(|k| !matches!(k.kind, Kick::PushBall | Kick::DribblePushBall)) {
+        let fwd = forward(p.facing);
+        let left_foot = k.kind == Kick::Shot && angle_diff(k.aim.x.to_radians(), p.facing).to_degrees() < -30.0;
+        let side = if left_foot { -KICK_BALL_SPOT.1 } else { KICK_BALL_SPOT.1 };
+        let spot = root + fwd * KICK_BALL_SPOT.0 + fwd.cross(Vec3::Y) * side;
+        let ball = ball + Vec3::new(p.vel.x, 0.0, p.vel.z) * dt;
+        let left = (contact_time(&k) - k.elapsed).max(dt);
+        let to = Vec3::new(spot.x - ball.x, 0.0, spot.z - ball.z);
+        let ball = ball + (to * (dt / left).min(1.0)).clamp_length_max(KICK_BALL_PULL * dt);
+        return Vec3::new(ball.x, BALL_RADIUS, ball.z);
+    }
     // Lock move with the ball: the right sole goes onto the ball (players confirm) and rolls it
     // with you, a little ahead the way you move; it eases there as you lock.
     if p.locked && p.dribble.is_none() {
@@ -1357,7 +1370,8 @@ pub fn kicking(
     // The ball leaves on release, but never before the kick's contact frame (ShootDataTable):
     // a shot under 29.41 m/s uses the quicker low-power kick (20 frames, not 32).
     let contact = contact_time(k);
-    if !k.released || k.elapsed < contact {
+    let release = (k.held - k.pre).max(0.0);
+    if !k.released || k.elapsed < contact.max(release + KICK_STRIKE_MIN) {
         return;
     }
     let k = p.kick.take().expect("checked above");
