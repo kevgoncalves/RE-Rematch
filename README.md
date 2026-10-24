@@ -10,6 +10,10 @@ A study of the gameplay mechanics of Rematch (Sloclap, Unreal Engine 5), for a c
 | File | Contents |
 |---|---|
 | [notes/mechanics.md](notes/mechanics.md) | stamina, movement speeds, cooldowns, shooting, volleys, dribbling, tackles, dash, dives, extra effort, ball physics |
+| [notes/ball-flight.md](notes/ball-flight.md) | spec: the ball's forces in flight and rolling, spin, and what each touch changes |
+| [notes/shot-aim.md](notes/shot-aim.md) | spec: shot direction from the crosshair, launch angle, yaw offset, curve input to spin |
+| [notes/pass-lob.md](notes/pass-lob.md) | spec: pass and lob direction and flight |
+| [notes/extra-effort.md](notes/extra-effort.md) | spec: extra effort gauge cost, auto tap and control tap |
 | [notes/controls.md](notes/controls.md) | Rematch's default keyboard and gamepad bindings |
 | [notes/frame-data.md](notes/frame-data.md) | cancel windows and when you can act again after every action |
 | [notes/frame-data.csv](notes/frame-data.csv) | the same, per animation (766 rows, 60 fps frames) |

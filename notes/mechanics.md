@@ -285,6 +285,8 @@ All times are from the press. Charged kicks wait for your release if you hold pa
 | fully pressed | 100% | 100% |
 
 ### Direction, height and curve
+Full spec: [shot-aim.md](shot-aim.md).
+
 - **Direction: the ball goes toward the crosshair's point, not along the camera.** The game traces up to 150 m from the camera through the crosshair (the trace ignores the floor and players, so it stops on the arena walls or the goal) and shoots from the ball toward that point, horizontally. With the camera to one side of the player, this is what makes the ball land under the crosshair.
 - **The side curve input turns the shot 3° the other way** (±3° at full input), so a curving ball starts off to one side and bends back toward the crosshair.
 - **Height comes from the camera's pitch, not from the trace:**
@@ -470,6 +472,8 @@ It stays live for **1.5 s**, the same in the centre and on the sides. Unconfirme
 ---
 
 ## 10. Extra effort
+Ability spec (cost, auto tap, control tap): [extra-effort.md](extra-effort.md).
+
 - **Own gauge:** separate from stamina, from 0 to 1.
 - **Duration:** while active it drains 0.5 per second, so it lasts **~2 s at most**.
 - **Start phase:** the first **0.6 s** is a separate phase. If you have the ball, it gets kicked forward at 0.13 s and you can act at 0.2 s.
@@ -497,6 +501,8 @@ It stays live for **1.5 s**, the same in the centre and on the sides. Unconfirme
 | Magnus effect | yes: spin curves the ball in flight and while rolling |
 
 ### Forces (native code)
+Full spec: [ball-flight.md](ball-flight.md).
+
 Each piece gives an **acceleration** directly; nothing is divided by the mass. In metres:
 - **Gravity (in flight):** g × (1.625 + 0.5 × seconds spent falling since the last bounce), with g the world's 9.8 m/s². So a ball rises against **15.9 m/s²** and comes down faster the longer it falls. The 1.625 is the ball's Mass attribute; the 0.5 is the "free fall multiplier".
 - **Air drag (in flight):** coefficient × 0.0228 × speed², weaker the more vertical the flight (× (1 − the vertical share of the velocity)). 0.0228 is half the air density times the ball's cross-section. With the default 0.45, a 30 m/s shot slows to about 24 m/s over 20 m.

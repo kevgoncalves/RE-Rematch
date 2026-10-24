@@ -34,8 +34,8 @@ The ball's flight is a stack of **trajectory modifiers**, each adding one force 
 | `SpeedKeeperTrajectoryModifier`, `ForceNullifierTrajectoryModifier`, `CurrentForceBonusTrajectoryModifier` | keep speed, cancel forces, bonus from the current force | |
 | `TrajectoryStatus` + activate / deactivate conditions | temporary states on the flight | on bounce, distance, duration, inside the goal, quick bounce, volley |
 
-**Known:** bounce values per surface, friction per touch, the ball's mass, max speed and gravity multiplier (mechanics.md §11, arena.md).
-**Missing:** the formulas inside each modifier, the units of spin, and the values each kick's stack uses.
+**Interpreted:** [ball-flight.md](ball-flight.md) covers the formulas of gravity, drag, Magnus and friction, the spin frame and fade, the per-touch stacks, and how the flight is stepped.
+**Missing:** the roll-or-bounce check, the stop speed, the world gravity setting, and the special modifiers (height and location followers, speed keeper, force nullifier, current force bonus).
 
 ## 2. Kicks: direction, force and spin
 Each kick ability (`RuntimeShootGameplayAbility`, the GA_Shoot family) carries a `ShootAbilityData`, which picks four strategies and a list of modifiers:
@@ -50,7 +50,8 @@ Each kick ability (`RuntimeShootGameplayAbility`, the GA_Shoot family) carries a
 
 Other pieces: `AbilityTask_ApplyShoot`, `AbilityTask_ApplyVolleyShoot`, `AbilityTask_NetworkSyncShootData`, `AnimNotify_Shoot`, `ShootForceAnimationPicker`, `ShootHelpers`, `ShootComputationHelper`.
 **Known:** force curves, build-up and contact frames, launch angles, spin curves by charge (mechanics.md §4).
-**Missing:** how the direction is computed from the camera, how the pieces combine, and the values per kick type.
+**Interpreted:** [shot-aim.md](shot-aim.md) covers the crosshair trace, launch angle, yaw offset, mouse accumulator and input-to-spin. [pass-lob.md](pass-lob.md) covers the shared base direction and the pass and lob flight overrides.
+**Missing:** the pass filtering (lerp, acceleration range), the 2° pitch cap question, and the force computations' charge flags.
 
 ## 3. Touching and receiving the ball
 | Class | Role |
@@ -78,8 +79,8 @@ Other pieces: `AbilityTask_ApplyShoot`, `AbilityTask_ApplyVolleyShoot`, `Ability
 
 ## 5. Stamina and extra effort
 `RuntimeAttributeSet`, `StaminaLossCalculation`, `StaminaRegenCalculation`, `OutOfStaminaCalculation`, `ExtraEffortRegenCalculation`, `AbilityTask_ApplyAbilityCostOverTime`.
-**Known:** costs and regen curves from the curve tables.
-**Missing:** the regen calculations' code (e.g. why the extra effort activation cost doesn't show in-game).
+**Known:** costs and regen curves from the curve tables. The extra effort ability (cost, auto tap, control tap, their modifiers) is in [extra-effort.md](extra-effort.md).
+**Missing:** the regen calculations' code (e.g. why the extra effort activation cost doesn't show in-game), and the sprint-tap hitbox.
 
 ## 6. Abilities and input
 The GA_* Blueprints (availability layers, buffers, windows), the input conditions (`…InputConditionData`, `InputConditionMappingDB`, `InputMappingPresetDB`), `InputModifierModeGameOption`, `InputDelayComponent`.
