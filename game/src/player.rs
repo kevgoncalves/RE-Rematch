@@ -383,8 +383,9 @@ pub fn kicking(
     ball.vel = dir * speed;
     ball.spin = if k.kind == Kick::Shot {
         // Spin around -Y curves the ball to the right of travel; `right` spin lifts it.
-        let top = curve(&TOP_SPIN, axes.curve.y) * curve(&TOP_SPIN_BY_CHARGE, ratio) + SHOT_BASE_SPIN;
-        Vec3::NEG_Y * curve(&SIDE_SPIN, side) * curve(&SIDE_SPIN_BY_CHARGE, ratio) + right * top
+        // Pulling the curve input down dips the ball, pushing it up lifts it (confirmed in-game).
+        let lift = -curve(&TOP_SPIN, axes.curve.y) * curve(&TOP_SPIN_BY_CHARGE, ratio) + SHOT_BASE_SPIN;
+        Vec3::NEG_Y * curve(&SIDE_SPIN, side) * curve(&SIDE_SPIN_BY_CHARGE, ratio) + right * lift
     } else {
         Vec3::ZERO // ponytail: curve only on shots for now
     };
