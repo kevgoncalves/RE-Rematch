@@ -24,11 +24,13 @@ pub struct Ball {
     pub no_control: f32,
     /// The kick's freeze: the ball waits at the foot this long before it flies.
     pub freeze: f32,
+    /// The last step's hit on a wall, post or crossbar: the surface point and its normal.
+    pub hit: Option<(Vec3, Vec3)>,
 }
 
 impl Default for Ball {
     fn default() -> Self {
-        Self { vel: Vec3::ZERO, spin: Vec3::ZERO, friction: SHOT_FRICTION, drag: DRAG_FORCE, fall_time: 0.0, held: false, no_control: 0.0, freeze: 0.0 }
+        Self { vel: Vec3::ZERO, spin: Vec3::ZERO, friction: SHOT_FRICTION, drag: DRAG_FORCE, fall_time: 0.0, held: false, no_control: 0.0, freeze: 0.0, hit: None }
     }
 }
 
@@ -89,7 +91,7 @@ pub fn step(pos: &mut Vec3, ball: &mut Ball, dt: f32) -> Option<f32> {
     }
     *pos += ball.vel * dt;
     let falling = ball.vel.y < 0.0;
-    collide(pos, &mut ball.vel);
+    ball.hit = collide(pos, &mut ball.vel).map(|normal| (*pos - normal * BALL_RADIUS, normal));
     if falling && ball.vel.y >= 0.0 {
         ball.fall_time = 0.0; // a bounce starts a new fall
     }
@@ -106,8 +108,11 @@ fn bounce(vel: &mut Vec3, normal: Vec3, (perp, para): (f32, f32)) {
     }
 }
 
-fn collide(pos: &mut Vec3, vel: &mut Vec3) {
+/// Keeps the ball in the arena; returns the normal of a wall, post or crossbar it hit (not the
+/// ground, the ceiling or the net).
+fn collide(pos: &mut Vec3, vel: &mut Vec3) -> Option<Vec3> {
     let r = BALL_RADIUS;
+    let mut hit = None;
     if pos.y < r {
         pos.y = r;
         bounce(vel, Vec3::Y, GRASS_BOUNCE);
@@ -121,7 +126,9 @@ fn collide(pos: &mut Vec3, vel: &mut Vec3) {
     }
     if pos.x.abs() > HALF_WIDTH - r {
         pos.x = pos.x.signum() * (HALF_WIDTH - r);
-        bounce(vel, Vec3::new(-pos.x.signum(), 0.0, 0.0), WALL_BOUNCE);
+        let normal = Vec3::new(-pos.x.signum(), 0.0, 0.0);
+        bounce(vel, normal, WALL_BOUNCE);
+        hit = Some(normal);
     }
 
     let in_mouth = pos.x.abs() < GOAL_HALF_WIDTH - r && pos.y < GOAL_HEIGHT - r;
@@ -154,7 +161,9 @@ fn collide(pos: &mut Vec3, vel: &mut Vec3) {
             }
         } else {
             pos.z = pos.z.signum() * (HALF_LENGTH - r);
-            bounce(vel, Vec3::new(0.0, 0.0, -pos.z.signum()), END_WALL_BOUNCE);
+            let normal = Vec3::new(0.0, 0.0, -pos.z.signum());
+            bounce(vel, normal, END_WALL_BOUNCE);
+            hit = Some(normal);
         }
     }
 
@@ -164,13 +173,14 @@ fn collide(pos: &mut Vec3, vel: &mut Vec3) {
         let bar = (Vec3::new(-GOAL_HALF_WIDTH, GOAL_HEIGHT, z), Vec3::new(GOAL_HALF_WIDTH, GOAL_HEIGHT, z));
         for side in [-1.0f32, 1.0] {
             let post = (Vec3::new(side * GOAL_HALF_WIDTH, 0.0, z), Vec3::new(side * GOAL_HALF_WIDTH, GOAL_HEIGHT, z));
-            hit_segment(pos, vel, post);
+            hit = hit_segment(pos, vel, post).or(hit);
         }
-        hit_segment(pos, vel, bar);
+        hit = hit_segment(pos, vel, bar).or(hit);
     }
+    hit
 }
 
-fn hit_segment(pos: &mut Vec3, vel: &mut Vec3, (a, b): (Vec3, Vec3)) {
+fn hit_segment(pos: &mut Vec3, vel: &mut Vec3, (a, b): (Vec3, Vec3)) -> Option<Vec3> {
     let ab = b - a;
     let t = ((*pos - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
     let offset = *pos - (a + ab * t);
@@ -179,7 +189,9 @@ fn hit_segment(pos: &mut Vec3, vel: &mut Vec3, (a, b): (Vec3, Vec3)) {
         let normal = offset.normalize_or(Vec3::Y);
         *pos = a + ab * t + normal * min;
         bounce(vel, normal, (POST_BOUNCE, POST_BOUNCE));
+        return Some(normal);
     }
+    None
 }
 
 #[cfg(test)]

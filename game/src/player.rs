@@ -32,7 +32,8 @@ pub struct Player {
     pub dash_cooldown: f32,
     pub second_dash_cooldown: f32,
     pub dribble: Option<DribbleState>,
-    pub dribble_lockout: f32,
+    /// Lock move held all through the current dribble: only then does the next press feint.
+    pub dribble_lock: bool,
     /// A push ball pressed before the dribble's window opened, waiting for it.
     pub push_buffered: bool,
     /// Scripted chase after a push ball.
@@ -360,7 +361,7 @@ impl Default for Player {
             dash_cooldown: 0.0,
             second_dash_cooldown: 0.0,
             dribble: None,
-            dribble_lockout: 0.0,
+            dribble_lock: false,
             push_buffered: false,
             run: None,
             receiving: None,
@@ -556,6 +557,9 @@ pub fn player_move(
     let min_stance = p.locked && p.has_ball && p.lock_time < STANCE_MIN_TIME;
     p.locked = (held && !p.relock_needed) || min_stance;
     p.lock_time = if p.locked { p.lock_time + dt } else { 0.0 };
+    if !p.locked {
+        p.dribble_lock = false;
+    }
     // Locking takes over from a kick's drag (not from a push ball's chase).
     if p.locked && p.run.is_some_and(|r| r.tables.is_none()) {
         p.run = None;
@@ -585,14 +589,17 @@ pub fn player_move(
     // Dribble (notes/dribble.md): the dash you do with the ball, from lock move, on the push ball
     // or dash button. From 0.2 s into it the same press chains the feint; nothing chains after a
     // feint, and a tired dribble can't chain at all.
-    p.dribble_lockout -= dt;
     // From a control's effect on the ball a dribble goes at once (Kev: no wait for the ball to
     // settle); the ball joins it as it does.
     let dribble_press = actions.pending(Action::PushBall) || actions.pending(Action::Dash);
     if dribble_press && (p.has_ball || p.receiving.is_some()) && p.locked && p.kick.is_none() {
-        let feint = !p.exhausted && p.dribble.is_some_and(|d| !d.feint && !d.exhausted && d.t >= DRIBBLE_WINDOW_OPENS && d.t < d.length() - FEINT_WINDOW_CUT);
-        let again = p.dribble.is_none_or(|d| !d.feint && d.t >= d.length() - FEINT_WINDOW_CUT);
-        if feint || (again && p.dribble_lockout <= 0.0) {
+        // The feint needs lock move held all through dribble 1 (Kev: let go and lock again, and the
+        // next press is dribble 1 again, at once).
+        let feint = !p.exhausted && p.dribble_lock && p.dribble.is_some_and(|d| !d.feint && !d.exhausted && d.t >= DRIBBLE_WINDOW_OPENS && d.t < d.length() - FEINT_WINDOW_CUT);
+        // A new dribble 1 from FEINT_WINDOW_CUT before any dribble's end, a feint's too (Kev: the
+        // game's 1 s lock after a feint made dribbles feel late).
+        let again = p.dribble.is_none_or(|d| d.t >= d.length() - FEINT_WINDOW_CUT || (!p.dribble_lock && d.t >= DRIBBLE_WINDOW_OPENS));
+        if feint || again {
             // No direction is a forward dribble. Keyboard diagonals sit on the 45/135 deg sector edges:
             // W+A and W+D are fast cuts, S+A and S+D side dribbles going back (players confirm).
             let dir = if tap_input == Vec2::ZERO { Vec2::Y } else { tap_input.normalize() };
@@ -604,11 +611,9 @@ pub fn player_move(
             p.dribble = Some(DribbleState { t: 0.0, feint, exhausted: p.exhausted, heading, dir, facing });
             // A new move takes over from a kick's drag (or any other scripted run).
             p.run = None;
+            p.dribble_lock = true;
             actions.consume(Action::PushBall);
             actions.consume(Action::Dash);
-            if feint {
-                p.dribble_lockout = FEINT_LOCKOUT;
-            }
             p.stamina = (p.stamina - DRIBBLE_COST).max(0.0);
             p.regen_wait = DRIBBLE_REGEN_DELAY;
         }
@@ -1550,6 +1555,22 @@ mod tests {
         frames(&mut app, lock, 6, 0.04);
         frames(&mut app, press, 1, 0.016);
         assert!(dribble(&mut app).is_some_and(|d| d.feint && d.t > 0.2));
+    }
+
+    #[test]
+    fn letting_go_of_lock_move_makes_the_next_press_dribble_1() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+        app.world_mut().spawn((Transform::default(), Player { has_ball: true, ..default() }));
+        app.world_mut().spawn(CameraRig::default());
+        let (lock, press) = ([Action::Lock].as_slice(), [Action::Lock, Action::PushBall].as_slice());
+        frames(&mut app, lock, 1, 0.016);
+        frames(&mut app, press, 1, 0.016);
+        // Let go (past the stance's 0.15 s minimum), lock again, press: dribble 1, not the feint.
+        frames(&mut app, &[], 12, 0.016);
+        frames(&mut app, lock, 2, 0.016);
+        frames(&mut app, press, 1, 0.016);
+        assert!(dribble(&mut app).is_some_and(|d| !d.feint && d.t < 0.05), "dribble 1 again");
     }
 
     #[test]

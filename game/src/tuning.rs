@@ -223,8 +223,6 @@ pub const PUSH_BALL_DEAD_ZONE: f32 = 0.1;
 pub const CHORD_WINDOW: f32 = 0.1;
 pub const DRIBBLE_COST: f32 = 0.5;
 pub const DRIBBLE_REGEN_DELAY: f32 = 0.9;
-/// No new dribble until this long after a feint starts (our reading of the game's 1 s tag time).
-pub const FEINT_LOCKOUT: f32 = 12.0 / 60.0 + 1.0;
 /// How fast a fast cut turns you (and the ball) to its direction, degrees per second.
 /// Dribbles and dashes turn the body to their way linearly over these (BP_RedirectCardinalsToForward
 /// 12f; the dash's redirection 9f).
