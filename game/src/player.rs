@@ -217,8 +217,9 @@ pub struct KickState {
     pub released: bool,
     /// Shot aim (yaw, pitch in degrees), locked at the press so the mouse can curve the ball.
     pub aim: Vec2,
-    /// The camera's position at the press. The aim is traced from it, so sliding on through the
-    /// kick doesn't move where you aimed (players confirm the aim locks as the kick starts).
+    /// The camera's position at the press. A shot's aim is traced from it, so sliding on through
+    /// the kick doesn't move where you aimed (players confirm a shot's aim locks as it starts;
+    /// passes and lobs don't lock).
     pub eye: Vec3,
     /// Your velocity at the press: a shot slides on from it.
     pub entry: Vec3,
@@ -980,7 +981,7 @@ pub fn kicking(
         // Toward the crosshair's point on the walls (aim locked at the press), turned a little
         // against the curve so the ball bends back toward it.
         Kick::Shot => crosshair_yaw(k.eye, k.aim.x, ball_tf.translation) + (side * AIM_NUDGE).to_radians(),
-        _ => pass_yaw(bindings.pass_aim, &axes, &rig, crosshair_yaw(k.eye, k.aim.x, ball_tf.translation)),
+        _ => pass_yaw(bindings.pass_aim, &axes, &rig, crosshair_yaw(camera.translation, rig.yaw, ball_tf.translation)),
     };
     let flat = forward(yaw);
     let dir = (flat * elevation.to_radians().cos() + Vec3::Y * elevation.to_radians().sin()).normalize();

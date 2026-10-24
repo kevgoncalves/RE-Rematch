@@ -84,6 +84,7 @@ pub fn update_pass_line(
     player: Single<&Player>,
     ball: Single<&Transform, (With<Ball>, Without<PassLine>)>,
     rig: Single<&CameraRig>,
+    camera: Single<&Transform, (With<Camera3d>, Without<Ball>, Without<PassLine>)>,
     axes: Res<Axes>,
     bindings: Res<Bindings>,
     mut line: Single<(&mut Transform, &mut Visibility, &MeshMaterial3d<PassLineMaterial>), With<PassLine>>,
@@ -96,7 +97,7 @@ pub fn update_pass_line(
         return;
     };
     **vis = Visibility::Inherited;
-    let yaw = pass_yaw(bindings.pass_aim, &axes, &rig, crosshair_yaw(k.eye, k.aim.x, ball.translation));
+    let yaw = pass_yaw(bindings.pass_aim, &axes, &rig, crosshair_yaw(camera.translation, rig.yaw, ball.translation));
     tf.translation = Vec3::new(ball.translation.x, 0.02, ball.translation.z) + forward(yaw) * 0.1;
     tf.rotation = Quat::from_rotation_y(yaw);
     if let Some(m) = materials.get_mut(&handle.0) {

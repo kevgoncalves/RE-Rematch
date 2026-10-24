@@ -273,10 +273,10 @@ pub fn camera_look(
     let lim = cam.blended();
     rig.yaw -= d.x;
     rig.pitch = (rig.pitch + d.y).clamp(-lim.down, lim.up);
-    // A charged kick locks the aim at the press. The camera keeps following you as you slide on
-    // and turns to keep the crosshair on that point (the lock shot; players confirm the aim locks
-    // as the kick starts).
-    if let Some(k) = p.kick.filter(|k| matches!(k.kind, Kick::Shot | Kick::Pass | Kick::Lob)) {
+    // A shot locks its aim at the press. The camera keeps following you as you slide on and turns
+    // to keep the crosshair on that point (the lock shot; players confirm the aim locks as a shot
+    // starts, and passes and lobs don't lock).
+    if let Some(k) = p.kick.filter(|k| k.kind == Kick::Shot) {
         rig.yaw = yaw_of(crosshair_point(k.eye, k.aim.x.to_radians()) - camera.translation).to_degrees();
         rig.pitch = k.aim.y;
     }
