@@ -79,6 +79,7 @@ Other pieces: `AbilityTask_ApplyShoot`, `AbilityTask_ApplyVolleyShoot`, `Ability
 | `…RootMotionModifier…` | root-motion moves: dribbles, dashes, dives, redirects to the ball |
 
 **Known:** speeds, transition durations and curves (mechanics.md §2–3).
+**Interpreted:** [turns.md](turns.md) covers turn transitions: the 50 ms input trigger, the angle bands, the brake to a pivot speed and the re-acceleration to full speed, the direction and facing during the turn, and when a new input can cut in. Most of SCCore's movement code (transition tables, movement descriptions) lies at 0x144A00000–0x144B50000, outside the dumped game ranges.
 
 ## 5. Stamina and extra effort
 `RuntimeAttributeSet`, `StaminaLossCalculation`, `StaminaRegenCalculation`, `OutOfStaminaCalculation`, `ExtraEffortRegenCalculation`, `AbilityTask_ApplyAbilityCostOverTime`.

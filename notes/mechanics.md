@@ -99,7 +99,7 @@ Top speeds come from the character's locomotion attributes (DefaultCharacterLoco
 Sprinting with the ball turns 4× slower than running with it. To turn sharply, leave the sprint.
 
 ### Starting, stopping and turning
-Every direction change is a short transition: you **brake**, then you **re-accelerate**, and you leave the turn at a reduced speed.
+Every sharp change of direction is a short transition: you **brake** along your old line down to a pivot speed, then **re-accelerate** to full speed along the new one. The full rules (when a turn starts, what can cut in, direction and facing) are in [turns.md](turns.md).
 
 **From standing to full speed, and from full speed to a stop:**
 
@@ -112,9 +112,9 @@ Every direction change is a short transition: you **brake**, then you **re-accel
 | Lock move | 0.2 s | 0.2 s |
 | Back to sprint after a tackle | 0.35 s | |
 
-**Turns** (brake + re-accelerate, and the speed you come out at):
+**Turns** (brake + re-accelerate, and the lowest speed in the turn as a share of top speed; you always come out at full speed):
 
-| State | 90° turn | 180° turn | Exit speed at 90° / 135° / 180° |
+| State | 90° turn | 180° turn | Lowest speed at 90° / 135° / 180° |
 |---|---|---|---|
 | Run | 0.14 + 0.13 s | **0.3 + 0.3 s** | 85% / 85% / 60% |
 | **Sprint** | 0.17 + 0.35 s | **0.4 + 0.35 s** | 70% / 70% / **50%** |
@@ -124,13 +124,21 @@ Every direction change is a short transition: you **brake**, then you **re-accel
 | Lock move with ball | 0.18 + 0.12 s | 0.26 + 0.12 s | 47% / 47% / 32% |
 | Lock move while sprinting | 0.1 + 0.1 s | 0.1 + 0.1 s | 85% / 60% / 50% |
 
-How a turn plays (the code-driven transition data in Data/Locomotion/TransitionDB): you **brake along your old direction** on the brake curve, then **re-accelerate along the new direction** to the exit share of top speed; the direction can still change while braking. Which turn you get depends on the angle between your run and the stick: **under 30° you just steer** (with the ball at most 180°/s, without it 400°/s), **30–60° is a 45° turn** (with the ball only), **60–120° a 90° turn**, **120° and over a 180° turn** (the 135° band isn't used in free move).
+How a turn plays (the code-driven transition data in Data/Locomotion/TransitionDB, run by a root-motion move):
+- **The brake** keeps you on your old velocity's line, sliding from your speed down to the pivot (the share above × top speed).
+- **The re-acceleration** goes from the pivot back to 100% of top speed, along a direction that starts at your new input and follows the live input at a capped rate.
+
+**When a turn starts:**
+- It starts when your **input** turns by a big angle **within 50 ms (3 frames)**.
+- Without the ball: 70–120° plays the "90°" data, 120° and over the 180°, and anything smaller is just steering.
+- With the ball: 60–120° is a 90° turn, 120° and over a 180°.
+- So W→D turns, W→W+D never does, and a slow stick sweep only steers (400°/s, with the ball 180°/s).
 
 What this means in practice:
-- **A 180° turn in a sprint costs ~0.75 s** and you come out at half speed.
-- **With the ball it costs 0.8 s** and you come out at 45%.
-- Running with the ball, any turn of 45° or more drops you to 55% speed.
-- Some transitions can be cut short by a new input: a start or stop after 30% of it, a 180° after 60% (40% in a sprint), a 90° after 80% (unconfirmed meaning).
+- **A 180° turn in a sprint costs ~0.75 s** and dips to half speed for a moment.
+- **With the ball it costs 0.8 s** and dips to 45%.
+- Running with the ball, any turn of 60° or more dips to 55% speed.
+- Nothing can cut into a turn while it brakes. In the re-acceleration a new transition can start after 80% of it (90° turns) or 60% (180°, 40% in a sprint). A start or a stop can be cut after 30%.
 
 ### Lock move (strafing: facing one way, moving another)
 - **Stance** (lock move with the ball) lasts at least **0.15 s** from the press: the release is only checked then.
