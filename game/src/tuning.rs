@@ -86,8 +86,8 @@ pub const STOP_TIME: [f32; 4] = [0.38, 0.7, 0.68, 1.0];
 // direction that keeps turning toward the input. You never brake to a stop.
 /// One phase: duration (s) and its curve over normalised time (brake 1 -> 0, re-acceleration 0 -> 1).
 pub type TurnPhase = (f32, &'static [(f32, f32)]);
-const LIN_DOWN: &[(f32, f32)] = &[(0.0, 1.0), (1.0, 0.0)];
-const LIN_UP: &[(f32, f32)] = &[(0.0, 0.0), (1.0, 1.0)];
+pub const LIN_DOWN: &[(f32, f32)] = &[(0.0, 1.0), (1.0, 0.0)];
+pub const LIN_UP: &[(f32, f32)] = &[(0.0, 0.0), (1.0, 1.0)];
 const V2_TURN90_STOP: &[(f32, f32)] = &[(0.0, 1.0), (0.5, 0.25), (1.0, 0.0)];
 const V2_TURN90_START: &[(f32, f32)] = &[(0.0, 0.0), (0.6, 0.6), (1.0, 1.0)];
 const V3_TURN90_STOP: &[(f32, f32)] = &[(0.0, 1.0), (0.2, 0.7), (1.0, 0.0)];
@@ -191,6 +191,9 @@ pub const SECOND_DASH_FROM: f32 = 14.4 / 60.0;
 pub const DRIBBLE_SPEED_TIME: f32 = 45.0 / 60.0;
 /// From here the feint, dribble push balls, passes and shots are allowed.
 pub const DRIBBLE_WINDOW_OPENS: f32 = 12.0 / 60.0;
+/// Kev wants dribble 1 chains back (as before the patch that widened the feint window): the feint
+/// window closes this long before the dribble's end, and a press after it is a new dribble 1.
+pub const FEINT_WINDOW_CUT: f32 = 0.2;
 pub const DRIBBLE_FORWARD: [(f32, f32); 4] = [(0.0, 4.0), (0.2, 6.8), (0.5, 4.0), (1.0, 4.0)];
 pub const DRIBBLE_SIDE: [(f32, f32); 5] = [(0.0, 4.0), (0.1, 6.5), (0.15, 6.5), (0.35, 3.4), (1.0, 3.4)];
 pub const DRIBBLE_BACK: [(f32, f32); 5] = [(0.0, 3.0), (0.1, 5.8), (0.2, 5.8), (0.45, 3.0), (1.0, 3.0)];
@@ -354,10 +357,20 @@ pub const PUSH_BALL_LENGTH: [f32; 3] = [55.0 / 60.0, 55.0 / 60.0, 53.0 / 60.0];
 /// You're free to act again this long after the press.
 pub const PUSH_BALL_FREE: f32 = 23.0 / 60.0;
 pub const RUN_TURN_LIMIT: f32 = 30.0; // degrees
-/// Kev's ippy (as before the Season 1 fix to turning quickly after a push ball): once the chase is
-/// free, a stick turned further away turns your body to it at this rate (deg/s) as you run on, so
-/// you meet the ball already turning. TUNE.
-pub const CHASE_TURN_RATE: f32 = 540.0;
+/// Kev's quick turn, for the ippy (as before the Season 1 fix to turning quickly after a push
+/// ball: once its chase is free, a stick turned back starts it) and for controls taken with the
+/// stick well off your way: you slide on along your way down to a stop, the body swinging round
+/// smoothly, then run off the new way. Brake and re-acceleration (s), and the body's swing (s). TUNE.
+pub const QUICK_TURN: (f32, f32, f32) = (0.18, 0.25, 0.16);
+/// Kev's softer hand-back (out of dribbles, passes, lobs, shots): a pivot where your heading and
+/// body swing round together at this rate (deg/s) for up to this long (s), your speed dipping to
+/// this share while more than 90 deg off. TUNE.
+pub const PIVOT_RATE: f32 = 720.0;
+pub const PIVOT_TIME: f32 = 0.35;
+pub const PIVOT_SPEED: f32 = 0.6;
+/// The ippy's quick turn starts when your push ball is this close ahead (m) with the stick turned
+/// back, so you slide into it mid-turn. TUNE.
+pub const IPPY_TURN_GAP: f32 = 0.9;
 // Push ball during a dribble: no direction falloff; x1.35 when sprinting.
 pub const DRIBBLE_PUSH_BALL_SPEED: f32 = 11.0;
 pub const DRIBBLE_PUSH_BALL_SPRINT_FACTOR: f32 = 1.35;
@@ -437,13 +450,11 @@ pub const CONTROL_EXIT_ANGLE: f32 = 15.0;
 pub const CONTROL_BEHIND_ANGLE: f32 = 112.5;
 pub const CONTROL_REAR_SPOT: (f32, f32) = (-0.25, 0.15);
 /// A control taken mid-turn, or with the stick more than this far off the way you move (degrees),
-/// turns you to the stick (the ippy slide, as Kev knew it before the nerf): the body turns by the
-/// snap as you slide on, slowing, the foot pulls the ball out the new way (this far, m), and you
-/// leave that way at 75% of your entry speed (at least 4, at most 6 m/s), with no turn's brake. TUNE.
+/// takes the ball out the turn's way (the ippy slide, as Kev knew it before the nerf): the turn
+/// goes on (a quick turn if none was running) and the foot pulls the ball out the new way (this
+/// far, m). TUNE.
 pub const CONTROL_TURN_ANGLE: f32 = 45.0;
 pub const CONTROL_TURN_SPOT: f32 = 0.45;
-pub const CONTROL_TURN_SLIDE: [(f32, f32); 2] = [(0.0, 1.0), (1.0, 0.2)];
-pub const CONTROL_TURN_LEAVE: (f32, f32, f32) = (0.75, 4.0, 6.0);
 /// Touches come up to 20% more often as your way turns, from 20 to 180 deg/s.
 pub const TOUCH_TURN_RATES: (f32, f32) = (20.0, 180.0);
 pub const CONTROL_MAX_HEIGHT: f32 = 2.0;
