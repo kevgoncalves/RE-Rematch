@@ -1063,6 +1063,12 @@ pub fn kicking(
 
     let Some(k) = &mut p.kick else { return };
     k.elapsed += dt;
+    // Extra effort's auto tap turns you to where you push by its touch (as the game's 135/180 deg
+    // weakening implies), so starting it any way, even out of a dribble, takes the ball with you.
+    if k.kind == Kick::PushBall && p.extra_active && k.steer != Vec3::ZERO {
+        let left = (contact_time(k) - (k.elapsed - dt)).max(dt);
+        p.facing += angle_diff(yaw_of(k.steer), p.facing) * (dt / left).min(1.0);
+    }
     if !k.released {
         if k.kind.charge_action().is_some_and(|a| actions.pressed(a)) {
             k.held = k.elapsed.min(MAX_HOLD);
