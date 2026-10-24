@@ -205,6 +205,8 @@ struct Transition {
 
 /// Time a start takes to reach the run, and the shortest stop.
 const START_TIME: f32 = 0.35;
+/// The fastest any joint may turn, degrees per second.
+const MAX_JOINT_SPEED: f32 = 1200.0;
 const STOP_TIME: f32 = 0.45;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1349,6 +1351,9 @@ pub struct Animator {
     move_w: f32,
     move_mirror: bool,
     move_t: f32,
+    /// The pose shown last frame (for MAX_JOINT_SPEED).
+    shown: Pose,
+    shown_ready: bool,
     /// A chained move crossfades from the last one's pose.
     move_prev: Pose,
     move_fade: f32,
@@ -1845,6 +1850,19 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         anim.spin -= anim.spin * (dt / 0.1).min(1.0);
     }
     pose.0[PELVIS].y += anim.spin;
+
+    // No joint turns faster than MAX_JOINT_SPEED: a layer starting or ending mid-pose can't snap a
+    // limb in one frame (the start of a run flicked the right forearm 70 deg), while every authored
+    // move (a kick's strike, a dash's burst) stays under it.
+    if anim.shown_ready {
+        let max = MAX_JOINT_SPEED * dt;
+        for j in 0..JOINTS {
+            let d = (pose.0[j] - anim.shown.0[j]).clamp(Vec3::splat(-max), Vec3::splat(max));
+            pose.0[j] = anim.shown.0[j] + d;
+        }
+    }
+    anim.shown = pose;
+    anim.shown_ready = true;
 
     // The feet stay on the ground: the pelvis follows the pose's drop closely (a slow follow left
     // deep moves like the fast cut floating, then sinking).
