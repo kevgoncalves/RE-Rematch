@@ -189,7 +189,8 @@ pub const SHORT_LOB_SPEED: f32 = 13.2;
 pub const PUSH_BALL_SPEED: f32 = 11.5;
 pub const PUSH_BALL_FRICTION: f32 = BASE_FRICTION * 2.8; // about 5.5 m of roll at 11.5 m/s
 pub const PUSH_BALL_WINDUP: f32 = 8.0 / 60.0;
-pub const PUSH_BALL_NO_CONTROL: f32 = 23.0 / 60.0;
+/// After any kick you can't control your own ball for 0.5 s (GE_LostBall).
+pub const PUSH_BALL_NO_CONTROL: f32 = 0.5;
 pub const PUSH_BALL_NO_CONTROL_EXTRA_EFFORT: f32 = 12.0 / 60.0;
 pub const PUSH_BALL_COST: f32 = 0.375;
 pub const PUSH_BALL_REGEN_DELAY: f32 = 1.0;
@@ -249,12 +250,27 @@ pub const EXTRA_EFFORT_TURN_FORCE: [(f32, f32); 4] = [(0.0, 1.0), (112.5, 1.0), 
 pub const EXTRA_EFFORT_KNOCK_REACH: f32 = 0.35 + BALL_RADIUS + 0.05;
 
 // Ball control (hitboxes.md)
-pub const CONTROL_RADIUS_STANDING: f32 = 0.5;
-pub const CONTROL_RADIUS_MOVING: f32 = 0.9;
+// Ball control zones (the character's control hitboxes; m, centred at pitch level, `forward` ahead
+// of you): standing up to 2.5 m/s, moving above it. The ball's own hit sphere is 0.12 m.
+pub const CONTROL_SWITCH_SPEED: f32 = 2.5;
+pub const BALL_HIT_RADIUS: f32 = 0.12;
+/// (forward offset, radius, half height) of the capsules; the standing ground zone is a sphere.
+pub const CONTROL_STANDING: (f32, f32, f32) = (0.10, 0.50, 1.85);
+pub const CONTROL_STANDING_GROUND: (f32, f32) = (0.10, 0.83);
+pub const CONTROL_MOVING: (f32, f32, f32) = (0.30, 0.90, 1.84);
+/// Running forward you can also take a ball rolling away from you.
+pub const CONTROL_MOVING_GROUND: (f32, f32, f32) = (-0.10, 0.60, 1.80);
+/// Lock move without the ball catches from any direction.
+pub const CONTROL_LOCK_MOVE: (f32, f32, f32) = (0.10, 0.675, 1.85);
+/// The normal zones refuse a ball heading away from you: this close to "away" (degrees).
+pub const CONTROL_AWAY_ANGLE: f32 = 75.0;
+/// The ball becomes yours 12 frames into the control (it settles at your feet), and you can act
+/// from the control's action frame (14 to 22 by animation; TUNE within that).
+pub const CONTROL_SNAP: f32 = 12.0 / 60.0;
+pub const CONTROL_ACT: f32 = 16.0 / 60.0;
 pub const CONTROL_MAX_HEIGHT: f32 = 2.0;
-pub const MOVING_THRESHOLD: f32 = 3.0; // "standing" is below 3 m/s
 pub const DRIBBLE_OFFSET: f32 = 0.7; // TUNE: ball distance in front while carrying
-pub const NO_RECONTROL_TIME: f32 = 0.3; // TUNE: after kicking, you can't instantly re-control
+pub const NO_RECONTROL_TIME: f32 = 0.5; // GE_LostBall: no control of your own kick for 0.5 s
 
 // Freeplay ball call
 pub const FEED_DISTANCE: f32 = 15.0; // TUNE

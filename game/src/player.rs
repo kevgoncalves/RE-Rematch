@@ -34,6 +34,8 @@ pub struct Player {
     pub push_buffered: bool,
     /// Scripted chase after a push ball.
     pub run: Option<Run>,
+    /// Seconds into receiving the ball (the ball becomes yours at CONTROL_SNAP; you act from CONTROL_ACT).
+    pub receiving: Option<f32>,
 }
 
 #[derive(Clone, Copy)]
@@ -152,6 +154,7 @@ impl Default for Player {
             dribble_lockout: 0.0,
             push_buffered: false,
             run: None,
+            receiving: None,
         }
     }
 }
@@ -494,9 +497,51 @@ pub fn player_move(
     tf.rotation = lean * Quat::from_rotation_y(p.facing);
 }
 
-pub fn ball_control(mut player: Single<(&Transform, &mut Player), Without<Ball>>, mut ball: Single<(&mut Transform, &mut Ball)>) {
+/// Whether a ball at `rel` (relative to you: x forward, y up, z right) moving at `vel` (same frame)
+/// is inside one of your control zones (BC: the character's control hitboxes).
+fn in_control_zone(rel: Vec3, vel: Vec3, speed: f32, locked: bool) -> bool {
+    let capsule = |(fwd, radius, half): (f32, f32, f32)| {
+        let p = rel - Vec3::X * fwd;
+        let axis_y = p.y.clamp(-(half - radius), half - radius);
+        (p - Vec3::Y * axis_y).length() < radius + BALL_HIT_RADIUS
+    };
+    let sphere = |(fwd, radius): (f32, f32)| (rel - Vec3::X * fwd).length() < radius + BALL_HIT_RADIUS;
+    if locked {
+        return capsule(CONTROL_LOCK_MOVE);
+    }
+    // A ball heading away from you is refused, unless you're running forward onto it.
+    let coming = vel.length() < 0.5 || rel.angle_between(vel).to_degrees() > CONTROL_AWAY_ANGLE;
+    if speed <= CONTROL_SWITCH_SPEED {
+        coming && (capsule(CONTROL_STANDING) || sphere(CONTROL_STANDING_GROUND))
+    } else {
+        (coming && capsule(CONTROL_MOVING)) || capsule(CONTROL_MOVING_GROUND)
+    }
+}
+
+pub fn ball_control(
+    time: Res<Time>,
+    mut player: Single<(&Transform, &mut Player), Without<Ball>>,
+    mut ball: Single<(&mut Transform, &mut Ball)>,
+) {
     let (ptf, p) = &mut *player;
     let (btf, b) = &mut *ball;
+    // Receiving: the ball settles at your feet and becomes yours 12 frames in; kicks wait for the
+    // control's action frame.
+    if let Some(t) = p.receiving {
+        let t = t + time.delta_secs();
+        p.receiving = (t < CONTROL_ACT).then_some(t);
+        if !p.has_ball {
+            let target = ptf.translation + forward(p.facing) * DRIBBLE_OFFSET;
+            let target = Vec3::new(target.x, BALL_RADIUS, target.z);
+            btf.translation = btf.translation.lerp(target, (t / CONTROL_SNAP).min(1.0));
+            b.vel = p.vel;
+            if t >= CONTROL_SNAP {
+                p.has_ball = true;
+                b.held = true;
+            }
+            return;
+        }
+    }
     if p.has_ball {
         // ponytail: ball glued in front of the feet; real dribble touches come later
         let target = ptf.translation + forward(p.facing) * DRIBBLE_OFFSET;
@@ -505,9 +550,14 @@ pub fn ball_control(mut player: Single<(&Transform, &mut Player), Without<Ball>>
         return;
     }
     let flat = Vec2::new(btf.translation.x - ptf.translation.x, btf.translation.z - ptf.translation.z);
-    let moving = p.vel.length() > MOVING_THRESHOLD;
-    let radius = if moving { CONTROL_RADIUS_MOVING } else { CONTROL_RADIUS_STANDING } + BALL_RADIUS;
-    let in_reach = b.no_control <= 0.0 && flat.length() < radius && btf.translation.y < CONTROL_MAX_HEIGHT;
+    // Into your own frame: x forward, y up (from the pitch), z right.
+    let fwd = forward(p.facing);
+    let right = fwd.cross(Vec3::Y);
+    let to_ball = Vec3::new(flat.x, 0.0, flat.y);
+    let rel = Vec3::new(to_ball.dot(fwd), btf.translation.y, to_ball.dot(right));
+    let vel = Vec3::new(b.vel.dot(fwd), b.vel.y, b.vel.dot(right));
+    let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
+    let in_reach = b.no_control <= 0.0 && in_control_zone(rel, vel, speed, p.locked);
     if p.extra_active {
         // A fresh activation near the ball cuts it the new way, weaker on a sharp turn.
         if let Some((dir, _)) = p.extra_cut
@@ -539,8 +589,7 @@ pub fn ball_control(mut player: Single<(&Transform, &mut Player), Without<Ball>>
         return;
     }
     if in_reach {
-        p.has_ball = true;
-        b.held = true;
+        p.receiving = Some(0.0);
         b.spin = Vec3::ZERO;
     }
 }
@@ -579,8 +628,9 @@ pub fn kicking(
         p.push_buffered = true;
     }
     let buffered_push = p.push_buffered && dribble_open;
-    // A dash that picked up the ball doesn't block kicks (players confirm).
-    if p.has_ball && p.kick.is_none() {
+    // A dash that picked up the ball doesn't block kicks (players confirm). A control does until
+    // its action frame.
+    if p.has_ball && p.kick.is_none() && p.receiving.is_none() {
         let charged = [(Action::Shoot, Kick::Shot), (Action::Pass, Kick::Pass), (Action::Lob, Kick::Lob)];
         // In lock move the push ball button dribbles instead (player_move); inside a dribble,
         // released from lock move, it's the dribble push ball.
@@ -737,6 +787,7 @@ pub fn ball_call(
     let (btf, b) = &mut *ball;
     p.has_ball = false;
     p.kick = None;
+    p.receiving = None;
     let from = ptf.translation + forward(rig.yaw.to_radians()) * FEED_DISTANCE;
     let from = Vec3::new(
         from.x.clamp(-HALF_WIDTH + 1.0, HALF_WIDTH - 1.0),
@@ -877,6 +928,22 @@ mod tests {
         let tf = app.world_mut().query::<&Transform>().iter(app.world()).next().copied().unwrap();
         // Backing off is +Z; there should be no sideways drift.
         assert!(tf.translation.z > 3.0 && tf.translation.x.abs() < 0.3, "ended at {:?}", tf.translation);
+    }
+
+    #[test]
+    fn control_zones() {
+        let toward = Vec3::new(-5.0, 0.0, 0.0); // rolling at you
+        let away = Vec3::new(5.0, 0.0, 0.0);
+        let ground = |x: f32| Vec3::new(x, BALL_RADIUS, 0.0);
+        // Standing: a ball rolling at you is taken within ~0.95 m of a point 0.1 m ahead.
+        assert!(in_control_zone(ground(0.9), toward, 0.0, false));
+        assert!(!in_control_zone(ground(1.2), toward, 0.0, false));
+        // A ball rolling away is refused standing, but taken running forward onto it.
+        assert!(!in_control_zone(ground(0.4), away, 0.0, false));
+        assert!(in_control_zone(ground(0.4), away, 6.0, false));
+        // Moving, the zone reaches further ahead; lock move catches from any side.
+        assert!(in_control_zone(ground(1.25), toward, 4.0, false));
+        assert!(in_control_zone(Vec3::new(0.0, BALL_RADIUS, 0.7), away, 0.0, true));
     }
 
     #[test]

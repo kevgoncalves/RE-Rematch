@@ -200,6 +200,7 @@ fn on_goal(
         let (ptf, p) = &mut *player;
         ptf.translation = Vec3::new(0.0, 0.9, 6.0);
         p.has_ball = false;
+        p.receiving = None;
         p.vel = Vec3::ZERO;
     }
 }
