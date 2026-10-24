@@ -44,13 +44,15 @@ pub const WALL_BOUNCE: (f32, f32) = (0.675, 0.675);
 pub const NET_BOUNCE: (f32, f32) = (0.08, 0.15);
 pub const POST_BOUNCE: f32 = 0.875;
 
-// Movement (mechanics.md §2). Accelerations come from the time to reach full speed.
+// Movement (mechanics.md §2). Top speeds are the character's locomotion attributes
+// (DefaultCharacterLocomotionAttributeTable; the speed tables read them, not their fallback
+// floats). Accelerations come from the time to reach full speed.
 pub const RUN_SPEED: f32 = 5.0;
-pub const SPRINT_SPEED: f32 = 8.75;
+pub const SPRINT_SPEED: f32 = 8.0;
 pub const BALL_RUN_SPEED: f32 = 4.5;
 pub const BALL_SPRINT_SPEED: f32 = 6.5;
 pub const RUN_ACCEL: f32 = 5.0 / 0.22;
-pub const SPRINT_ACCEL: f32 = 8.75 / 0.6;
+pub const SPRINT_ACCEL: f32 = SPRINT_SPEED / 0.6;
 pub const BALL_RUN_ACCEL: f32 = 4.5 / 0.6;
 pub const BALL_SPRINT_ACCEL: f32 = 6.5 / 0.8;
 pub const STOP_DECEL: f32 = 5.0 / 0.38;
@@ -60,10 +62,10 @@ pub const TURN_RATE_SPRINT: f32 = 180.0;
 pub const TURN_RATE_BALL_SPRINT: f32 = 90.0;
 /// Out of lock move the body turns to face where you're going this fast, without changing your heading (TUNE).
 pub const FACE_HEADING_TURN_RATE: f32 = 720.0;
-pub const LOCK_SPEED: f32 = 4.0;
-pub const LOCK_BALL_SPEED: f32 = 3.5;
-pub const LOCK_ACCEL: f32 = 16.0;
-pub const LOCK_BALL_ACCEL: f32 = 13.0;
+pub const LOCK_SPEED: f32 = 5.25;
+pub const LOCK_BALL_SPEED: f32 = 4.0;
+pub const LOCK_ACCEL: f32 = LOCK_SPEED / 0.2; // full speed in 0.2 s
+pub const LOCK_BALL_ACCEL: f32 = LOCK_BALL_SPEED / 0.2;
 /// Turning to face the camera in lock move. The speed table says 400 deg/s for outfielders (nothing
 /// with the ball), but players find the turn to the front much quicker (TUNE).
 pub const LOCK_TURN_RATE: f32 = 720.0;
@@ -212,7 +214,7 @@ pub const EXTRA_EFFORT_DRAIN: f32 = 0.5;
 pub const EXTRA_EFFORT_REGEN: f32 = 0.0625;
 /// With stamina full, the gauge refills 3x faster (ExtraEffortRegenMultiplier 3 at threshold 1.0; players confirm).
 pub const EXTRA_EFFORT_REGEN_FULL_STAMINA: f32 = 0.1875;
-pub const EXTRA_EFFORT_SPEED: f32 = 8.75;
+pub const EXTRA_EFFORT_SPEED: f32 = 9.5;
 pub const EXTRA_EFFORT_ACCEL: f32 = 100.0;
 pub const TURN_RATE_EXTRA_EFFORT: f32 = 150.0;
 /// Extra effort can't control the ball: starting it taps the ball on, and running into the
