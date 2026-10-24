@@ -58,6 +58,8 @@ pub const TURN_RATE_RUN: f32 = 400.0; // degrees per second
 pub const TURN_RATE_BALL_RUN: f32 = 360.0;
 pub const TURN_RATE_SPRINT: f32 = 180.0;
 pub const TURN_RATE_BALL_SPRINT: f32 = 90.0;
+/// Out of lock move the body turns to face where you're going this fast, without changing your heading (TUNE).
+pub const FACE_HEADING_TURN_RATE: f32 = 720.0;
 pub const LOCK_SPEED: f32 = 4.0;
 pub const LOCK_BALL_SPEED: f32 = 3.5;
 pub const LOCK_ACCEL: f32 = 16.0;

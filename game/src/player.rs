@@ -245,6 +245,16 @@ pub struct CameraRig {
     pub pitch: f32,
 }
 
+/// Yaw (radians) a horizontal direction points at; the inverse of `forward`.
+fn yaw_of(dir: Vec3) -> f32 {
+    (-dir.x).atan2(-dir.z)
+}
+
+/// Shortest signed angle from `from` to `to`, radians.
+fn angle_diff(to: f32, from: f32) -> f32 {
+    (to - from + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
+}
+
 pub fn forward(yaw_rad: f32) -> Vec3 {
     Vec3::new(-yaw_rad.sin(), 0.0, -yaw_rad.cos())
 }
@@ -466,13 +476,17 @@ pub fn player_move(
         let max_turn = turn.to_radians() * dt;
         p.facing += diff.clamp(-max_turn, max_turn);
     } else if wish != Vec3::ZERO {
-        let target = (-wish.x).atan2(-wish.z);
-        let diff = (target - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
-        // Standing still you turn freely; moving, the turn rate caps how fast you change direction.
+        // Your heading turns toward the input at the turn rate (standing still: at once). The body
+        // then turns to face your heading on its own, without dragging it: leaving lock move while
+        // backing off turns you round while you keep moving back (ToFreemove transitions keep the
+        // velocity), instead of arcing sideways.
+        let heading_now = if speed < 0.5 { yaw_of(wish) } else { yaw_of(p.vel) };
         let max_turn = if speed < 0.5 { f32::INFINITY } else { turn.to_radians() * dt };
-        p.facing += diff.clamp(-max_turn, max_turn);
+        let heading = heading_now + angle_diff(yaw_of(wish), heading_now).clamp(-max_turn, max_turn);
         let new_speed = (speed + accel * input.length() * dt).min(top * input.length());
-        p.vel = forward(p.facing) * new_speed.max(speed.min(top) - STOP_DECEL * dt);
+        p.vel = forward(heading) * new_speed.max(speed.min(top) - STOP_DECEL * dt);
+        let body_turn = FACE_HEADING_TURN_RATE.to_radians() * dt;
+        p.facing += angle_diff(heading, p.facing).clamp(-body_turn, body_turn);
     } else {
         p.vel = p.vel.normalize_or_zero() * (speed - STOP_DECEL * dt).max(0.0);
     }
@@ -846,6 +860,23 @@ mod tests {
         // The camera looks down -Z, so going back is +Z; there should be no sideways or forward drift.
         let (end, ..) = log.last().unwrap();
         assert!(end.z > 2.0 && end.x.abs() < 0.2, "ended at {end:?}");
+    }
+
+    #[test]
+    fn spamming_stance_while_backing_off_keeps_going_back() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+        app.world_mut().resource_mut::<Axes>().movement = Vec2::NEG_Y; // holding S
+        app.world_mut().spawn((Transform::default(), Player { has_ball: true, ..default() }));
+        app.world_mut().spawn(CameraRig::default());
+        frames(&mut app, &[Action::Lock], 30, 0.016);
+        for _ in 0..10 {
+            frames(&mut app, &[], 8, 0.016);
+            frames(&mut app, &[Action::Lock], 8, 0.016);
+        }
+        let tf = app.world_mut().query::<&Transform>().iter(app.world()).next().copied().unwrap();
+        // Backing off is +Z; there should be no sideways drift.
+        assert!(tf.translation.z > 3.0 && tf.translation.x.abs() < 0.3, "ended at {:?}", tf.translation);
     }
 
     #[test]
