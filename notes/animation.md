@@ -1,6 +1,6 @@
 # Character body and animation
 
-How Rematch builds and animates its player, and how the prototype rebuilds it with our own body and our own poses. Read from the player skeleton, its physics asset and the anim blueprints' structure; **no animation keyframes were read or used**. Status: **spec for review, not coded**.
+How Rematch builds and animates its player, and how the prototype rebuilds it with our own body and our own poses. Read from the player skeleton, its physics asset and the anim blueprints' structure; **no animation keyframes were read or used**. Status: **approved; the body and locomotion are coded** (steps 1–3 of §3, with simple kick poses); transitions, actions and the layers beyond the lean are next.
 
 ## 1. The body
 The prototype body is our own mannequin: plain capsules and boxes, flat colours, no textures. Its sizes come from the game's skeleton (bone positions in the reference pose) and its physics asset (one collision shape per bone, which follows the limbs' thickness). The mesh itself is not used.
