@@ -74,8 +74,9 @@ The spin computation gives a spin vector in the flight frame (see ball-flight.md
    - side (spin.z): **1.02 → 0.8**;
    - vertical (spin.y): **0.95 → 0.85**, from a tap to a full charge.
 
-   - **The ratio comes from time, not force or speed.** The modifiers' source is "max time from shoot force curve": the shot's input time ÷ the force curve's last key (1.0 s), capped at 1.
-   - The input time is the same one the force uses, held at least the build-up (the shot's force source clamps with the build-up duration). So a tap counts as 0.53.
+   - **The ratio comes from time, not force or speed.** The modifiers' source is "max time from shoot force curve": the raw charge clock in seconds ÷ the force curve's last key (1.0), capped at 1.
+   - The clock is not floored at the build-up and not divided by it (unlike the force, see mechanics.md §4).
+   - A full-power shot reaches full force at ~0.37 s held and fires around 0.53 s, so its spin ratio is about 0.37–0.53: side ×0.90–0.94, vertical ×0.90–0.91. A tap is about ×1.0.
    - The "DependingForce" in the curve names is misleading.
 5. **Built-in spin:** the shot's own Magnus modifier then adds its forced spin once at launch, spin.y −= 210. That is a small **lift** on every shot.
 
@@ -93,6 +94,7 @@ Everything above matches the prototype except:
 |---|---|---|---|
 | 1 | The mouse curve is clamped per axis (a square) | Clamped to a circle of radius 1 | **Curve and dip together are too strong in the prototype**: up to 825 side + 780 dip, where the game gives about 505 + 500. Pure curve or pure dip are the same |
 | 2 | Stick and mouse are added together; no stick dead zone | One device's computation; stick dead zone 0.2 | Gamepad only: small stick tilts curve a little in the prototype |
+| 3 | Spin ratio = max(held, build-up) ÷ 1 s, with a full charge at 1 s | Raw time held ÷ 1 s, with full force at ~0.37 s | Full-power curves are ~15% weaker in the prototype (×0.8 instead of ×0.9–0.94) |
 
 Matching:
 - the spin curves, the charge ratio (with the build-up floor), the shot's built-in lift, the units;

@@ -21,6 +21,15 @@ What passes and lobs share with shots, and what differs. Force curves, launch an
 
   Whether the controller's pitch step is skipped for passes (by the mode byte) was not confirmed.
 
+## Charge
+- **Same clock as shots** (mechanics.md §4): the time held from the press, including time spent in the input buffer, read against the build-up.
+  - The build-up is 24 frames from the global shot table, less the 0.15 s network margins.
+  - So the curves run on **charge = time held ÷ ~0.23 s**, capped at 1.
+- **Full charge after ~0.23 s;** the ball still leaves at the 0.4 s contact frame.
+- **The pass sweet spot** (32 m/s, 60% of the charge) is at **~0.14 s**. Holding longer drops it to 25.6 m/s, then it climbs to 30.65 m/s at full charge.
+- **A tap** gives 20 m/s (pass) and 16 m/s (lob). Full lob: 27 m/s.
+- **No analog fill curve:** a half-pressed trigger charges at full speed.
+
 ## Flight
 | Kick | Friction μ | Drag Cd | Forced spin (spin.y) | Rolls (at speed v) |
 |---|---|---|---|---|

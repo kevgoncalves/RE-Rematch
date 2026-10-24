@@ -198,39 +198,51 @@ A push ball during extra effort is the fastest way to move with the ball: 9.5 m/
 
 ## 4. Shooting and passing
 
-### How charging works
-The force curves are by **time held**, in seconds since you pressed the button.
+### How charging works (native code)
+- **The charge clock** is how long the button has been held, counted from the press. A press that waited in the input buffer before the kick started counts too (the shot, pass and lob all count their time on the input stack).
+- **Analog trigger:**
+  - Shots fill at 50% speed up to a half press and at 100% fully pressed (Curve_ShootFillFactorByAnalogPressValue).
+  - Pressing fully snaps the clock up to the real time held (catch-up).
+  - Passes and lobs have no fill curve, so they always run at 100%.
+- **The force curves are not read in seconds.** Shots, passes and lobs "clamp with the build-up duration", so the curves' 0→1 axis is the share of the build-up you have held:
 
-The **build-up (wind-up) runs while you hold**, not after you release:
-- the ball leaves when you release;
-- but never before the build-up has finished;
-- the force uses at least the build-up time.
+  **charge = time held ÷ (build-up − 0.15 s), capped at 1.**
+  - The build-up is the kick's own:
+    - **Shot:** the length of its build-up animation, 32 frames = **0.53 s** for the power kick.
+    - **Pass and lob:** **24 frames = 0.4 s** from the global shot table.
 
-Players say a quick tap goes off much sooner than the build-up, so the build-up may only set the minimum force and the earliest contact may be earlier (unconfirmed until the code is read).
+    One frame is taken off at the start.
+  - The 0.15 s is the stadium's network margins (time margin 0.12 + tolerance 0.03, the world settings' defaults; a map could change them). Taking them off makes full power arrive before the animation ends.
+- **So full power arrives early:**
 
-| Kick | Build-up (earliest ball contact) |
-|---|---|
-| Shot | **0.53 s** (power shot; a shot under 29.41 m/s is the low-power kick, struck at **0.33 s**) |
-| Pass | 0.4 s |
-| Lob | 0.4 s |
-
-So a full-power shot takes 1 s from press to ball contact, not 1 s plus the wind-up.
+  | Kick | Full power after holding | Ball contact (build-up end) |
+  |---|---|---|
+  | Shot | **~0.37 s** | 0.53 s (power kick); a shot under 29.41 m/s is the low-power kick, struck at **0.33 s** |
+  | Pass | **~0.23 s** | 0.4 s |
+  | Lob | **~0.23 s** | 0.4 s |
+- **Release:** the force is the one at your release (the shot's time is overridden at release time). The ball still leaves at the contact frame.
+  - The shot can't be synced earlier than 0.2 s after the press, or 0.33 s for the fake-shot input.
+  - Where the kick goes off if you keep holding was not found in the code. Players confirm a fully charged kick goes off by itself, so most likely it fires at the end of the build-up.
+- **The crosshair's force fill** uses the same clock: fill = (current force − the curve's lowest) ÷ (highest − lowest), shown from 3% to 100%. It is full when the force is.
 
 ### Time held to ball speed
 | Held | Shot | Pass | Lob |
 |---|---|---|---|
-| 0–0.3 s | 24 m/s | 20 m/s | 16 m/s |
-| 0.4 s (fastest pass/lob) | 26 m/s | 24 m/s | 17.6 m/s |
-| 0.53 s (fastest shot) | **28.7 m/s (103 km/h)** | 29.3 m/s | 19.7 m/s |
-| **0.6 s** | 30 m/s | **32 m/s (115 km/h): the pass peak** | 20.7 m/s |
-| 0.61 s | 30.2 m/s | **25.7 m/s: drops** | 20.9 m/s |
-| 0.8 s | 34 m/s | 28.1 m/s | 23.9 m/s |
-| 1.0 s and longer | **38 m/s (137 km/h)** | 30.65 m/s | **27 m/s** |
+| tap (shot 0–0.11 s; pass and lob 0–0.07 s) | 24 m/s | 20 m/s | 16 m/s |
+| 0.11 s | 24 m/s | 26.9 m/s | 18.7 m/s |
+| 0.14 s | 25.6 m/s | **32 m/s (115 km/h): the pass peak** | 20.7 m/s |
+| 0.15 s | 26.2 m/s | 26.1 m/s: drops | 21.4 m/s |
+| 0.21 s | **29.4 m/s**: from here on, the power kick | 29.4 m/s | 25.4 m/s |
+| 0.23 s | 30.7 m/s | **30.65 m/s (full)** | **27 m/s (full)** |
+| 0.3 s | 34.4 m/s | 30.65 m/s | 27 m/s |
+| **0.37 s and longer** | **38 m/s (137 km/h, full)** | 30.65 m/s | 27 m/s |
+
+Computed with a build-up of 32 frames for shots and 24 for passes and lobs, one frame off, and the 0.15 s network margins.
 
 What this means in practice:
-- **The pass has a sweet spot at 0.6 s.** That is the strongest pass in the game. Holding a moment longer drops it to 25.6 m/s, and even a full 1 s hold only reaches 30.65 m/s.
-- **The quickest possible shot is already 28.7 m/s.** The flat 0–0.3 s part of the curve is never reached, because the 0.53 s build-up comes first.
-- The power-shot animation plays above 34.8 m/s, which is a hold of ~0.84 s (unconfirmed).
+- **The pass has a sweet spot at ~0.14 s** (60% of its charge). That is the strongest pass in the game. Holding a moment longer drops it to 25.6 m/s, and a full charge only reaches 30.65 m/s.
+- **Taps are weak:** the first 30% of each curve is flat. Shot 24 m/s, pass 20, lob 16.
+- **Shots released before ~0.21 s are the quick low-power kick** (under 29.41 m/s, contact at 0.33 s). Later releases are power kicks struck at 0.53 s.
 
 ### Moving while you shoot
 A shot keeps your run-up instead of stopping you:
