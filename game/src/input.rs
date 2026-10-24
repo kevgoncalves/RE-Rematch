@@ -432,14 +432,35 @@ pub fn read_input(
             axes.curve_mouse = axes.curve_mouse.clamp_length_max(1.0);
         }
     }
-    // For screenshots: RE_RUN=1 holds forward.
-    if std::env::var("RE_RUN").is_ok() {
-        movement = Vec2::Y;
+    // For screenshots: RE_RUN=1 holds forward; RE_RUN=w1,d0.5,.1 holds each key (w a s d, or . for
+    // none) for so many seconds in turn, then the last one.
+    if let Ok(script) = std::env::var("RE_RUN") {
+        movement = scripted_movement(&script, t);
     }
     axes.movement = movement.clamp_length_max(1.0);
     axes.look_mouse = look_mouse;
     axes.look_pad = look_pad;
     axes.curve = (axes.curve_mouse + stick_curve).clamp_length_max(1.0);
+}
+
+fn scripted_movement(script: &str, t: f32) -> Vec2 {
+    let mut end = 0.0;
+    let mut dir = Vec2::Y;
+    for step in script.split(',').filter(|s| s.len() > 1) {
+        let (key, secs) = step.split_at(1);
+        dir = match key {
+            "w" => Vec2::Y,
+            "s" => Vec2::NEG_Y,
+            "a" => Vec2::NEG_X,
+            "d" => Vec2::X,
+            _ => Vec2::ZERO,
+        };
+        end += secs.parse::<f32>().unwrap_or(0.0);
+        if t < end {
+            break;
+        }
+    }
+    dir
 }
 
 pub fn input_name(input: &Input) -> String {

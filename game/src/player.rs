@@ -158,6 +158,15 @@ pub struct Turn {
     face_time: f32,
 }
 
+impl Turn {
+    /// For the body's turn pose: how far through the turn (0..1), the brake's share of it,
+    /// whether it turns right, and whether it is a big one.
+    pub fn progress(&self) -> (f32, f32, bool, bool) {
+        let total = self.brake.0 + self.accel.0;
+        ((self.t / total).clamp(0.0, 1.0), self.brake.0 / total, self.from.cross(self.cur).y < 0.0, self.big)
+    }
+}
+
 /// Starts a turn toward `dir` (turns.md §2). Entering slower than top speed, the game treats you
 /// as at top speed and starts the brake where its curve gives your speed, at most 20% in.
 fn start_turn(p: &Player, dir: Vec3, big: bool, speed: f32, top: f32) -> Turn {

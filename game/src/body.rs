@@ -3,12 +3,13 @@
 //!
 //! A cycle per mode and speed tier plays at a clamped rate with the feet in phase; changing cycle
 //! crossfades; the lower body turns toward the velocity; the body leans into turns; kicks play on
-//! top. There is no leg IK: the pelvis only drops so the lower foot stays on the ground.
+//! top. There is no leg IK: the pelvis only drops (smoothly) toward where the lower foot is on the
+//! ground.
 //!
 //! Pose angles are in degrees: x bends forward (for knees and elbows, it is the flexion; for feet,
 //! toes down), y turns left, z rolls right (a limb moves toward +x, an upright part tilts right).
 
-use std::f32::consts::{PI, TAU};
+use std::f32::consts::TAU;
 use std::sync::LazyLock;
 
 use bevy::prelude::*;
@@ -167,6 +168,44 @@ impl Clip {
     }
 }
 
+/// A one-shot clip: key poses at points of its progress (0..1), eased between.
+struct OneShot(Vec<(f32, Pose)>);
+
+impl OneShot {
+    fn sample(&self, u: f32) -> Pose {
+        let keys = &self.0;
+        let i = keys.iter().rposition(|(at, _)| *at <= u).unwrap_or(0).min(keys.len() - 2);
+        let ((a, from), (b, to)) = (keys[i], keys[i + 1]);
+        let t = ((u - a) / (b - a)).clamp(0.0, 1.0);
+        from.lerp(&to, t * t * (3.0 - 2.0 * t))
+    }
+}
+
+/// The transitions (notes/animation.md §2): starts, stops and turns.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Move {
+    Start,
+    Stop,
+    Turn,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Transition {
+    kind: Move,
+    /// Authored for the left foot (starts, stops) or a right turn; mirrored for the other.
+    mirror: bool,
+    /// How much of the authored pose: smaller turns and slower stops use less.
+    size: f32,
+    t: f32,
+    u: f32,
+    /// The speed a stop started from.
+    entry: f32,
+}
+
+/// Time a start takes to reach the run, and the shortest stop.
+const START_TIME: f32 = 0.35;
+const STOP_TIME: f32 = 0.45;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Cycle {
     Idle,
@@ -185,6 +224,11 @@ enum Cycle {
 struct Clips {
     stand: Pose,
     kick: [Pose; 3],
+    start: OneShot,
+    stop: OneShot,
+    turn: OneShot,
+    /// Controlling the ball, added on top of whatever runs.
+    control: Pose,
     cycles: Vec<(Cycle, Clip)>,
 }
 
@@ -279,7 +323,115 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         (UPPER_R, [8.0, 0.0, 10.0]),
         (FORE_R, [90.0, 0.0, 0.0]),
     ]);
-    let run = Clip::cycle(run_contact, run_stance, RUN_SPEED, 0.68, 0.035);
+    let run = Clip::cycle(run_contact, run_stance, RUN_SPEED, 0.68, 0.0);
+    // Starts and turns end on the run's last stretch into a left contact, so the cycle picks up
+    // in step; mirrored, into a right one.
+    let (into_contact, contact) = (run.sample(0.85), run.sample(0.0));
+    // Start, the left foot first: lean and load, push off the right, then into the run.
+    let start = OneShot(vec![
+        (0.0, stand.with(&[
+            (SPINE_J, [12.0, 0.0, 0.0]),
+            (CHEST_J, [3.0, 0.0, 0.0]),
+            (NECK_J, [-8.0, 0.0, 0.0]),
+            (THIGH_L, [6.0, 0.0, -3.0]),
+            (SHIN_L, [22.0, 0.0, 0.0]),
+            (FOOT_L, [-16.0, 0.0, 3.0]),
+            (THIGH_R, [-6.0, 0.0, 3.0]),
+            (SHIN_R, [18.0, 0.0, 0.0]),
+            (FOOT_R, [-14.0, 0.0, -3.0]),
+            (UPPER_L, [-15.0, 0.0, -10.0]),
+            (FORE_L, [50.0, 0.0, 0.0]),
+            (UPPER_R, [20.0, 0.0, 10.0]),
+            (FORE_R, [60.0, 0.0, 0.0]),
+        ])),
+        (0.45, stand.with(&[
+            (SPINE_J, [14.0, 0.0, 0.0]),
+            (CHEST_J, [3.0, 8.0, 0.0]),
+            (NECK_J, [-10.0, 0.0, 0.0]),
+            (THIGH_L, [38.0, 0.0, -2.0]),
+            (SHIN_L, [75.0, 0.0, 0.0]),
+            (FOOT_L, [-30.0, 0.0, 0.0]),
+            (THIGH_R, [-22.0, 0.0, 2.0]),
+            (SHIN_R, [20.0, 0.0, 0.0]),
+            (FOOT_R, [-17.0, 0.0, 0.0]),
+            (UPPER_L, [-35.0, 0.0, -10.0]),
+            (FORE_L, [70.0, 0.0, 0.0]),
+            (UPPER_R, [40.0, 0.0, 10.0]),
+            (FORE_R, [90.0, 0.0, 0.0]),
+        ])),
+        (0.7, into_contact),
+        (1.0, contact),
+    ]);
+    // Stop on the left foot: plant it ahead and brake, the right comes alongside, then stand.
+    let stop = OneShot(vec![
+        (0.0, stand.with(&[
+            (PELVIS, [0.0, -10.0, 0.0]),
+            (SPINE_J, [-2.0, 0.0, 0.0]),
+            (CHEST_J, [0.0, 6.0, 0.0]),
+            (THIGH_L, [32.0, 0.0, -3.0]),
+            (SHIN_L, [12.0, 0.0, 0.0]),
+            (FOOT_L, [8.0, 0.0, 3.0]),
+            (THIGH_R, [-14.0, 0.0, 3.0]),
+            (SHIN_R, [45.0, 0.0, 0.0]),
+            (FOOT_R, [-39.0, 0.0, -3.0]),
+            (UPPER_L, [25.0, 0.0, -14.0]),
+            (FORE_L, [45.0, 0.0, 0.0]),
+            (UPPER_R, [30.0, 0.0, 14.0]),
+            (FORE_R, [50.0, 0.0, 0.0]),
+        ])),
+        (0.55, stand.with(&[
+            (SPINE_J, [4.0, 0.0, 0.0]),
+            (THIGH_L, [14.0, 0.0, -3.0]),
+            (SHIN_L, [22.0, 0.0, 0.0]),
+            (FOOT_L, [-8.0, 0.0, 3.0]),
+            (THIGH_R, [6.0, 0.0, 3.0]),
+            (SHIN_R, [30.0, 0.0, 0.0]),
+            (FOOT_R, [-24.0, 0.0, -3.0]),
+            (UPPER_L, [10.0, 0.0, -10.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [10.0, 0.0, 10.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ])),
+        (1.0, stand),
+    ]);
+    // Turn right: plant the outside (left) foot and lean in through the brake, pivot the hips at
+    // its end, then run out. The brake's end sits at 0.45 (see `turn_progress`).
+    let turn = OneShot(vec![
+        (0.0, stand.with(&[
+            (PELVIS, [0.0, -12.0, 6.0]),
+            (SPINE_J, [-4.0, 0.0, 6.0]),
+            (CHEST_J, [0.0, -10.0, 4.0]),
+            (NECK_J, [0.0, -15.0, 0.0]),
+            (THIGH_L, [26.0, 0.0, -14.0]),
+            (SHIN_L, [22.0, 0.0, 0.0]),
+            (FOOT_L, [4.0, 0.0, 14.0]),
+            (THIGH_R, [-12.0, 0.0, 6.0]),
+            (SHIN_R, [50.0, 0.0, 0.0]),
+            (FOOT_R, [-42.0, 0.0, -6.0]),
+            (UPPER_L, [35.0, 0.0, -30.0]),
+            (FORE_L, [60.0, 0.0, 0.0]),
+            (UPPER_R, [-20.0, 0.0, 25.0]),
+            (FORE_R, [50.0, 0.0, 0.0]),
+        ])),
+        (0.45, stand.with(&[
+            (PELVIS, [0.0, -40.0, 6.0]),
+            (SPINE_J, [6.0, 10.0, 6.0]),
+            (CHEST_J, [2.0, 5.0, 4.0]),
+            (NECK_J, [-4.0, -10.0, 0.0]),
+            (THIGH_L, [4.0, 0.0, -8.0]),
+            (SHIN_L, [38.0, 0.0, 0.0]),
+            (FOOT_L, [-34.0, 0.0, 8.0]),
+            (THIGH_R, [35.0, 0.0, 12.0]),
+            (SHIN_R, [80.0, 0.0, 0.0]),
+            (FOOT_R, [-30.0, 0.0, -12.0]),
+            (UPPER_L, [20.0, 0.0, -35.0]),
+            (FORE_L, [70.0, 0.0, 0.0]),
+            (UPPER_R, [10.0, 0.0, 20.0]),
+            (FORE_R, [70.0, 0.0, 0.0]),
+        ])),
+        (0.7, into_contact),
+        (1.0, contact),
+    ]);
     let sprint_contact = stand.with(&[
         (PELVIS, [0.0, -10.0, 0.0]),
         (SPINE_J, [14.0, 0.0, 0.0]),
@@ -312,12 +464,12 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         (UPPER_R, [10.0, 0.0, 10.0]),
         (FORE_R, [95.0, 0.0, 0.0]),
     ]);
-    let sprint = Clip::cycle(sprint_contact, sprint_stance, SPRINT_SPEED, 0.6, 0.06);
+    let sprint = Clip::cycle(sprint_contact, sprint_stance, SPRINT_SPEED, 0.6, 0.015);
     // Extra effort: the sprint driven harder. Tired: the run's shape at a sprint, arms low, head down.
     let harder = Pose::default().with(&[(SPINE_J, [6.0, 0.0, 0.0]), (NECK_J, [-4.0, 0.0, 0.0]), (UPPER_L, [-8.0, 0.0, 0.0]), (UPPER_R, [8.0, 0.0, 0.0])]);
-    let extra = Clip::cycle(sprint_contact.plus(&harder), sprint_stance.plus(&harder.mirror()), EXTRA_EFFORT_SPEED, 0.54, 0.07);
+    let extra = Clip::cycle(sprint_contact.plus(&harder), sprint_stance.plus(&harder.mirror()), EXTRA_EFFORT_SPEED, 0.54, 0.02);
     let tired = Pose::default().with(&[(SPINE_J, [5.0, 0.0, 0.0]), (NECK_J, [8.0, 0.0, 0.0]), (HEAD_J, [6.0, 0.0, 0.0]), (FORE_L, [-30.0, 0.0, 0.0]), (FORE_R, [-30.0, 0.0, 0.0])]);
-    let exhausted = Clip::cycle(run_contact.plus(&tired), run_stance.plus(&tired), SPRINT_SPEED * 0.8, 0.66, 0.025);
+    let exhausted = Clip::cycle(run_contact.plus(&tired), run_stance.plus(&tired), SPRINT_SPEED * 0.8, 0.66, 0.0);
 
     // Lock move: a low, wide stance, arms out, head up.
     let stance = stand.plus(&Pose::default().with(&[
@@ -370,7 +522,7 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         (SHIN_R, [30.0, 0.0, 0.0]),
         (FOOT_R, [-16.0, 0.0, -4.0]),
     ]);
-    let lock_right = Clip { keys: [apart, together, apart, together], speed: 4.5, duration: 0.5, flight: 0.015 };
+    let lock_right = Clip { keys: [apart, together, apart, together], speed: 4.5, duration: 0.5, flight: 0.0 };
 
     // A kick (the right foot): wind-up, contact, follow-through; the left arm out for balance.
     let kick = [
@@ -416,9 +568,25 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         ]),
     ];
 
+    // Controlling the ball: lean over it, the right foot reaches out to cushion it.
+    let control = Pose::default().with(&[
+        (SPINE_J, [6.0, 0.0, 0.0]),
+        (NECK_J, [6.0, 0.0, 0.0]),
+        (HEAD_J, [6.0, 0.0, 0.0]),
+        (THIGH_R, [16.0, 0.0, 6.0]),
+        (SHIN_R, [14.0, 0.0, 0.0]),
+        (FOOT_R, [-6.0, 0.0, -6.0]),
+        (UPPER_L, [0.0, 0.0, -12.0]),
+        (UPPER_R, [0.0, 0.0, 10.0]),
+    ]);
+
     Clips {
         stand,
         kick,
+        start,
+        stop,
+        turn,
+        control,
         cycles: vec![
             (Cycle::Idle, Clip::held(stand)),
             (Cycle::Walk, walk),
@@ -500,6 +668,48 @@ pub struct Animator {
     kick: Option<KickState>,
     follow: Option<(f32, Kick)>,
     action: f32,
+    trans: Option<Transition>,
+    turn_u: f32,
+    /// The pose a transition fades from, and the fade (1 → 0) and its length.
+    snap: Pose,
+    snap_w: f32,
+    snap_time: f32,
+    /// Last frame's pose before the layers on top, and its speed.
+    last: Pose,
+    prev_speed: f32,
+    /// The pelvis's drop toward the ground, smoothed so the body doesn't bob step by step.
+    drop: f32,
+    /// The ball control's weight, and the lean, both eased.
+    control: f32,
+    roll: f32,
+}
+
+impl Animator {
+    /// Starts a transition, fading from the current pose: 0.1 s from one of the same kind, 0.2 s
+    /// otherwise.
+    fn begin(&mut self, kind: Move, mirror: bool, size: f32, entry: f32) {
+        let blend = if self.trans.is_some_and(|t| t.kind == kind) { 0.1 } else { 0.2 };
+        self.fade_from_last(blend);
+        self.trans = Some(Transition { kind, mirror, size, t: 0.0, u: 0.0, entry });
+    }
+
+    /// Cuts the transition short, fading back over `time`.
+    fn interrupt(&mut self, time: f32) {
+        if self.trans.take().is_some() {
+            self.fade_from_last(time);
+        }
+    }
+
+    fn fade_from_last(&mut self, time: f32) {
+        self.snap = self.last;
+        self.snap_w = 1.0;
+        self.snap_time = time;
+    }
+}
+
+/// A turn's progress mapped onto its pose's timeline, where the brake ends at 0.45.
+fn turn_progress(u: f32, brake: f32) -> f32 {
+    if u < brake { 0.45 * u / brake.max(1e-3) } else { 0.45 + 0.55 * (u - brake) / (1.0 - brake).max(1e-3) }
 }
 
 pub fn spawn_body(commands: &mut Commands, player: Entity, meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) {
@@ -515,14 +725,14 @@ pub fn spawn_body(commands: &mut Commands, player: Entity, meshes: &mut Assets<M
     let shin = limb(0.062, SHIN);
     let upper = limb(0.048, UPPER_ARM);
     let fore = limb(0.042, FOREARM);
-    // The trunk: upright capsules, wider than deep; the shoulders a short bar across.
+    // The trunk is one smooth shape, wider than deep, from the hips to the base of the neck; the
+    // shorts sit over the pelvis and the shoulders are rounded off.
     let mut trunk = |r: f32, len: f32, at: Vec3, scale: Vec3| (Mesh3d(meshes.add(Capsule3d::new(r, len))), Transform::from_translation(at).with_scale(scale));
-    let pelvis_mesh = trunk(0.12, 0.06, Vec3::new(0.0, -0.04, 0.0), Vec3::new(1.25, 1.0, 0.85));
-    let waist_mesh = trunk(0.115, 0.1, Vec3::new(0.0, 0.04, 0.0), Vec3::new(1.2, 1.0, 0.82));
-    let chest_mesh = trunk(0.12, 0.12, Vec3::new(0.0, 0.06, -0.005), Vec3::new(1.4, 0.9, 0.82));
-    let shoulders_mesh = (Mesh3d(meshes.add(Capsule3d::new(0.055, 0.22))), Transform::from_xyz(0.0, 0.14, 0.0).with_rotation(Quat::from_rotation_z(PI / 2.0)));
-    let neck_mesh = Mesh3d(meshes.add(Capsule3d::new(0.05, 0.06)));
-    let head_mesh = Mesh3d(meshes.add(Sphere::new(0.1)));
+    let pelvis_mesh = trunk(0.115, 0.08, Vec3::new(0.0, -0.03, 0.0), Vec3::new(1.3, 1.0, 0.85));
+    let chest_mesh = trunk(0.13, 0.2, Vec3::new(0.0, -0.02, -0.005), Vec3::new(1.32, 1.0, 0.78));
+    let shoulder_mesh = Mesh3d(meshes.add(Sphere::new(0.062)));
+    let neck_mesh = Mesh3d(meshes.add(Capsule3d::new(0.06, 0.05)));
+    let head_mesh = Mesh3d(meshes.add(Sphere::new(0.105)));
     let hand = Mesh3d(meshes.add(Capsule3d::new(0.035, 0.08)));
     let foot = Mesh3d(meshes.add(Cuboid::new(0.1, 0.085, 0.27)));
     let joint = |j: usize, at: Vec3| (Joint(j), Transform::from_translation(at), Visibility::default());
@@ -542,14 +752,15 @@ pub fn spawn_body(commands: &mut Commands, player: Entity, meshes: &mut Assets<M
                 });
             }
             pelvis.spawn(joint(SPINE_J, Vec3::Y * SPINE)).with_children(|spine| {
-                spine.spawn((waist_mesh.0, MeshMaterial3d(shirt.clone()), waist_mesh.1));
                 spine.spawn(joint(CHEST_J, Vec3::Y * CHEST)).with_children(|chest| {
                     chest.spawn((chest_mesh.0, MeshMaterial3d(shirt.clone()), chest_mesh.1));
-                    chest.spawn((shoulders_mesh.0, MeshMaterial3d(shirt.clone()), shoulders_mesh.1));
+                    for side in [-1.0f32, 1.0] {
+                        chest.spawn((shoulder_mesh.clone(), MeshMaterial3d(shirt.clone()), Transform::from_xyz(side * 0.15, 0.15, 0.0)));
+                    }
                     chest.spawn(joint(NECK_J, Vec3::Y * NECK)).with_children(|neck| {
                         neck.spawn((neck_mesh, MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, 0.03, 0.0)));
                         neck.spawn(joint(HEAD_J, Vec3::Y * HEAD)).with_children(|head| {
-                            head.spawn((head_mesh, MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, 0.1, -0.01).with_scale(Vec3::new(0.9, 1.05, 1.0))));
+                            head.spawn((head_mesh, MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, 0.095, -0.01).with_scale(Vec3::new(0.9, 1.05, 1.0))));
                         });
                     });
                     for (u, f, h, side) in [(UPPER_L, FORE_L, HAND_L, -1.0f32), (UPPER_R, FORE_R, HAND_R, 1.0)] {
@@ -578,6 +789,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         return;
     }
     let clips = &*CLIPS;
+    let anim: &mut Animator = &mut anim;
     let local = root.rotation.inverse() * p.vel;
     let speed = Vec2::new(local.x, local.z).length();
     let angle = if speed > 0.1 { local.x.atan2(-local.z).to_degrees() } else { 0.0 };
@@ -606,6 +818,61 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     if clip.speed > 0.0 {
         anim.phase = (anim.phase + dt * rate / clip.duration).rem_euclid(1.0);
     }
+
+    // Transitions (notes/animation.md §2): turns follow the movement's own turn; starts leave a
+    // standstill; stops brake with no input. Lock move has none yet, and any action (a kick, a
+    // ball control) cuts the running one at once, as in the game.
+    let input = p.last_input != Vec3::ZERO;
+    if p.locked || p.kick.is_some() || p.receiving.is_some() {
+        anim.interrupt(0.1);
+    } else if let Some(tr) = p.turn {
+        let (u, brake, right, big) = tr.progress();
+        if anim.trans.is_none_or(|t| t.kind != Move::Turn) || u + 0.05 < anim.turn_u {
+            anim.begin(Move::Turn, !right, if big { 1.0 } else { 0.6 }, 0.0);
+        }
+        anim.turn_u = u;
+        if let Some(t) = anim.trans.as_mut() {
+            t.u = turn_progress(u, brake);
+        }
+    } else {
+        anim.turn_u = 0.0;
+        match anim.trans.map(|t| t.kind) {
+            // A turn that ends early, a start let go, a stop pushed out of: back to the cycle.
+            Some(Move::Turn) => {
+                if anim.trans.is_some_and(|t| t.u < 0.95) {
+                    anim.interrupt(0.1);
+                } else {
+                    anim.trans = None;
+                }
+            }
+            Some(Move::Start) if !input => anim.interrupt(0.2),
+            Some(Move::Stop) if input => anim.interrupt(0.2),
+            _ => {}
+        }
+        if anim.trans.is_none() && input && anim.prev_speed < 0.3 && speed >= 0.3 {
+            anim.begin(Move::Start, angle > 0.0, if p.sprinting { 1.0 } else { 0.8 }, 0.0);
+        } else if anim.trans.is_none() && !input && speed > 1.5 && speed <= anim.prev_speed {
+            // Plant the foot that lands next.
+            let next_right = (0.25..0.75).contains(&anim.phase);
+            anim.begin(Move::Stop, next_right, (speed / RUN_SPEED).clamp(0.4, 1.0), speed);
+        }
+    }
+    if let Some(t) = anim.trans.as_mut() {
+        t.t += dt;
+        match t.kind {
+            Move::Start => t.u = (t.t / START_TIME).min(1.0),
+            Move::Stop => t.u = (t.t / STOP_TIME).max(1.0 - speed / t.entry.max(0.1)).min(1.0),
+            Move::Turn => {}
+        }
+        // Starts and turns run the cycle in step under their last stretch.
+        if t.kind != Move::Stop {
+            anim.phase = (if t.mirror { 0.5 } else { 0.0 } + (t.u - 1.0) * 0.5).rem_euclid(1.0);
+        }
+        if t.kind != Move::Turn && t.u >= 1.0 {
+            anim.trans = None;
+        }
+    }
+
     let phase = anim.phase;
     let mut pose = clip.sample(phase);
     let mut lift = clip.lift(phase);
@@ -629,6 +896,28 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         }
     }
 
+    if let Some(t) = anim.trans {
+        let shot = match t.kind {
+            Move::Start => &clips.start,
+            Move::Stop => &clips.stop,
+            Move::Turn => &clips.turn,
+        };
+        let mut target = shot.sample(t.u);
+        if t.mirror {
+            target = target.mirror();
+        }
+        // Starts and turns hand back to the cycle over their last 30%.
+        let w = if t.kind == Move::Stop { 1.0 } else { ((1.0 - t.u) / 0.3).clamp(0.0, 1.0) };
+        pose = pose.lerp(&target, w * w * (3.0 - 2.0 * w) * t.size);
+    }
+    if anim.snap_w > 0.0 {
+        let w = anim.snap_w;
+        pose = pose.lerp(&anim.snap, w * w * (3.0 - 2.0 * w));
+        anim.snap_w = (w - dt / anim.snap_time.max(1e-3)).max(0.0);
+    }
+    anim.last = pose;
+    anim.prev_speed = speed;
+
     // Breathing, mostly at rest.
     anim.breath = (anim.breath + dt / 3.5).rem_euclid(1.0);
     let breath = (TAU * anim.breath).sin() * if speed < 0.3 { 1.5 } else { 0.5 };
@@ -639,7 +928,8 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     // Free move has one forward cycle: the lower body turns toward the velocity and the upper body
     // keeps facing (the game's orientation warping).
     if !p.locked && speed > 0.5 {
-        let warp = -angle.clamp(-60.0, 60.0) * (speed / 2.0).min(1.0);
+        let in_turn = if anim.trans.is_some_and(|t| t.kind == Move::Turn) { 0.5 } else { 1.0 };
+        let warp = -angle.clamp(-60.0, 60.0) * (speed / 2.0).min(1.0) * in_turn;
         pose.0[PELVIS].y += warp;
         pose.0[SPINE_J].y -= warp * 0.6;
         pose.0[CHEST_J].y -= warp * 0.4;
@@ -647,7 +937,9 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
 
     // Lean into turns, by speed, and forward as stamina drops.
     let lean_max = if p.sprint_running { 0.06 } else if p.has_ball { 0.1 } else { 0.075 };
-    let roll = (anim.lateral / lean_max).clamp(-1.0, 1.0) * (speed / SPRINT_SPEED).min(1.0) * 14.0;
+    let lean = (anim.lateral / lean_max).clamp(-1.0, 1.0) * (speed / SPRINT_SPEED).min(1.0) * 14.0;
+    anim.roll += (lean - anim.roll) * (8.0 * dt).min(1.0);
+    let roll = anim.roll;
     pose.0[PELVIS].z += roll * 0.4;
     pose.0[SPINE_J].z += roll * 0.3;
     pose.0[CHEST_J].z += roll * 0.3;
@@ -688,8 +980,17 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     if let Some((key, kind, _)) = kick_pose {
         pose = pose.lerp(&clips.stand.lerp(&key, kick_size(kind)), anim.action);
     }
+    // Ball control: in over 0.1 s, back out over 0.25 s, on top of the cycle so the legs keep
+    // running.
+    let receiving = p.receiving.is_some_and(|t| t < CONTROL_ACT);
+    anim.control += (if receiving { 1.0 } else { 0.0 } - anim.control).clamp(-dt / 0.25, dt / 0.1);
+    if anim.control > 0.0 {
+        let w = anim.control * anim.control * (3.0 - 2.0 * anim.control);
+        pose = pose.plus(&Pose(clips.control.0.map(|a| a * w)));
+    }
 
-    let drop = ground_drop(&pose);
+    anim.drop += (ground_drop(&pose) - anim.drop) * (6.0 * dt).min(1.0);
+    let drop = anim.drop;
     for (j, mut tf) in &mut joints {
         tf.rotation = joint_rotation(j.0, pose.0[j.0]);
         if j.0 == PELVIS {
@@ -733,6 +1034,18 @@ mod tests {
         }
         // Mid-stance bends the knee: the body is lower than standing.
         assert!(ground_drop(&run.sample(0.25)) > 0.04);
+    }
+
+    #[test]
+    fn starts_and_turns_end_on_the_run_cycle() {
+        let run = CLIPS.get(Cycle::Run);
+        assert_eq!(CLIPS.start.sample(1.0), run.sample(0.0));
+        assert_eq!(CLIPS.turn.sample(1.0), run.sample(0.0));
+        assert_eq!(CLIPS.turn.sample(1.0).mirror(), run.sample(0.5));
+        assert_eq!(CLIPS.stop.sample(1.0), CLIPS.stand);
+        // The brake ends where the pose has its pivot, whatever its share of the turn.
+        assert!((turn_progress(0.3, 0.3) - 0.45).abs() < 1e-6);
+        assert!((turn_progress(1.0, 0.6) - 1.0).abs() < 1e-6);
     }
 
     #[test]
