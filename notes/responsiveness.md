@@ -112,7 +112,10 @@ So pressing A a moment before X still gives the low-power pass: the push ball st
 | Second dash sideways | 42f | 10.8f | 25.2f | 24f | 42f |
 | Second dash back | 43f | 10.8f | 25.2f | 29f | 43f |
 
-- **The animation blends in over 6f.** The dash's speed curve (6 → 8.5 → 4.5 m/s) spans the whole animation; at 32f it is at 4.5.
+- **The animation blends in over 6f.** The dash's speed curves run in **seconds** from the press, not over the animation (their keys fall on the 6f blend-in, the 14f after-dash and the second dash's 42f free):
+  - first dash: 6 m/s, 8.5 from 0.1 to 0.233 s, 6.5 at 0.331 s, 4.5 from 0.5 s;
+  - second dash: 6 m/s, 7.2 from 0.1 to 0.3 s, down to 2 at 0.7 s. So at any moment it has covered less ground than a first dash, whichever way it goes (players confirm it is always shorter).
+- **Back in free move with the stick against the dash** (lock released), you turn as from a run: brake to the pivot speed, then re-accelerate the other way (players confirm the change of side is smooth).
 - **The second dash** cuts into the first from 14.4f, and also works after the first ends while its 0.8 s cooldown runs. It doesn't need lock move.
 - **From 14.4f** you can also lock move, sprint, extra effort and dash again. Kicks wait for the end of the animation.
 - **So in the game a dash holds you for 0.4–0.5 s at most**, and only 0.24 s if you keep pushing the way you dashed.

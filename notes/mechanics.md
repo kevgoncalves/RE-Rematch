@@ -240,6 +240,7 @@ A push ball during extra effort is the fastest way to move with the ball: 9.5 m/
     - the lob flattening from 44° to 30° over 0.3–1 s;
     - the spin's charge scaling.
   - The only cap found is the sync task's timeout (its value wasn't read). That is probably the "fully charged kick goes off by itself" players describe.
+  - **Players confirm the ball leaves as the gauge fills**, whether you hold on or let go then. That fits a gauge that fills at the contact frame, not 0.15 s before it. So either the network margins don't apply to what the player sees, or they are offset elsewhere; the prototype fills the gauge on the frame before the contact and fires the kick then.
 - **Release:** the force is the one at your release (the shot's time is overridden at release time).
 - **The crosshair's force fill** uses the same clock: fill = (current force − the curve's lowest) ÷ (highest − lowest), shown from 3% to 100%. It is full when the force is.
 
