@@ -1,179 +1,469 @@
-//! A simple, sturdy jointed body for the player, posed every frame from the gameplay state. The
-//! poses are our own; their timing is the game's (contact frames, freezes, move lengths).
+//! The player's body: our own mannequin at Rematch's sizes (its skeleton and physics shapes; no
+//! mesh), posed by our own key poses on Rematch's animation structure (notes/animation.md).
 //!
-//! Legs are placed by two-bone IK: while running each foot stays planted while it carries you and
-//! then steps to the next foothold, so the feet don't slide; on a touch the foot goes to the ball
-//! itself at the frame the game's data has the contact.
+//! A cycle per mode and speed tier plays at a clamped rate with the feet in phase; changing cycle
+//! crossfades; the lower body turns toward the velocity; the body leans into turns; kicks play on
+//! top. There is no leg IK: the pelvis only drops so the lower foot stays on the ground.
 //!
-//! The player entity sits at hip height (the game's capsule is 1.8 m tall) and faces -Z; each
-//! joint swings its limb, which hangs down from it. A positive pitch swings a limb forward.
+//! Pose angles are in degrees: x bends forward (for knees and elbows, it is the flexion; for feet,
+//! toes down), y turns left, z rolls right (a limb moves toward +x, an upright part tilts right).
 
 use std::f32::consts::{PI, TAU};
+use std::sync::LazyLock;
 
 use bevy::prelude::*;
 
-use crate::ball::Ball;
-use crate::player::{Heading, Kick, KickState, Player, contact_time};
+use crate::player::{Kick, KickState, Player, contact_time};
 use crate::tuning::*;
 
-#[derive(Component, Clone, Copy, PartialEq)]
-pub enum Part {
-    /// Everything above the root: bobbing, crouching and leaning.
-    Body,
-    Spine,
-    Head,
-    /// Side: -1 left, +1 right.
-    UpperArm(f32),
-    Forearm(f32),
-    Thigh(f32),
-    Shin(f32),
-    Foot(f32),
-}
+// Rematch's player (notes/animation.md §1), metres. The root entity is the capsule's centre.
+const ROOT_HEIGHT: f32 = 0.9;
+const PELVIS_HEIGHT: f32 = 1.12;
+const HIP: Vec3 = Vec3::new(0.096, -0.051, 0.0);
+const THIGH: f32 = 0.477;
+const SHIN: f32 = 0.48;
+/// Where the ankle sits with the legs straight: hips 1.069 m, less the legs.
+const ANKLE_HEIGHT: f32 = PELVIS_HEIGHT + HIP.y - THIGH - SHIN;
+const SPINE: f32 = 0.13;
+const CHEST: f32 = 0.114;
+const NECK: f32 = 0.207;
+const HEAD: f32 = 0.118;
+const SHOULDER: Vec3 = Vec3::new(0.155, 0.154, 0.0);
+const UPPER_ARM: f32 = 0.267;
+const FOREARM: f32 = 0.259;
 
-// The rig, in metres: hips under the body joint, then thigh and shin; the ankle sits this high
-// with the foot flat on the ground.
-const HIP_X: f32 = 0.12;
-const HIP_Y: f32 = -0.02;
-const THIGH: f32 = 0.43;
-const SHIN: f32 = 0.40;
-const ANKLE_HEIGHT: f32 = 0.065;
-const FRAME: f32 = 1.0 / 60.0;
+// Joints, in pose order.
+const PELVIS: usize = 0;
+const SPINE_J: usize = 1;
+const CHEST_J: usize = 2;
+const NECK_J: usize = 3;
+const HEAD_J: usize = 4;
+const THIGH_L: usize = 5;
+const SHIN_L: usize = 6;
+const FOOT_L: usize = 7;
+const THIGH_R: usize = 8;
+const SHIN_R: usize = 9;
+const FOOT_R: usize = 10;
+const UPPER_L: usize = 11;
+const FORE_L: usize = 12;
+const HAND_L: usize = 13;
+const UPPER_R: usize = 14;
+const FORE_R: usize = 15;
+const HAND_R: usize = 16;
+const JOINTS: usize = 17;
+const PAIRS: [(usize, usize); 6] = [(THIGH_L, THIGH_R), (SHIN_L, SHIN_R), (FOOT_L, FOOT_R), (UPPER_L, UPPER_R), (FORE_L, FORE_R), (HAND_L, HAND_R)];
 
-/// An upper-body joint's target pose: pitch (forward swing), roll (outwards for limbs, sideways for
-/// the spine) and yaw (twist), radians.
-#[derive(Clone, Copy, Default)]
-struct Pose {
-    pitch: f32,
-    roll: f32,
-    yaw: f32,
-}
+#[derive(Component, Clone, Copy, PartialEq, Debug)]
+pub struct Joint(usize);
 
-#[derive(Clone, Copy, Default)]
-struct Foot {
-    /// Where the foot is planted (world), and where its step started (from under the hip).
-    planted: Vec3,
-    from: Vec3,
-    stance: bool,
-    /// Last frame's target (world).
-    last: Vec3,
-}
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+struct Pose([Vec3; JOINTS]);
 
-/// Running state of the animation.
-#[derive(Default)]
-pub struct Gait {
-    /// Stride phase, 0..1 per full cycle (two steps).
-    phase: f32,
-    /// Smoothed forward lean, body drop and side lean.
-    lean: f32,
-    drop: f32,
-    roll: f32,
-    /// Left and right foot.
-    feet: [Foot; 2],
-    started: bool,
-    /// The kick in progress, and after the touch its follow-through (seconds since the touch).
-    kick: Option<KickState>,
-    follow: Option<(f32, Kick)>,
-}
-
-pub fn spawn_body(commands: &mut Commands, player: Entity, meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) {
-    let shirt = materials.add(Color::srgb(0.92, 0.38, 0.16));
-    let shorts = materials.add(Color::srgb(0.10, 0.12, 0.22));
-    let skin = materials.add(Color::srgb(0.80, 0.62, 0.5));
-    let boots = materials.add(Color::srgb(0.06, 0.06, 0.07));
-    // A capsule hanging `len` metres below its joint.
-    let mut limb = |radius: f32, len: f32| (Mesh3d(meshes.add(Capsule3d::new(radius, len - 2.0 * radius))), Transform::from_xyz(0.0, -len / 2.0, 0.0));
-    let thigh = limb(0.1, THIGH + 0.01);
-    let shin = limb(0.08, SHIN + 0.03);
-    let upper_arm = limb(0.075, 0.32);
-    let forearm = limb(0.065, 0.3);
-    let joint = |part: Part, at: Vec3| (part, Transform::from_translation(at), Visibility::default());
-
-    commands.entity(player).with_children(|root| {
-        root.spawn(joint(Part::Body, Vec3::ZERO)).with_children(|body| {
-            body.spawn((Mesh3d(meshes.add(Cuboid::new(0.4, 0.22, 0.26))), MeshMaterial3d(shorts.clone()), Transform::default()));
-            for side in [-1.0f32, 1.0] {
-                body.spawn(joint(Part::Thigh(side), Vec3::new(side * HIP_X, HIP_Y, 0.0))).with_children(|hip| {
-                    hip.spawn((thigh.0.clone(), MeshMaterial3d(shorts.clone()), thigh.1));
-                    hip.spawn(joint(Part::Shin(side), Vec3::new(0.0, -THIGH, 0.0))).with_children(|knee| {
-                        knee.spawn((shin.0.clone(), MeshMaterial3d(skin.clone()), shin.1));
-                        knee.spawn(joint(Part::Foot(side), Vec3::new(0.0, -SHIN, 0.0))).with_children(|ankle| {
-                            ankle.spawn((Mesh3d(meshes.add(Cuboid::new(0.13, 0.09, 0.28))), MeshMaterial3d(boots.clone()), Transform::from_xyz(0.0, -0.02, -0.06)));
-                        });
-                    });
-                });
-            }
-            body.spawn(joint(Part::Spine, Vec3::new(0.0, 0.1, 0.0))).with_children(|spine| {
-                spine.spawn((Mesh3d(meshes.add(Capsule3d::new(0.2, 0.32))), MeshMaterial3d(shirt.clone()), Transform::from_xyz(0.0, 0.3, 0.0).with_scale(Vec3::new(1.25, 1.0, 0.75))));
-                spine.spawn(joint(Part::Head, Vec3::new(0.0, 0.62, 0.0))).with_children(|neck| {
-                    neck.spawn((Mesh3d(meshes.add(Sphere::new(0.14))), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, 0.17, 0.0)));
-                });
-                for side in [-1.0f32, 1.0] {
-                    spine.spawn(joint(Part::UpperArm(side), Vec3::new(side * 0.31, 0.55, 0.0))).with_children(|shoulder| {
-                        shoulder.spawn((upper_arm.0.clone(), MeshMaterial3d(shirt.clone()), upper_arm.1));
-                        shoulder.spawn(joint(Part::Forearm(side), Vec3::new(0.0, -0.32, 0.0))).with_children(|elbow| {
-                            elbow.spawn((forearm.0.clone(), MeshMaterial3d(skin.clone()), forearm.1));
-                        });
-                    });
-                }
-            });
-        });
-    });
-}
-
-/// Two-bone IK for a leg: the thigh and shin rotations (in the body's frame) that put the ankle at
-/// `target`, given relative to the hip in the body's frame. The knee points forward.
-fn leg_ik(target: Vec3) -> (Quat, Quat) {
-    let dist = target.length().clamp(0.05, THIGH + SHIN - 1e-3);
-    let dir = target.normalize_or(Vec3::NEG_Y);
-    let cos_knee = ((THIGH * THIGH + SHIN * SHIN - dist * dist) / (2.0 * THIGH * SHIN)).clamp(-1.0, 1.0);
-    let bend = PI - cos_knee.acos();
-    let cos_hip = ((THIGH * THIGH + dist * dist - SHIN * SHIN) / (2.0 * THIGH * dist)).clamp(-1.0, 1.0);
-    let aim = Quat::from_rotation_arc(Vec3::NEG_Y, dir);
-    (aim * Quat::from_rotation_x(cos_hip.acos()), Quat::from_rotation_x(-bend))
-}
-
-/// Share of the stride a foot spends on the ground: walking ~0.6, running ~0.35.
-fn duty(speed: f32) -> f32 {
-    0.62 - 0.27 * ((speed - 1.5) / 4.5).clamp(0.0, 1.0)
-}
-
-/// Ground covered by one full stride (two steps), metres.
-fn stride(speed: f32, locked: bool) -> f32 {
-    if locked { 0.9 + 0.3 * speed } else { 1.2 + 0.45 * speed }
-}
-
-/// 0 -> 1 -> 0 around `at`: rising over `before`, holding for `hold`, falling over `after` (seconds).
-fn bell(t: f32, at: f32, before: f32, hold: f32, after: f32) -> f32 {
-    let s = |x: f32| {
-        let x = x.clamp(0.0, 1.0);
-        x * x * (3.0 - 2.0 * x)
-    };
-    if t < at { s((t - (at - before)) / before) } else { 1.0 - s((t - at - hold) / after) }
-}
-
-/// The frame a dribble's foot touches the ball (responsiveness.md §2).
-fn dribble_contact(feint: bool, exhausted: bool, heading: Heading) -> f32 {
-    let frames = match (exhausted, feint, heading) {
-        (true, ..) => 8.0,
-        (_, true, Heading::Forward) => 10.0,
-        (_, true, _) => 8.0,
-        (_, _, Heading::Forward) => 17.0,
-        (_, _, Heading::Side) => 8.0,
-        (_, _, Heading::Back) => 0.0,
-    };
-    frames * FRAME
-}
-
-/// A kick's foot path, as offsets from the ground under the right hip in the player's frame
-/// (x right, y up, z back): the wind-up and the follow-through's peak.
-fn kick_path(kind: Kick) -> (Vec3, Vec3) {
-    match kind {
-        Kick::Shot => (Vec3::new(0.05, 0.45, 0.45), Vec3::new(0.0, 0.7, -0.75)),
-        Kick::Pass => (Vec3::new(0.05, 0.3, 0.3), Vec3::new(-0.05, 0.35, -0.55)),
-        Kick::Lob => (Vec3::new(0.05, 0.35, 0.35), Vec3::new(0.0, 0.8, -0.6)),
-        Kick::ShortPass | Kick::ShortLob => (Vec3::new(0.03, 0.2, 0.2), Vec3::new(0.0, 0.25, -0.4)),
-        Kick::PushBall | Kick::DribblePushBall => (Vec3::new(0.03, 0.15, 0.12), Vec3::new(0.0, 0.15, -0.35)),
+impl Pose {
+    fn with(mut self, set: &[(usize, [f32; 3])]) -> Pose {
+        for &(j, [x, y, z]) in set {
+            self.0[j] = Vec3::new(x, y, z);
+        }
+        self
     }
+
+    /// Adds `delta` joint by joint.
+    fn plus(mut self, delta: &Pose) -> Pose {
+        for j in 0..JOINTS {
+            self.0[j] += delta.0[j];
+        }
+        self
+    }
+
+    /// The same pose on the other side: left and right swapped, turns and rolls reversed.
+    fn mirror(self) -> Pose {
+        let mut m = self.0.map(|a| Vec3::new(a.x, -a.y, -a.z));
+        for (l, r) in PAIRS {
+            m.swap(l, r);
+        }
+        Pose(m)
+    }
+
+    fn lerp(self, other: &Pose, t: f32) -> Pose {
+        let mut out = self;
+        for j in 0..JOINTS {
+            out.0[j] = self.0[j].lerp(other.0[j], t);
+        }
+        out
+    }
+}
+
+/// A joint's local rotation from its pose angles.
+fn joint_rotation(j: usize, a: Vec3) -> Quat {
+    let (x, y, z) = (a.x.to_radians(), a.y.to_radians(), a.z.to_radians());
+    let upright = j <= HEAD_J;
+    let pitch = match j {
+        // Upright parts bend forward, knees and feet flex backward, the rest swings forward.
+        PELVIS | SPINE_J | CHEST_J | NECK_J | HEAD_J | SHIN_L | SHIN_R | FOOT_L | FOOT_R => -x,
+        _ => x,
+    };
+    Quat::from_rotation_y(y) * Quat::from_rotation_z(if upright { -z } else { z }) * Quat::from_rotation_x(pitch)
+}
+
+/// The ankles, from the pelvis joint (in the pelvis's parent frame).
+fn ankles(p: &Pose) -> [Vec3; 2] {
+    let pelvis = joint_rotation(PELVIS, p.0[PELVIS]);
+    [(THIGH_L, SHIN_L, -1.0), (THIGH_R, SHIN_R, 1.0)].map(|(t, s, side)| {
+        let thigh = joint_rotation(t, p.0[t]);
+        let shin = joint_rotation(s, p.0[s]);
+        pelvis * (Vec3::new(side * HIP.x, HIP.y, HIP.z) + thigh * (Vec3::NEG_Y * THIGH + shin * (Vec3::NEG_Y * SHIN)))
+    })
+}
+
+/// How far the pelvis drops so the lower ankle is at its standing height.
+fn ground_drop(p: &Pose) -> f32 {
+    let [l, r] = ankles(p);
+    (PELVIS_HEIGHT + l.y.min(r.y) - ANKLE_HEIGHT).max(0.0)
+}
+
+/// A looping cycle: four key poses, at 0, ¼, ½ and ¾ of the cycle (left foot down at 0, right at
+/// ½), the speed it is made for and its length.
+#[derive(Clone, Copy)]
+struct Clip {
+    keys: [Pose; 4],
+    speed: f32,
+    duration: f32,
+    /// Height (m) the body rises between steps: the run's flight.
+    flight: f32,
+}
+
+impl Clip {
+    /// A cycle from its first half (left contact, left mid-stance); the second half mirrors it.
+    fn cycle(contact: Pose, stance: Pose, speed: f32, duration: f32, flight: f32) -> Clip {
+        Clip { keys: [contact, stance, contact.mirror(), stance.mirror()], speed, duration, flight }
+    }
+
+    fn held(pose: Pose) -> Clip {
+        Clip { keys: [pose; 4], speed: 0.0, duration: 4.0, flight: 0.0 }
+    }
+
+    fn mirror(&self) -> Clip {
+        Clip { keys: self.keys.map(Pose::mirror), ..*self }
+    }
+
+    /// The pose at `phase` (0..1), smoothly through the keys (Catmull-Rom).
+    fn sample(&self, phase: f32) -> Pose {
+        let u = phase.rem_euclid(1.0) * 4.0;
+        let i = (u.floor() as usize).min(3);
+        let t = u - i as f32;
+        let k = |n: usize| &self.keys[(i + n) % 4];
+        let (p0, p1, p2, p3) = (k(3), k(0), k(1), k(2));
+        let mut out = Pose::default();
+        for j in 0..JOINTS {
+            let (a, b, c, d) = (p0.0[j], p1.0[j], p2.0[j], p3.0[j]);
+            out.0[j] = 0.5 * (2.0 * b + (c - a) * t + (2.0 * a - 5.0 * b + 4.0 * c - d) * t * t + (3.0 * b - a - 3.0 * c + d) * t * t * t);
+        }
+        out
+    }
+
+    /// The body's rise at `phase`: a bump between each mid-stance and the next contact.
+    fn lift(&self, phase: f32) -> f32 {
+        self.flight * (TAU * 2.0 * (phase - 0.375)).cos().max(0.0).powi(2)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Cycle {
+    Idle,
+    Walk,
+    Run,
+    Sprint,
+    Exhausted,
+    ExtraEffort,
+    LockIdle,
+    LockForward,
+    LockRight,
+    LockLeft,
+    LockBack,
+}
+
+struct Clips {
+    stand: Pose,
+    kick: [Pose; 3],
+    cycles: Vec<(Cycle, Clip)>,
+}
+
+impl Clips {
+    fn get(&self, c: Cycle) -> &Clip {
+        &self.cycles.iter().find(|(k, _)| *k == c).expect("every cycle is authored").1
+    }
+}
+
+/// Our own key poses (notes/animation.md §3).
+static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
+    let stand = Pose::default().with(&[
+        (SPINE_J, [3.0, 0.0, 0.0]),
+        (CHEST_J, [2.0, 0.0, 0.0]),
+        (NECK_J, [-2.0, 0.0, 0.0]),
+        (THIGH_L, [2.0, 0.0, -3.0]),
+        (SHIN_L, [5.0, 0.0, 0.0]),
+        (FOOT_L, [-3.0, 0.0, 3.0]),
+        (THIGH_R, [2.0, 0.0, 3.0]),
+        (SHIN_R, [5.0, 0.0, 0.0]),
+        (FOOT_R, [-3.0, 0.0, -3.0]),
+        (UPPER_L, [5.0, 0.0, -8.0]),
+        (FORE_L, [15.0, 0.0, 0.0]),
+        (HAND_L, [5.0, 0.0, 0.0]),
+        (UPPER_R, [5.0, 0.0, 8.0]),
+        (FORE_R, [15.0, 0.0, 0.0]),
+        (HAND_R, [5.0, 0.0, 0.0]),
+    ]);
+    // Feet: toes down = thigh − knee keeps the sole flat; more points the toes down.
+    let walk = Clip::cycle(
+        stand.with(&[
+            (PELVIS, [0.0, -5.0, 0.0]),
+            (SPINE_J, [4.0, 0.0, 0.0]),
+            (CHEST_J, [2.0, 6.0, 0.0]),
+            (THIGH_L, [22.0, 0.0, -2.0]),
+            (SHIN_L, [4.0, 0.0, 0.0]),
+            (FOOT_L, [6.0, 0.0, 0.0]),
+            (THIGH_R, [-14.0, 0.0, 2.0]),
+            (SHIN_R, [22.0, 0.0, 0.0]),
+            (FOOT_R, [-16.0, 0.0, 0.0]),
+            (UPPER_L, [-16.0, 0.0, -8.0]),
+            (FORE_L, [15.0, 0.0, 0.0]),
+            (UPPER_R, [18.0, 0.0, 8.0]),
+            (FORE_R, [25.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [0.0, 0.0, -2.0]),
+            (SPINE_J, [4.0, 0.0, 0.0]),
+            (THIGH_L, [2.0, 0.0, -2.0]),
+            (SHIN_L, [8.0, 0.0, 0.0]),
+            (FOOT_L, [-6.0, 0.0, 0.0]),
+            (THIGH_R, [14.0, 0.0, 2.0]),
+            (SHIN_R, [45.0, 0.0, 0.0]),
+            (FOOT_R, [-26.0, 0.0, 0.0]),
+            (UPPER_L, [-2.0, 0.0, -8.0]),
+            (UPPER_R, [4.0, 0.0, 8.0]),
+            (FORE_R, [20.0, 0.0, 0.0]),
+        ]),
+        1.6,
+        1.1,
+        0.0,
+    );
+    let run_contact = stand.with(&[
+        (PELVIS, [0.0, -8.0, 0.0]),
+        (SPINE_J, [8.0, 0.0, 0.0]),
+        (CHEST_J, [3.0, 12.0, 0.0]),
+        (NECK_J, [-6.0, -4.0, 0.0]),
+        (THIGH_L, [30.0, 0.0, -2.0]),
+        (SHIN_L, [18.0, 0.0, 0.0]),
+        (FOOT_L, [4.0, 0.0, 0.0]),
+        (THIGH_R, [-24.0, 0.0, 2.0]),
+        (SHIN_R, [80.0, 0.0, 0.0]),
+        (FOOT_R, [-79.0, 0.0, 0.0]),
+        (UPPER_L, [-35.0, 0.0, -10.0]),
+        (FORE_L, [75.0, 0.0, 0.0]),
+        (UPPER_R, [40.0, 0.0, 10.0]),
+        (FORE_R, [95.0, 0.0, 0.0]),
+    ]);
+    let run_stance = stand.with(&[
+        (PELVIS, [0.0, 0.0, -2.0]),
+        (SPINE_J, [9.0, 0.0, 0.0]),
+        (CHEST_J, [3.0, 0.0, 0.0]),
+        (NECK_J, [-7.0, 0.0, 0.0]),
+        (THIGH_L, [0.0, 0.0, -2.0]),
+        (SHIN_L, [32.0, 0.0, 0.0]),
+        (FOOT_L, [-32.0, 0.0, 0.0]),
+        (THIGH_R, [25.0, 0.0, 2.0]),
+        (SHIN_R, [115.0, 0.0, 0.0]),
+        (FOOT_R, [-75.0, 0.0, 0.0]),
+        (UPPER_L, [-6.0, 0.0, -10.0]),
+        (FORE_L, [80.0, 0.0, 0.0]),
+        (UPPER_R, [8.0, 0.0, 10.0]),
+        (FORE_R, [90.0, 0.0, 0.0]),
+    ]);
+    let run = Clip::cycle(run_contact, run_stance, RUN_SPEED, 0.68, 0.035);
+    let sprint_contact = stand.with(&[
+        (PELVIS, [0.0, -10.0, 0.0]),
+        (SPINE_J, [14.0, 0.0, 0.0]),
+        (CHEST_J, [4.0, 14.0, 0.0]),
+        (NECK_J, [-12.0, -5.0, 0.0]),
+        (THIGH_L, [34.0, 0.0, -2.0]),
+        (SHIN_L, [20.0, 0.0, 0.0]),
+        (FOOT_L, [8.0, 0.0, 0.0]),
+        (THIGH_R, [-30.0, 0.0, 2.0]),
+        (SHIN_R, [95.0, 0.0, 0.0]),
+        (FOOT_R, [-95.0, 0.0, 0.0]),
+        (UPPER_L, [-50.0, 0.0, -10.0]),
+        (FORE_L, [80.0, 0.0, 0.0]),
+        (UPPER_R, [55.0, 0.0, 10.0]),
+        (FORE_R, [100.0, 0.0, 0.0]),
+    ]);
+    let sprint_stance = stand.with(&[
+        (PELVIS, [0.0, 0.0, -2.0]),
+        (SPINE_J, [15.0, 0.0, 0.0]),
+        (CHEST_J, [4.0, 0.0, 0.0]),
+        (NECK_J, [-13.0, 0.0, 0.0]),
+        (THIGH_L, [-2.0, 0.0, -2.0]),
+        (SHIN_L, [36.0, 0.0, 0.0]),
+        (FOOT_L, [-38.0, 0.0, 0.0]),
+        (THIGH_R, [35.0, 0.0, 2.0]),
+        (SHIN_R, [125.0, 0.0, 0.0]),
+        (FOOT_R, [-70.0, 0.0, 0.0]),
+        (UPPER_L, [-10.0, 0.0, -10.0]),
+        (FORE_L, [85.0, 0.0, 0.0]),
+        (UPPER_R, [10.0, 0.0, 10.0]),
+        (FORE_R, [95.0, 0.0, 0.0]),
+    ]);
+    let sprint = Clip::cycle(sprint_contact, sprint_stance, SPRINT_SPEED, 0.6, 0.06);
+    // Extra effort: the sprint driven harder. Tired: the run's shape at a sprint, arms low, head down.
+    let harder = Pose::default().with(&[(SPINE_J, [6.0, 0.0, 0.0]), (NECK_J, [-4.0, 0.0, 0.0]), (UPPER_L, [-8.0, 0.0, 0.0]), (UPPER_R, [8.0, 0.0, 0.0])]);
+    let extra = Clip::cycle(sprint_contact.plus(&harder), sprint_stance.plus(&harder.mirror()), EXTRA_EFFORT_SPEED, 0.54, 0.07);
+    let tired = Pose::default().with(&[(SPINE_J, [5.0, 0.0, 0.0]), (NECK_J, [8.0, 0.0, 0.0]), (HEAD_J, [6.0, 0.0, 0.0]), (FORE_L, [-30.0, 0.0, 0.0]), (FORE_R, [-30.0, 0.0, 0.0])]);
+    let exhausted = Clip::cycle(run_contact.plus(&tired), run_stance.plus(&tired), SPRINT_SPEED * 0.8, 0.66, 0.025);
+
+    // Lock move: a low, wide stance, arms out, head up.
+    let stance = stand.plus(&Pose::default().with(&[
+        (SPINE_J, [14.0, 0.0, 0.0]),
+        (CHEST_J, [4.0, 0.0, 0.0]),
+        (NECK_J, [-12.0, 0.0, 0.0]),
+        (HEAD_J, [-6.0, 0.0, 0.0]),
+        (THIGH_L, [14.0, 0.0, -6.0]),
+        (SHIN_L, [28.0, 0.0, 0.0]),
+        (FOOT_L, [-14.0, 0.0, 6.0]),
+        (THIGH_R, [14.0, 0.0, 6.0]),
+        (SHIN_R, [28.0, 0.0, 0.0]),
+        (FOOT_R, [-14.0, 0.0, -6.0]),
+        (UPPER_L, [20.0, 0.0, -24.0]),
+        (FORE_L, [35.0, 0.0, 0.0]),
+        (UPPER_R, [20.0, 0.0, 24.0]),
+        (FORE_R, [35.0, 0.0, 0.0]),
+    ]));
+    let low = |p: Pose| Pose(std::array::from_fn(|j| if j >= UPPER_L { stance.0[j] } else { p.0[j] }));
+    let lock_forward = Clip::cycle(
+        low(stance.with(&[(THIGH_L, [32.0, 0.0, -6.0]), (SHIN_L, [30.0, 0.0, 0.0]), (FOOT_L, [2.0, 0.0, 6.0]), (THIGH_R, [-6.0, 0.0, 6.0]), (SHIN_R, [70.0, 0.0, 0.0]), (FOOT_R, [-56.0, 0.0, -6.0])])),
+        low(stance.with(&[(THIGH_L, [12.0, 0.0, -6.0]), (SHIN_L, [40.0, 0.0, 0.0]), (FOOT_L, [-28.0, 0.0, 6.0]), (THIGH_R, [30.0, 0.0, 6.0]), (SHIN_R, [90.0, 0.0, 0.0]), (FOOT_R, [-50.0, 0.0, -6.0])])),
+        4.5,
+        0.62,
+        0.0,
+    );
+    let lock_back = Clip::cycle(
+        low(stance.with(&[(THIGH_L, [-6.0, 0.0, -8.0]), (SHIN_L, [40.0, 0.0, 0.0]), (FOOT_L, [-36.0, 0.0, 6.0]), (THIGH_R, [26.0, 0.0, 8.0]), (SHIN_R, [44.0, 0.0, 0.0]), (FOOT_R, [-18.0, 0.0, -6.0])])),
+        low(stance.with(&[(THIGH_L, [14.0, 0.0, -8.0]), (SHIN_L, [36.0, 0.0, 0.0]), (FOOT_L, [-22.0, 0.0, 6.0]), (THIGH_R, [4.0, 0.0, 8.0]), (SHIN_R, [80.0, 0.0, 0.0]), (FOOT_R, [-50.0, 0.0, -6.0])])),
+        4.0,
+        0.58,
+        0.0,
+    );
+    // Strafing right: the right foot steps out, the left one follows, twice a cycle.
+    let apart = stance.with(&[
+        (PELVIS, [0.0, 0.0, -3.0]),
+        (THIGH_L, [14.0, 0.0, -12.0]),
+        (SHIN_L, [30.0, 0.0, 0.0]),
+        (FOOT_L, [-16.0, 0.0, 12.0]),
+        (THIGH_R, [14.0, 0.0, 18.0]),
+        (SHIN_R, [24.0, 0.0, 0.0]),
+        (FOOT_R, [-10.0, 0.0, -18.0]),
+    ]);
+    let together = stance.with(&[
+        (PELVIS, [0.0, 0.0, 2.0]),
+        (THIGH_L, [16.0, 0.0, 4.0]),
+        (SHIN_L, [46.0, 0.0, 0.0]),
+        (FOOT_L, [-24.0, 0.0, -4.0]),
+        (THIGH_R, [14.0, 0.0, 4.0]),
+        (SHIN_R, [30.0, 0.0, 0.0]),
+        (FOOT_R, [-16.0, 0.0, -4.0]),
+    ]);
+    let lock_right = Clip { keys: [apart, together, apart, together], speed: 4.5, duration: 0.5, flight: 0.015 };
+
+    // A kick (the right foot): wind-up, contact, follow-through; the left arm out for balance.
+    let kick = [
+        stand.with(&[
+            (SPINE_J, [6.0, 0.0, 0.0]),
+            (CHEST_J, [2.0, 12.0, 0.0]),
+            (THIGH_L, [8.0, 0.0, -4.0]),
+            (SHIN_L, [25.0, 0.0, 0.0]),
+            (FOOT_L, [-17.0, 0.0, 4.0]),
+            (THIGH_R, [-30.0, 0.0, 4.0]),
+            (SHIN_R, [85.0, 0.0, 0.0]),
+            (FOOT_R, [-80.0, 0.0, 0.0]),
+            (UPPER_L, [30.0, 0.0, -55.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [-25.0, 0.0, 25.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [2.0, 0.0, 0.0]),
+            (CHEST_J, [0.0, -6.0, 0.0]),
+            (THIGH_L, [10.0, 0.0, -4.0]),
+            (SHIN_L, [22.0, 0.0, 0.0]),
+            (FOOT_L, [-12.0, 0.0, 4.0]),
+            (THIGH_R, [30.0, 0.0, 0.0]),
+            (SHIN_R, [20.0, 0.0, 0.0]),
+            (FOOT_R, [50.0, 0.0, 0.0]),
+            (UPPER_L, [35.0, 0.0, -60.0]),
+            (FORE_L, [25.0, 0.0, 0.0]),
+            (UPPER_R, [-20.0, 0.0, 30.0]),
+            (FORE_R, [25.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [-6.0, 0.0, 0.0]),
+            (CHEST_J, [0.0, -12.0, 0.0]),
+            (THIGH_L, [5.0, 0.0, -4.0]),
+            (SHIN_L, [15.0, 0.0, 0.0]),
+            (FOOT_L, [10.0, 0.0, 4.0]),
+            (THIGH_R, [75.0, 0.0, -4.0]),
+            (SHIN_R, [25.0, 0.0, 0.0]),
+            (FOOT_R, [75.0, 0.0, 0.0]),
+            (UPPER_L, [20.0, 0.0, -50.0]),
+            (UPPER_R, [25.0, 0.0, 20.0]),
+        ]),
+    ];
+
+    Clips {
+        stand,
+        kick,
+        cycles: vec![
+            (Cycle::Idle, Clip::held(stand)),
+            (Cycle::Walk, walk),
+            (Cycle::Run, run),
+            (Cycle::Sprint, sprint),
+            (Cycle::Exhausted, exhausted),
+            (Cycle::ExtraEffort, extra),
+            (Cycle::LockIdle, Clip::held(stance)),
+            (Cycle::LockForward, lock_forward),
+            (Cycle::LockRight, lock_right),
+            (Cycle::LockLeft, lock_right.mirror()),
+            (Cycle::LockBack, lock_back),
+        ],
+    }
+});
+
+/// The cycle for the mode and speed (notes/animation.md §2). Lock move picks a cardinal by the
+/// movement's angle to the facing (0 ahead, +90 right), in ±45° sectors, keeping the current one
+/// up to ±60°.
+fn pick_cycle(p: &Player, speed: f32, angle: f32, current: Cycle) -> Cycle {
+    if p.locked {
+        if speed < 0.3 {
+            return Cycle::LockIdle;
+        }
+        let off = |centre: f32| ((angle - centre + 540.0).rem_euclid(360.0) - 180.0).abs();
+        let cardinals = [(Cycle::LockForward, 0.0), (Cycle::LockRight, 90.0), (Cycle::LockBack, 180.0), (Cycle::LockLeft, -90.0)];
+        if cardinals.iter().any(|&(c, centre)| c == current && off(centre) <= 60.0) {
+            return current;
+        }
+        return cardinals.iter().find(|(_, centre)| off(*centre) <= 45.0).map_or(Cycle::LockForward, |(c, _)| *c);
+    }
+    match () {
+        _ if speed < 0.3 => Cycle::Idle,
+        _ if p.extra_active => Cycle::ExtraEffort,
+        _ if p.sprint_running && p.exhausted => Cycle::Exhausted,
+        _ if p.sprint_running => Cycle::Sprint,
+        _ if speed < 2.7 => Cycle::Walk,
+        _ => Cycle::Run,
+    }
+}
+
+/// The cycle's play rate (notes/animation.md §2): the speed against its own, clamped to 0.7–1.5,
+/// faster into sharp turns.
+fn play_rate(speed: f32, clip: &Clip, corner: f32) -> f32 {
+    if clip.speed <= 0.0 { 1.0 } else { (speed / clip.speed).clamp(0.7, 1.5) * corner }
 }
 
 fn follow_time(kind: Kick) -> f32 {
@@ -184,265 +474,227 @@ fn follow_time(kind: Kick) -> f32 {
     }
 }
 
+/// How big a kick's swing is, against a full shot.
+fn kick_size(kind: Kick) -> f32 {
+    match kind {
+        Kick::Shot => 1.0,
+        Kick::Pass | Kick::Lob => 0.8,
+        Kick::ShortPass | Kick::ShortLob => 0.55,
+        Kick::PushBall | Kick::DribblePushBall => 0.4,
+    }
+}
+
+#[derive(Default)]
+pub struct Animator {
+    phase: f32,
+    cycle: Option<Cycle>,
+    /// The cycle being faded out, and the fade's progress and length.
+    from: Option<Cycle>,
+    fade: f32,
+    fade_time: f32,
+    mode: (bool, bool),
+    breath: f32,
+    /// Smoothed sideways turn of the travel direction, and last frame's direction.
+    lateral: f32,
+    heading: Vec3,
+    kick: Option<KickState>,
+    follow: Option<(f32, Kick)>,
+    action: f32,
+}
+
+pub fn spawn_body(commands: &mut Commands, player: Entity, meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) {
+    let mut flat = |c: Color| materials.add(StandardMaterial { base_color: c, perceptual_roughness: 0.9, ..default() });
+    let shirt = flat(Color::srgb(0.92, 0.38, 0.16));
+    let shorts = flat(Color::srgb(0.10, 0.12, 0.22));
+    let skin = flat(Color::srgb(0.80, 0.62, 0.5));
+    let socks = flat(Color::srgb(0.92, 0.92, 0.9));
+    let boots = flat(Color::srgb(0.06, 0.06, 0.07));
+    // A capsule of radius r along a bone of length len, hanging down from its joint.
+    let mut limb = |r: f32, len: f32| (Mesh3d(meshes.add(Capsule3d::new(r, (len - r).max(0.01)))), Transform::from_xyz(0.0, -len / 2.0, 0.0));
+    let thigh = limb(0.085, THIGH);
+    let shin = limb(0.062, SHIN);
+    let upper = limb(0.048, UPPER_ARM);
+    let fore = limb(0.042, FOREARM);
+    // The trunk: upright capsules, wider than deep; the shoulders a short bar across.
+    let mut trunk = |r: f32, len: f32, at: Vec3, scale: Vec3| (Mesh3d(meshes.add(Capsule3d::new(r, len))), Transform::from_translation(at).with_scale(scale));
+    let pelvis_mesh = trunk(0.12, 0.06, Vec3::new(0.0, -0.04, 0.0), Vec3::new(1.25, 1.0, 0.85));
+    let waist_mesh = trunk(0.115, 0.1, Vec3::new(0.0, 0.04, 0.0), Vec3::new(1.2, 1.0, 0.82));
+    let chest_mesh = trunk(0.12, 0.12, Vec3::new(0.0, 0.06, -0.005), Vec3::new(1.4, 0.9, 0.82));
+    let shoulders_mesh = (Mesh3d(meshes.add(Capsule3d::new(0.055, 0.22))), Transform::from_xyz(0.0, 0.14, 0.0).with_rotation(Quat::from_rotation_z(PI / 2.0)));
+    let neck_mesh = Mesh3d(meshes.add(Capsule3d::new(0.05, 0.06)));
+    let head_mesh = Mesh3d(meshes.add(Sphere::new(0.1)));
+    let hand = Mesh3d(meshes.add(Capsule3d::new(0.035, 0.08)));
+    let foot = Mesh3d(meshes.add(Cuboid::new(0.1, 0.085, 0.27)));
+    let joint = |j: usize, at: Vec3| (Joint(j), Transform::from_translation(at), Visibility::default());
+
+    commands.entity(player).with_children(|root| {
+        root.spawn(joint(PELVIS, Vec3::Y * (PELVIS_HEIGHT - ROOT_HEIGHT))).with_children(|pelvis| {
+            pelvis.spawn((pelvis_mesh.0, MeshMaterial3d(shorts.clone()), pelvis_mesh.1));
+            for (t, s, f, side) in [(THIGH_L, SHIN_L, FOOT_L, -1.0f32), (THIGH_R, SHIN_R, FOOT_R, 1.0)] {
+                pelvis.spawn(joint(t, Vec3::new(side * HIP.x, HIP.y, HIP.z))).with_children(|hip| {
+                    hip.spawn((thigh.0.clone(), MeshMaterial3d(shorts.clone()), thigh.1));
+                    hip.spawn(joint(s, Vec3::NEG_Y * THIGH)).with_children(|knee| {
+                        knee.spawn((shin.0.clone(), MeshMaterial3d(socks.clone()), shin.1));
+                        knee.spawn(joint(f, Vec3::NEG_Y * SHIN)).with_children(|ankle| {
+                            ankle.spawn((foot.clone(), MeshMaterial3d(boots.clone()), Transform::from_xyz(0.0, -ANKLE_HEIGHT + 0.0425, -0.07)));
+                        });
+                    });
+                });
+            }
+            pelvis.spawn(joint(SPINE_J, Vec3::Y * SPINE)).with_children(|spine| {
+                spine.spawn((waist_mesh.0, MeshMaterial3d(shirt.clone()), waist_mesh.1));
+                spine.spawn(joint(CHEST_J, Vec3::Y * CHEST)).with_children(|chest| {
+                    chest.spawn((chest_mesh.0, MeshMaterial3d(shirt.clone()), chest_mesh.1));
+                    chest.spawn((shoulders_mesh.0, MeshMaterial3d(shirt.clone()), shoulders_mesh.1));
+                    chest.spawn(joint(NECK_J, Vec3::Y * NECK)).with_children(|neck| {
+                        neck.spawn((neck_mesh, MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, 0.03, 0.0)));
+                        neck.spawn(joint(HEAD_J, Vec3::Y * HEAD)).with_children(|head| {
+                            head.spawn((head_mesh, MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, 0.1, -0.01).with_scale(Vec3::new(0.9, 1.05, 1.0))));
+                        });
+                    });
+                    for (u, f, h, side) in [(UPPER_L, FORE_L, HAND_L, -1.0f32), (UPPER_R, FORE_R, HAND_R, 1.0)] {
+                        chest.spawn(joint(u, Vec3::new(side * SHOULDER.x, SHOULDER.y, SHOULDER.z))).with_children(|shoulder| {
+                            shoulder.spawn((upper.0.clone(), MeshMaterial3d(shirt.clone()), upper.1));
+                            shoulder.spawn(joint(f, Vec3::NEG_Y * UPPER_ARM)).with_children(|elbow| {
+                                elbow.spawn((fore.0.clone(), MeshMaterial3d(skin.clone()), fore.1));
+                                elbow.spawn(joint(h, Vec3::NEG_Y * FOREARM)).with_children(|wrist| {
+                                    wrist.spawn((hand.clone(), MeshMaterial3d(skin.clone()), Transform::from_xyz(0.0, -0.07, 0.0)));
+                                });
+                            });
+                        });
+                    }
+                });
+            });
+        });
+    });
+}
+
 /// Poses the body from the player's state.
-pub fn animate_body(
-    time: Res<Time>,
-    player: Single<(&Player, &Transform)>,
-    ball: Option<Single<&Transform, (With<Ball>, Without<Player>)>>,
-    mut parts: Query<(&Part, &mut Transform), (Without<Player>, Without<Ball>)>,
-    mut gait: Local<Gait>,
-) {
+pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut joints: Query<(&Joint, &mut Transform), Without<Player>>, mut anim: Local<Animator>) {
     let dt = time.delta_secs();
     let (p, root) = *player;
     // The kick's freeze holds the pose too.
     if dt <= 0.0 || p.freeze > 0.0 {
         return;
     }
-    let to_local = root.rotation.inverse();
-    let local = to_local * p.vel;
-    let (fwd, side, speed) = (-local.z, local.x, Vec3::new(local.x, 0.0, local.z).length());
-    let (fwd_share, side_share) = if speed > 0.1 { (fwd / speed, side / speed) } else { (1.0, 0.0) };
-    let ahead = root.rotation * Vec3::NEG_Z;
-    let right = root.rotation * Vec3::X;
-    let near_ball = ball
-        .map(|b| b.translation)
-        .filter(|b| Vec2::new(b.x - root.translation.x, b.z - root.translation.z).length() < 1.5);
+    let clips = &*CLIPS;
+    let local = root.rotation.inverse() * p.vel;
+    let speed = Vec2::new(local.x, local.z).length();
+    let angle = if speed > 0.1 { local.x.atan2(-local.z).to_degrees() } else { 0.0 };
 
-    // Kicks: remember the one in progress; when it's gone the ball has left, so follow through.
-    match (gait.kick, p.kick) {
-        (Some(was), None) => gait.follow = Some((0.0, was.kind)),
-        (_, Some(_)) => gait.follow = None,
+    // Cornering: the smoothed per-frame turn of the travel direction (the game's relative lateral
+    // acceleration), positive turning right; it speeds the cycle up and leans the body.
+    let heading = Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or_zero();
+    let turn = if speed > 0.5 && anim.heading != Vec3::ZERO { heading.dot(anim.heading.cross(Vec3::Y)) } else { 0.0 };
+    anim.heading = heading;
+    anim.lateral += (turn - anim.lateral) * (7.0 * dt).min(1.0);
+
+    // The cycle; a change fades the old one out, faster when the mode changed.
+    let next = pick_cycle(p, speed, angle, anim.cycle.unwrap_or(Cycle::Idle));
+    let mode = (p.locked, p.has_ball);
+    if anim.cycle != Some(next) {
+        anim.from = anim.cycle;
+        anim.fade = 0.0;
+        anim.fade_time = if mode != anim.mode { 0.1 } else { 0.25 };
+        anim.cycle = Some(next);
+    }
+    anim.mode = mode;
+    anim.fade = (anim.fade + dt / anim.fade_time.max(1e-3)).min(1.0);
+    let clip = clips.get(next);
+    let boost_max = if p.has_ball { 1.0 } else if p.sprint_running { 1.05 } else { 1.15 };
+    let rate = play_rate(speed, clip, 1.0 + (boost_max - 1.0) * (anim.lateral.abs() / 0.06).min(1.0));
+    if clip.speed > 0.0 {
+        anim.phase = (anim.phase + dt * rate / clip.duration).rem_euclid(1.0);
+    }
+    let phase = anim.phase;
+    let mut pose = clip.sample(phase);
+    let mut lift = clip.lift(phase);
+    if let Some(from) = anim.from.filter(|_| anim.fade < 1.0) {
+        let w = anim.fade * anim.fade * (3.0 - 2.0 * anim.fade);
+        let old = clips.get(from);
+        pose = old.sample(phase).lerp(&pose, w);
+        lift = old.lift(phase) * (1.0 - w) + lift * w;
+    }
+
+    // What the rate clamp leaves, the steps absorb (the game's stride warping).
+    if clip.speed > 0.0 {
+        let stride = (speed / clip.speed / rate).clamp(0.4, 1.3);
+        let side = matches!(next, Cycle::LockRight | Cycle::LockLeft);
+        for j in [THIGH_L, THIGH_R, UPPER_L, UPPER_R] {
+            let rest = clips.stand.0[j];
+            pose.0[j].x = rest.x + (pose.0[j].x - rest.x) * stride;
+            if side && j <= THIGH_R {
+                pose.0[j].z = rest.z + (pose.0[j].z - rest.z) * stride;
+            }
+        }
+    }
+
+    // Breathing, mostly at rest.
+    anim.breath = (anim.breath + dt / 3.5).rem_euclid(1.0);
+    let breath = (TAU * anim.breath).sin() * if speed < 0.3 { 1.5 } else { 0.5 };
+    pose.0[CHEST_J].x += breath;
+    pose.0[UPPER_L].z -= breath * 0.5;
+    pose.0[UPPER_R].z += breath * 0.5;
+
+    // Free move has one forward cycle: the lower body turns toward the velocity and the upper body
+    // keeps facing (the game's orientation warping).
+    if !p.locked && speed > 0.5 {
+        let warp = -angle.clamp(-60.0, 60.0) * (speed / 2.0).min(1.0);
+        pose.0[PELVIS].y += warp;
+        pose.0[SPINE_J].y -= warp * 0.6;
+        pose.0[CHEST_J].y -= warp * 0.4;
+    }
+
+    // Lean into turns, by speed, and forward as stamina drops.
+    let lean_max = if p.sprint_running { 0.06 } else if p.has_ball { 0.1 } else { 0.075 };
+    let roll = (anim.lateral / lean_max).clamp(-1.0, 1.0) * (speed / SPRINT_SPEED).min(1.0) * 14.0;
+    pose.0[PELVIS].z += roll * 0.4;
+    pose.0[SPINE_J].z += roll * 0.3;
+    pose.0[CHEST_J].z += roll * 0.3;
+    pose.0[SPINE_J].x += (1.0 - p.stamina / MAX_STAMINA).max(0.0) * 6.0;
+
+    // Kicks on top: wind up while charging, swing to the contact frame, follow through.
+    match (anim.kick, p.kick) {
+        (Some(was), None) => anim.follow = Some((0.0, was.kind)),
+        (_, Some(_)) => anim.follow = None,
         _ => {}
     }
-    gait.kick = p.kick;
-    if let Some((t, kind)) = gait.follow.as_mut() {
+    anim.kick = p.kick;
+    if let Some((t, kind)) = anim.follow.as_mut() {
         *t += dt;
         if *t > follow_time(*kind) {
-            gait.follow = None;
+            anim.follow = None;
         }
     }
-
-    // Body: crouch in lock move and dashes, bob with the stride, lean forward with speed and into
-    // dribbles and dashes.
-    let rate = 1.0 - (-12.0 * dt).exp();
-    let amp = (speed / 7.0).min(1.2);
-    // Running bends the knees more the faster you go, so the planted foot can reach.
-    let crouch = if p.locked { 0.12 } else { 0.08 * (speed / 5.0).min(1.2) } + if p.dash.is_some() { 0.08 } else { 0.0 };
-    // A foot stays planted only as far as the leg reaches from the hip: that caps its share of
-    // the stride.
-    let len = stride(speed, p.locked);
-    gait.phase = (gait.phase + speed * dt / len).fract();
-    let height = root.translation.y + HIP_Y - crouch - ANKLE_HEIGHT;
-    let reach = ((0.96 * (THIGH + SHIN)).powi(2) - height * height).max(0.0).sqrt();
-    let d = (if p.locked { 0.6 } else { duty(speed) }).min(2.0 * reach / len);
-    // The hips are lowest halfway through each stance.
-    let bob = 0.02 * amp * (1.0 + (2.0 * TAU * (gait.phase - d / 2.0)).cos());
-    gait.drop += (crouch + bob - gait.drop) * rate;
-    let lean = -(0.06 + 0.04 * speed.min(9.5)) * fwd_share.max(0.0);
-    gait.lean += (lean - gait.lean) * (1.0 - (-6.0 * dt).exp());
-    let roll = match (p.dribble.filter(|d| d.moving()), p.dash) {
-        (Some(d), _) => -0.25 * (to_local * d.dir).x,
-        (_, Some(d)) => -0.3 * (to_local * d.dir).x,
-        _ => 0.0,
+    let [windup, hit, through] = &clips.kick;
+    let kick_pose = if let Some(k) = p.kick {
+        let first = contact_time(&k);
+        let contact = if k.released { first.max(k.held) } else { first };
+        let key = if !k.released {
+            clips.stand.lerp(windup, (k.elapsed / (first - 6.0 / 60.0).max(1.0 / 60.0)).min(1.0))
+        } else {
+            let s = ((k.elapsed - k.held) / (contact - k.held).max(4.0 / 60.0)).clamp(0.0, 1.0);
+            windup.lerp(hit, s * s * (3.0 - 2.0 * s))
+        };
+        Some((key, k.kind, 1.0))
+    } else {
+        anim.follow.map(|(t, kind)| {
+            let u = t / follow_time(kind);
+            (hit.lerp(through, (u / 0.4).min(1.0)), kind, 1.0 - ((u - 0.4) / 0.6).clamp(0.0, 1.0))
+        })
     };
-    gait.roll += (roll - gait.roll) * rate;
-    let body_rot = Quat::from_rotation_z(gait.roll);
-    let body_pos = root.translation + Vec3::Y * -gait.drop;
-    let hip = |s: f32| body_pos + root.rotation * (body_rot * Vec3::new(s * HIP_X, HIP_Y, 0.0));
-    let ground = |v: Vec3| Vec3::new(v.x, ANKLE_HEIGHT, v.z);
+    let target = kick_pose.map_or(0.0, |(_, _, w)| w);
+    anim.action += (target - anim.action).clamp(-dt / 0.25, dt / 0.08);
+    if let Some((key, kind, _)) = kick_pose {
+        pose = pose.lerp(&clips.stand.lerp(&key, kick_size(kind)), anim.action);
+    }
 
-    // Locomotion: each foot planted for its share of the stride, then stepping to the next
-    // foothold, placed so it lands under you halfway through its next stance.
-    let lift = if p.locked { 0.06 } else { 0.12 + 0.04 * speed.min(8.0) };
-    let width = if p.locked { 0.08 } else { 0.0 };
-    let carrying = p.has_ball && p.kick.is_none() && p.dribble.is_none() && p.receiving.is_none();
-    let phase = gait.phase;
-    let started = gait.started;
-    let mut targets = [Vec3::ZERO; 2];
-    for (i, s) in [-1.0f32, 1.0].into_iter().enumerate() {
-        let rest = ground(hip(s)) + right * (s * width);
-        let foot = &mut gait.feet[i];
-        if !started {
-            *foot = Foot { planted: rest, from: Vec3::ZERO, stance: true, last: rest };
+    let drop = ground_drop(&pose);
+    for (j, mut tf) in &mut joints {
+        tf.rotation = joint_rotation(j.0, pose.0[j.0]);
+        if j.0 == PELVIS {
+            tf.translation.y = PELVIS_HEIGHT - ROOT_HEIGHT - drop + lift;
         }
-        targets[i] = if speed < 0.3 {
-            // Standing: feet stay put, drifting back under the hips if they've ended up far away.
-            if !foot.stance {
-                foot.stance = true;
-                foot.planted = ground(foot.last);
-            }
-            let off = rest - foot.planted;
-            if off.length() > 0.05 {
-                foot.planted += off.clamp_length_max(2.5 * dt);
-            }
-            foot.planted
-        } else {
-            let u = (phase + if s > 0.0 { 0.0 } else { 0.5 }).fract();
-            if u < d {
-                if !foot.stance {
-                    foot.stance = true;
-                    foot.planted = ground(foot.last);
-                }
-                foot.planted
-            } else {
-                if foot.stance {
-                    foot.stance = false;
-                    foot.from = foot.planted - rest;
-                }
-                let w = (u - d) / (1.0 - d);
-                // The foot lands half a stance ahead of the hip, so it is under you halfway through
-                // the stance.
-                let mut land = Vec3::new(p.vel.x, 0.0, p.vel.z) * (d * len / speed / 2.0);
-                // Running with the ball, the right foot steps up to it: a touch every stride.
-                if s > 0.0 && carrying {
-                    if let Some(b) = near_ball {
-                        land = ground(b - ahead * 0.18) - rest;
-                    }
-                }
-                // The swing moves with the hips: the heel comes up behind first, then the foot
-                // swings through to where it lands.
-                let h = w * w * (3.0 - 2.0 * w * w);
-                rest + foot.from.lerp(land, h) + Vec3::Y * (lift * (PI * w.sqrt()).sin())
-            }
-        };
-    }
-    gait.started = true;
-
-    // Touches: the foot goes to the ball at the game's contact frames.
-    let to_ball = |b: Vec3, back: f32| Vec3::new(b.x, b.y.max(ANKLE_HEIGHT), b.z) - ahead * back;
-    let mut kick_weight = 0.0f32;
-    if let Some(k) = p.kick {
-        // Wind up while you charge; swing through to the ball from the release to the contact.
-        let (back, _) = kick_path(k.kind);
-        let windup = ground(hip(1.0)) + root.rotation * back;
-        let first_contact = contact_time(&k);
-        let contact = if k.released { first_contact.max(k.held) } else { first_contact };
-        let foot_at = near_ball.map_or(ground(hip(1.0)) - ahead * 0.35, |b| to_ball(b, 0.18));
-        let target = if !k.released {
-            let w = (k.elapsed / (first_contact - 6.0 * FRAME).max(FRAME)).min(1.0);
-            targets[1].lerp(windup, w)
-        } else {
-            let swing = ((k.elapsed - k.held) / (contact - k.held).max(4.0 * FRAME)).clamp(0.0, 1.0);
-            windup.lerp(foot_at, swing * swing * (3.0 - 2.0 * swing))
-        };
-        kick_weight = (k.elapsed / (5.0 * FRAME)).min(1.0);
-        targets[1] = targets[1].lerp(target, kick_weight);
-    } else if let Some((t, kind)) = gait.follow {
-        // Through the ball to the follow-through's peak, then back into the stride.
-        let (_, through) = kick_path(kind);
-        let peak = ground(hip(1.0)) + root.rotation * through;
-        let u = t / follow_time(kind);
-        let target = if u < 0.4 { gait.feet[1].last.lerp(peak, u / 0.4) } else { peak };
-        kick_weight = 1.0 - ((u - 0.4) / 0.6).clamp(0.0, 1.0);
-        targets[1] = targets[1].lerp(target, kick_weight);
-    }
-    if kick_weight > 0.0 {
-        // The other foot plants beside the ball.
-        let support = near_ball.map_or(ground(hip(-1.0)), |b| ground(b - right * 0.28 - ahead * 0.05));
-        targets[0] = targets[0].lerp(support, kick_weight);
-    }
-    if let (Some(dr), Some(b)) = (p.dribble, near_ball) {
-        let at = dribble_contact(dr.feint, dr.exhausted, dr.heading);
-        let w = bell(dr.t, at, 6.0 * FRAME, 3.0 * FRAME, 6.0 * FRAME);
-        // Fast cuts push it on, side dribbles sweep it across, drag backs pull it back with the sole.
-        let touch = match dr.heading {
-            Heading::Forward => to_ball(b, 0.18),
-            Heading::Side => to_ball(b, 0.0) - dr.dir * 0.15,
-            Heading::Back => to_ball(b, 0.0) + Vec3::Y * 0.1,
-        };
-        targets[1] = targets[1].lerp(touch, w);
-    }
-    if let (Some(t), Some(b)) = (p.receiving, near_ball) {
-        // Receiving: the foot meets the ball and cushions it in.
-        let w = (t / CONTROL_SNAP).min(1.0) * (1.0 - 0.5 * ((t - CONTROL_SNAP) / (CONTROL_ACT - CONTROL_SNAP)).clamp(0.0, 1.0));
-        targets[1] = targets[1].lerp(to_ball(b, 0.15), w);
-    }
-    for (i, t) in targets.iter().enumerate() {
-        gait.feet[i].last = *t;
-    }
-
-    // Upper body: arms swing against the legs, lean with speed; lock move opens the arms, kicks
-    // open the body.
-    let leg_swing = |s: f32| (TAU * (phase + if s > 0.0 { 0.0 } else { 0.5 })).sin();
-    let mut spine = Pose { pitch: gait.lean, ..default() };
-    let mut head = Pose { pitch: -0.6 * gait.lean, ..default() };
-    let mut arms = [-1.0f32, 1.0].map(|s| {
-        (Pose { pitch: 0.6 * amp * leg_swing(-s) * fwd_share, roll: 0.1 + 0.15 * amp * side_share.abs(), yaw: 0.0 }, Pose { pitch: 0.4 + 0.6 * amp.min(1.0), ..default() })
-    });
-    if p.locked {
-        spine.pitch -= 0.3;
-        head.pitch += 0.25;
-        for (upper, fore) in &mut arms {
-            *upper = Pose { pitch: 0.3, roll: 0.5, yaw: 0.0 };
-            fore.pitch = 0.5;
-        }
-    }
-    if p.extra_active {
-        spine.pitch -= 0.15;
-        for (upper, fore) in &mut arms {
-            upper.pitch *= 1.5;
-            fore.pitch = 1.4;
-        }
-    }
-    if let Some(dash) = p.dash {
-        spine.pitch = match dash_sector(to_local * dash.dir) {
-            DashSector::Front => -0.45,
-            DashSector::Side(_) => -0.15,
-            DashSector::Back => 0.15,
-        };
-    }
-    if kick_weight > 0.0 {
-        // The left arm out for balance, the right one back.
-        spine.yaw = -0.25 * kick_weight;
-        arms[0].0.roll = 0.1 + 0.7 * kick_weight;
-        arms[0].0.pitch = 0.3 * kick_weight;
-        arms[1].0.pitch = -0.4 * kick_weight;
-    }
-
-    let blend = 1.0 - (-18.0 * dt).exp();
-    let limb = |q: Pose, s: f32| Quat::from_rotation_y(q.yaw) * Quat::from_rotation_z(q.roll * s) * Quat::from_rotation_x(q.pitch);
-    for (part, mut tf) in &mut parts {
-        match *part {
-            Part::Body => {
-                tf.translation.y = -gait.drop;
-                tf.rotation = body_rot;
-            }
-            Part::Spine => tf.rotation = tf.rotation.slerp(limb(spine, 1.0), blend),
-            Part::Head => tf.rotation = tf.rotation.slerp(limb(head, 1.0), blend),
-            Part::UpperArm(s) => tf.rotation = tf.rotation.slerp(limb(arms[(s > 0.0) as usize].0, s), blend),
-            Part::Forearm(s) => tf.rotation = tf.rotation.slerp(limb(arms[(s > 0.0) as usize].1, s), blend),
-            Part::Thigh(s) | Part::Shin(s) | Part::Foot(s) => {
-                // The leg reaches its foot target: world -> the body's frame, relative to the hip.
-                let i = (s > 0.0) as usize;
-                let rel = body_rot.inverse() * (to_local * (targets[i] - body_pos)) - Vec3::new(s * HIP_X, HIP_Y, 0.0);
-                let (thigh, shin) = leg_ik(rel);
-                tf.rotation = match *part {
-                    Part::Thigh(_) => thigh,
-                    Part::Shin(_) => shin,
-                    // Keep the foot flat on the ground.
-                    _ => (thigh * shin).inverse(),
-                };
-            }
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-enum DashSector {
-    Front,
-    /// +1 right, -1 left.
-    Side(f32),
-    Back,
-}
-
-/// Which dash animation a direction (in the body's frame) plays: front within 45 deg, back beyond
-/// 135 deg, a side step in between.
-fn dash_sector(dir: Vec3) -> DashSector {
-    let angle = dir.x.atan2(-dir.z).to_degrees();
-    match angle.abs() {
-        a if a <= 45.0 => DashSector::Front,
-        a if a < 135.0 => DashSector::Side(angle.signum()),
-        _ => DashSector::Back,
     }
 }
 
@@ -451,81 +703,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn leg_ik_reaches_its_target() {
-        for target in [Vec3::new(0.0, -0.8, 0.0), Vec3::new(0.0, -0.6, -0.3), Vec3::new(0.1, -0.7, 0.25), Vec3::new(-0.15, -0.5, -0.2)] {
-            let (thigh, shin) = leg_ik(target);
-            let ankle = thigh * (Vec3::new(0.0, -THIGH, 0.0) + shin * Vec3::new(0.0, -SHIN, 0.0));
-            assert!((ankle - target).length() < 0.01, "{target:?} reached {ankle:?}");
-            // The knee bends forward, never backward.
-            let knee = thigh * Vec3::new(0.0, -THIGH, 0.0);
-            assert!(knee.z <= target.z + 0.01, "knee {knee:?} for {target:?}");
-        }
+    fn mirroring_twice_gives_the_same_pose() {
+        let p = CLIPS.get(Cycle::Run).sample(0.3);
+        assert_eq!(p.mirror().mirror(), p);
     }
 
     #[test]
-    fn dash_sectors() {
-        assert_eq!(dash_sector(Vec3::NEG_Z), DashSector::Front);
-        assert_eq!(dash_sector(Vec3::X), DashSector::Side(1.0));
-        assert_eq!(dash_sector(Vec3::NEG_X), DashSector::Side(-1.0));
-        assert_eq!(dash_sector(Vec3::Z), DashSector::Back);
-    }
-
-    fn app_with(player: Player) -> App {
-        let mut app = App::new();
-        app.init_resource::<Time>().add_systems(Update, animate_body);
-        let world = app.world_mut();
-        let root = world.spawn((player, Transform::from_xyz(0.0, 0.9, 0.0))).id();
-        spawn_body(&mut world.commands(), root, &mut Assets::default(), &mut Assets::default());
-        world.flush();
-        app
-    }
-
-    fn part(app: &mut App, part: Part) -> Transform {
-        *app.world_mut().query::<(&Part, &Transform)>().iter(app.world()).find(|(p, _)| **p == part).unwrap().1
-    }
-
-    /// The left ankle in the world, from the joints (forward kinematics).
-    fn left_ankle(app: &mut App) -> Vec3 {
-        let root = *app.world_mut().query::<(&Player, &Transform)>().single(app.world()).unwrap().1;
-        let (body, thigh, shin, foot) = (part(app, Part::Body), part(app, Part::Thigh(-1.0)), part(app, Part::Shin(-1.0)), part(app, Part::Foot(-1.0)));
-        root.transform_point(body.transform_point(thigh.transform_point(shin.transform_point(foot.translation))))
-    }
-
-    fn tick(app: &mut App) {
-        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(1.0 / 60.0));
-        app.update();
+    fn standing_body_has_rematch_sizes() {
+        let stand = CLIPS.stand;
+        let drop = ground_drop(&stand);
+        assert!(drop < 0.01, "standing drops {drop}");
+        let [l, r] = ankles(&stand);
+        assert!((PELVIS_HEIGHT - drop + l.y.min(r.y) - 0.112).abs() < 0.01);
+        // Head joint at 1.69 m, shoulders at 1.52 m.
+        assert!((PELVIS_HEIGHT + SPINE + CHEST + NECK + HEAD - 1.689).abs() < 0.01);
+        assert!((PELVIS_HEIGHT + SPINE + CHEST + SHOULDER.y - 1.518).abs() < 0.01);
     }
 
     #[test]
-    fn running_feet_stay_planted_and_above_ground() {
-        let vel = Vec3::new(0.0, 0.0, -5.0);
-        let mut app = app_with(Player { vel, ..default() });
-        let (mut planted_frames, mut longest, mut lowest) = (0, 0, f32::MAX);
-        let mut last = Vec3::ZERO;
-        for i in 0..120 {
-            app.world_mut().query::<(&Player, &mut Transform)>().single_mut(app.world_mut()).unwrap().1.translation += vel / 60.0;
-            tick(&mut app);
-            let ankle = left_ankle(&mut app);
-            lowest = lowest.min(ankle.y);
-            if i > 30 {
-                planted_frames = if (ankle - last).length() < 0.01 { planted_frames + 1 } else { 0 };
-                longest = longest.max(planted_frames);
-            }
-            last = ankle;
+    fn run_feet_alternate_and_stay_on_the_ground() {
+        let run = CLIPS.get(Cycle::Run);
+        for (phase, front) in [(0.0, 0), (0.5, 1)] {
+            let pose = run.sample(phase);
+            let feet = ankles(&pose);
+            assert!(feet[front].z < feet[1 - front].z - 0.3, "phase {phase}: {feet:?}");
+            // At the contact the front foot is the one on the ground.
+            let lowest = PELVIS_HEIGHT - ground_drop(&pose) + feet[front].y;
+            assert!((lowest - ANKLE_HEIGHT).abs() < 0.02, "phase {phase}: ankle at {lowest}");
         }
-        // At 5 m/s the foot is on the ground for about a third of each 0.7 s stride: it stays put.
-        assert!(longest >= 6, "longest planted run {longest} frames");
-        assert!(lowest > ANKLE_HEIGHT - 0.02, "ankle went down to {lowest}");
+        // Mid-stance bends the knee: the body is lower than standing.
+        assert!(ground_drop(&run.sample(0.25)) > 0.04);
     }
 
     #[test]
-    fn lock_move_crouches_with_bent_knees() {
-        let mut app = app_with(Player { locked: true, ..default() });
-        for _ in 0..30 {
-            tick(&mut app);
-        }
-        assert!(part(&mut app, Part::Body).translation.y < -0.1);
-        let knee = part(&mut app, Part::Shin(1.0)).rotation.to_euler(EulerRot::YZX).2;
-        assert!(knee < -0.7, "knee bend {knee}");
+    fn play_rate_is_clamped() {
+        let run = CLIPS.get(Cycle::Run);
+        assert_eq!(play_rate(1.0, run, 1.0), 0.7);
+        assert_eq!(play_rate(20.0, run, 1.0), 1.5);
+        assert!((play_rate(RUN_SPEED, run, 1.15) - 1.15).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lock_move_picks_cardinals_with_some_give() {
+        let p = Player { locked: true, ..default() };
+        assert_eq!(pick_cycle(&p, 3.0, 50.0, Cycle::LockForward), Cycle::LockForward);
+        assert_eq!(pick_cycle(&p, 3.0, 70.0, Cycle::LockForward), Cycle::LockRight);
+        assert_eq!(pick_cycle(&p, 3.0, -100.0, Cycle::LockIdle), Cycle::LockLeft);
+        assert_eq!(pick_cycle(&p, 3.0, 170.0, Cycle::LockIdle), Cycle::LockBack);
     }
 }
