@@ -8,6 +8,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
+use bevy::render::view::NoFrustumCulling;
 
 use crate::ball::{Ball, step};
 use crate::player::{Kick, Player};
@@ -303,7 +304,8 @@ pub fn spawn_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
     let glow = materials.add(StandardMaterial { base_color: Color::WHITE, unlit: true, alpha_mode: AlphaMode::Add, double_sided: true, cull_mode: None, ..default() });
     for (source, effect) in [(Source::Ball, Effect::Dribble), (Source::Foot(1.0), Effect::Dribble), (Source::Foot(-1.0), Effect::ExtraEffort), (Source::Foot(1.0), Effect::ExtraEffort), (Source::Ball, Effect::Kick)] {
         let mesh = meshes.add(ribbon(&[], Vec3::ZERO, 0.0, 1.0, Vec3::ZERO));
-        commands.spawn((NotShadowCaster, Trail { source, effect, points: Vec::new(), mesh: mesh.clone() }, Mesh3d(mesh), MeshMaterial3d(glow.clone()), Transform::default(), Visibility::default()));
+        // Rebuilt every frame wherever the ball goes, so its first bounds would cull it later.
+        commands.spawn((NotShadowCaster, NoFrustumCulling, Trail { source, effect, points: Vec::new(), mesh: mesh.clone() }, Mesh3d(mesh), MeshMaterial3d(glow.clone()), Transform::default(), Visibility::default()));
     }
 }
 
