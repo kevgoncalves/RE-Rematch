@@ -610,11 +610,12 @@ pub fn player_move(
     let dribble_press = actions.pending(Action::PushBall) || actions.pending(Action::Dash);
     if dribble_press && (p.has_ball || p.receiving.is_some()) && p.locked && p.kick.is_none() {
         // The feint needs lock move held all through dribble 1 (Kev: let go and lock again, and the
-        // next press is dribble 1 again, at once).
+        // next press is dribble 1 again, not the feint).
         let feint = !p.exhausted && p.dribble_lock && p.dribble.is_some_and(|d| !d.feint && !d.exhausted && d.t >= DRIBBLE_WINDOW_OPENS && d.t < d.length() - FEINT_WINDOW_CUT);
         // A new dribble 1 from FEINT_WINDOW_CUT before any dribble's end, a feint's too (Kev: the
-        // game's 1 s lock after a feint made dribbles feel late).
-        let again = p.dribble.is_none_or(|d| d.t >= d.length() - FEINT_WINDOW_CUT || (!p.dribble_lock && d.t >= DRIBBLE_WINDOW_OPENS));
+        // game's 1 s lock after a feint made dribbles feel late), and never sooner, lock let go or
+        // not (Kev: two dribble 1s back to back were too quick; the game has none before the end).
+        let again = p.dribble.is_none_or(|d| d.t >= d.length() - FEINT_WINDOW_CUT);
         if feint || again {
             // No direction is a forward dribble. Keyboard diagonals sit on the 45/135 deg sector edges:
             // W+A and W+D are fast cuts, S+A and S+D side dribbles going back (players confirm).
@@ -1697,9 +1698,15 @@ mod tests {
         let (lock, press) = ([Action::Lock].as_slice(), [Action::Lock, Action::PushBall].as_slice());
         frames(&mut app, lock, 1, 0.016);
         frames(&mut app, press, 1, 0.016);
-        // Let go (past the stance's 0.15 s minimum), lock again, press: dribble 1, not the feint.
+        // Let go (past the stance's 0.15 s minimum), lock again, press: too soon for a new dribble,
+        // and no feint either.
         frames(&mut app, &[], 12, 0.016);
         frames(&mut app, lock, 2, 0.016);
+        frames(&mut app, press, 1, 0.016);
+        assert!(dribble(&mut app).is_some_and(|d| !d.feint && d.t > 0.2), "the first dribble goes on");
+        // Late in it, the press is dribble 1 again, not the feint.
+        let length = dribble(&mut app).unwrap().length();
+        frames(&mut app, lock, ((length - FEINT_WINDOW_CUT - 0.2) / 0.016) as u32, 0.016);
         frames(&mut app, press, 1, 0.016);
         assert!(dribble(&mut app).is_some_and(|d| !d.feint && d.t < 0.05), "dribble 1 again");
     }
