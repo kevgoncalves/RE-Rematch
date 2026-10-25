@@ -89,9 +89,10 @@ pub fn step(pos: &mut Vec3, ball: &mut Ball, dt: f32) -> Option<f32> {
     if on_ground && Vec2::new(ball.vel.x, ball.vel.z).length() < ROLL_STOP_SPEED {
         ball.vel = Vec3::ZERO;
     }
+    let from = *pos;
     *pos += ball.vel * dt;
     let falling = ball.vel.y < 0.0;
-    ball.hit = collide(pos, &mut ball.vel).map(|normal| (*pos - normal * BALL_RADIUS, normal));
+    ball.hit = collide(from, pos, &mut ball.vel).map(|(at, normal)| (at - normal * BALL_RADIUS, normal));
     if falling && ball.vel.y >= 0.0 {
         ball.fall_time = 0.0; // a bounce starts a new fall
     }
@@ -108,9 +109,11 @@ fn bounce(vel: &mut Vec3, normal: Vec3, (perp, para): (f32, f32)) {
     }
 }
 
-/// Keeps the ball in the arena; returns the normal of a wall, post or crossbar it hit (not the
-/// ground, the ceiling or the net).
-fn collide(pos: &mut Vec3, vel: &mut Vec3) -> Option<Vec3> {
+/// Keeps the ball in the arena; for a wall, post or crossbar it hit (not the ground, the ceiling or
+/// the net) returns where its centre touched and the surface's normal. Those are found where the
+/// move from `from` first touches them, and the rest of the move goes on bounced, so the bounce
+/// doesn't depend on the step's length: the marker predicts with its own steps.
+fn collide(from: Vec3, pos: &mut Vec3, vel: &mut Vec3) -> Option<(Vec3, Vec3)> {
     let r = BALL_RADIUS;
     let mut hit = None;
     if pos.y < r {
@@ -125,10 +128,20 @@ fn collide(pos: &mut Vec3, vel: &mut Vec3) -> Option<Vec3> {
         bounce(vel, Vec3::NEG_Y, CEILING_BOUNCE);
     }
     if pos.x.abs() > HALF_WIDTH - r {
-        pos.x = pos.x.signum() * (HALF_WIDTH - r);
         let normal = Vec3::new(-pos.x.signum(), 0.0, 0.0);
-        bounce(vel, normal, WALL_BOUNCE);
-        hit = Some(normal);
+        hit = Some(hit_plane(from, pos, vel, normal, HALF_WIDTH - r, WALL_BOUNCE));
+    }
+
+    // Posts and crossbar: segments with a small radius. Their faces stand out in front of the end
+    // wall, so they come first: a ball at the post meets it before the wall beside it.
+    for end in [-1.0f32, 1.0] {
+        let z = end * HALF_LENGTH;
+        let bar = (Vec3::new(-GOAL_HALF_WIDTH, GOAL_HEIGHT, z), Vec3::new(GOAL_HALF_WIDTH, GOAL_HEIGHT, z));
+        for side in [-1.0f32, 1.0] {
+            let post = (Vec3::new(side * GOAL_HALF_WIDTH, 0.0, z), Vec3::new(side * GOAL_HALF_WIDTH, GOAL_HEIGHT, z));
+            hit = hit_segment(from, pos, vel, post).or(hit);
+        }
+        hit = hit_segment(from, pos, vel, bar).or(hit);
     }
 
     let in_mouth = pos.x.abs() < GOAL_HALF_WIDTH - r && pos.y < GOAL_HEIGHT - r;
@@ -160,39 +173,60 @@ fn collide(pos: &mut Vec3, vel: &mut Vec3) -> Option<Vec3> {
                 }
             }
         } else {
-            pos.z = pos.z.signum() * (HALF_LENGTH - r);
             let normal = Vec3::new(0.0, 0.0, -pos.z.signum());
-            bounce(vel, normal, END_WALL_BOUNCE);
-            hit = Some(normal);
+            hit = Some(hit_plane(from, pos, vel, normal, HALF_LENGTH - r, END_WALL_BOUNCE));
         }
     }
 
-    // Posts and crossbar: segments with a small radius.
-    for end in [-1.0f32, 1.0] {
-        let z = end * HALF_LENGTH;
-        let bar = (Vec3::new(-GOAL_HALF_WIDTH, GOAL_HEIGHT, z), Vec3::new(GOAL_HALF_WIDTH, GOAL_HEIGHT, z));
-        for side in [-1.0f32, 1.0] {
-            let post = (Vec3::new(side * GOAL_HALF_WIDTH, 0.0, z), Vec3::new(side * GOAL_HALF_WIDTH, GOAL_HEIGHT, z));
-            hit = hit_segment(pos, vel, post).or(hit);
-        }
-        hit = hit_segment(pos, vel, bar).or(hit);
-    }
     hit
 }
 
-fn hit_segment(pos: &mut Vec3, vel: &mut Vec3, (a, b): (Vec3, Vec3)) -> Option<Vec3> {
-    let ab = b - a;
-    let t = ((*pos - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
-    let closest = a + ab * t;
-    let offset = *pos - closest;
+/// A wall (`normal` pointing in, the centre kept within `limit` of the middle along it): the ball
+/// touches where its move crosses the limit, and the rest of the move goes on bounced.
+fn hit_plane(from: Vec3, pos: &mut Vec3, vel: &mut Vec3, normal: Vec3, limit: f32, coefs: (f32, f32)) -> (Vec3, Vec3) {
+    let (out_from, out_to) = (-from.dot(normal) - limit, -pos.dot(normal) - limit);
+    let s = if out_from < 0.0 { (-out_from / (out_to - out_from)).clamp(0.0, 1.0) } else { 0.0 };
+    let mut at = from + (*pos - from) * s;
+    at -= normal * (at.dot(normal) + limit); // exactly on the limit
+    let mut rest = *pos - at;
+    bounce(vel, normal, coefs);
+    bounce(&mut rest, normal, coefs);
+    *pos = at + rest;
+    (at, normal)
+}
+
+/// A post or the crossbar (a segment of POST_RADIUS): found where the ball's move first touches it
+/// (sampled, then halved down to a millimetre), even a move that would pass through it in one step.
+fn hit_segment(from: Vec3, pos: &mut Vec3, vel: &mut Vec3, (a, b): (Vec3, Vec3)) -> Option<(Vec3, Vec3)> {
     let min = BALL_RADIUS + POST_RADIUS;
-    if offset.length_squared() < min * min {
-        let normal = offset.normalize_or(Vec3::Y);
-        *pos = closest + normal * min;
-        bounce(vel, normal, (POST_BOUNCE, POST_BOUNCE));
-        return Some(normal);
-    }
-    None
+    let ab = b - a;
+    let offset = |p: Vec3| p - (a + ab * ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0));
+    let touching = |p: Vec3| offset(p).length_squared() < min * min;
+    let along = |s: f32| from + (*pos - from) * s;
+    // Already touching at the start (resting on it): pushed out where it is.
+    let s = if touching(from) {
+        if !touching(*pos) {
+            return None;
+        }
+        1.0
+    } else {
+        const SAMPLES: usize = 8;
+        let hit = (1..=SAMPLES).map(|i| i as f32 / SAMPLES as f32).find(|s| touching(along(*s)))?;
+        let (mut lo, mut hi) = (hit - 1.0 / SAMPLES as f32, hit);
+        while (hi - lo) * (*pos - from).length() > 0.001 {
+            let mid = (lo + hi) / 2.0;
+            if touching(along(mid)) { hi = mid } else { lo = mid }
+        }
+        lo
+    };
+    let p = along(s);
+    let normal = offset(p).normalize_or(Vec3::Y);
+    let at = p - offset(p) + normal * min;
+    let mut rest = *pos - p;
+    bounce(vel, normal, (POST_BOUNCE, POST_BOUNCE));
+    bounce(&mut rest, normal, (POST_BOUNCE, POST_BOUNCE));
+    *pos = at + rest;
+    Some((at, normal))
 }
 
 #[cfg(test)]
@@ -206,6 +240,29 @@ mod tests {
             }
         }
         None
+    }
+
+    #[test]
+    fn a_post_hit_does_not_depend_on_the_step() {
+        // A shot at the right post of the -z goal from 12 m out, flat and a little across.
+        let shoot = |hz: f32| {
+            let mut pos = Vec3::new(GOAL_HALF_WIDTH - 1.0, 1.0, -HALF_LENGTH + 12.0);
+            let target = Vec3::new(GOAL_HALF_WIDTH - 0.05, 1.0, -HALF_LENGTH);
+            let mut ball = Ball { vel: (target - pos).normalize() * 30.0, drag: 0.0, ..default() };
+            for _ in 0..(hz as usize) {
+                step(&mut pos, &mut ball, 1.0 / hz);
+                if let Some(hit) = ball.hit {
+                    return (hit, ball.vel);
+                }
+            }
+            panic!("no post hit at {hz} Hz");
+        };
+        let ((at, normal), vel) = shoot(240.0);
+        for hz in [144.0, 300.0, 1000.0] {
+            let ((at2, normal2), vel2) = shoot(hz);
+            assert!(at.distance(at2) < 0.01, "{hz} Hz hits at {at2}, 240 Hz at {at}");
+            assert!(normal.angle_between(normal2) < 0.01 && vel.angle_between(vel2) < 0.02, "{hz} Hz bounces {vel2}, 240 Hz {vel}");
+        }
     }
 
     #[test]
