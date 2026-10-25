@@ -454,8 +454,8 @@ pub const FAKE_BACK_SPEED_SLOW: [(f32, f32); 5] = [(0.0, 1.0), (0.11, 0.7), (0.5
 /// on and stop (0.7 m); the tired forward fake's run (its root track).
 pub const FAKE_STOP_STEP: [(f32, f32); 4] = [(0.0, 4.4), (0.1, 3.7), (0.18, 2.0), (0.25, 0.0)];
 pub const FAKE_TIRED_SPEED: [(f32, f32); 6] = [(0.0, 4.4), (0.1, 3.1), (0.55, 3.2), (0.75, 4.7), (1.0, 5.4), (1.4, 4.5)];
-/// The left side's fake. The data gives it the half turn back, the same as S (false); Kev expects a
-/// roulette each way, which true gives (the right's mirrored). For Kev to test.
+/// The left side's fake: the half turn back, the same as S, as the data has it (Kev confirmed);
+/// true would make it the right's roulette mirrored.
 pub const FAKE_LEFT_ROULETTE: bool = false;
 /// The side fake's roulette: the body spins a whole turn over the ball between these times (s), on
 /// top of the quarter turn out (our own timing; in Kev's recording the body faces the camera 0.5-0.7
