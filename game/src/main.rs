@@ -11,6 +11,7 @@ mod menu;
 mod pass_line;
 mod player;
 mod reticle;
+mod sfx;
 mod tuning;
 
 use bevy::app::ScheduleRunnerPlugin;
@@ -70,6 +71,7 @@ fn main() {
     }
     app
         .add_plugins((UiMaterialPlugin::<reticle::ReticleMaterial>::default(), UiMaterialPlugin::<gauges::GaugeMaterial>::default(), MaterialPlugin::<pass_line::PassLineMaterial>::default()))
+        .add_plugins(sfx::SfxPlugin)
         .insert_resource(ClearColor(Color::srgb(0.56, 0.68, 0.8)))
         .init_resource::<Score>()
         .insert_resource(Bindings::load())
