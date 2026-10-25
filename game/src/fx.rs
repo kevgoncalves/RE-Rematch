@@ -21,10 +21,21 @@ pub enum Cheat {
     InfiniteEffort,
     BallTrail,
     BallPath,
+    DebugInfo,
+    SlowMotion,
+    ShowZones,
 }
 
 impl Cheat {
-    pub const ALL: [Cheat; 4] = [Cheat::InfiniteStamina, Cheat::InfiniteEffort, Cheat::BallTrail, Cheat::BallPath];
+    pub const ALL: [Cheat; 7] = [
+        Cheat::InfiniteStamina,
+        Cheat::InfiniteEffort,
+        Cheat::BallTrail,
+        Cheat::BallPath,
+        Cheat::DebugInfo,
+        Cheat::SlowMotion,
+        Cheat::ShowZones,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -32,12 +43,15 @@ impl Cheat {
             Cheat::InfiniteEffort => "Infinite extra effort",
             Cheat::BallTrail => "Ball trail",
             Cheat::BallPath => "Ball path prediction",
+            Cheat::DebugInfo => "Debug info",
+            Cheat::SlowMotion => "Slow motion (25%)",
+            Cheat::ShowZones => "Show control zones",
         }
     }
 }
 
 #[derive(Resource, Default)]
-pub struct Cheats([bool; 4]);
+pub struct Cheats([bool; 7]);
 
 impl Cheats {
     pub fn on(&self, c: Cheat) -> bool {
@@ -49,7 +63,11 @@ impl Cheats {
     }
 }
 
-pub fn apply_cheats(cheats: Res<Cheats>, mut player: Single<&mut Player>) {
+pub fn apply_cheats(cheats: Res<Cheats>, mut player: Single<&mut Player>, mut time: ResMut<Time<Virtual>>) {
+    let speed = if cheats.on(Cheat::SlowMotion) { 0.25 } else { 1.0 };
+    if time.relative_speed() != speed {
+        time.set_relative_speed(speed);
+    }
     if cheats.on(Cheat::InfiniteStamina) {
         player.stamina = MAX_STAMINA;
         player.exhausted = false;
@@ -696,4 +714,31 @@ mod tests {
         let s = marker_for(Vec3::new(0.0, BALL_RADIUS, 0.0), &across).expect("marked");
         assert!((s.at.x.abs() - HALF_WIDTH).abs() > 0.05, "{}", s.at);
     }
+}
+
+/// The "Show control zones" cheat: on the ground around you, the control zone that applies now
+/// (red while your magnet is off or the ball can't be taken), the extra-effort touch reach and the
+/// reach of a dash onto the ball, and a line the way you face.
+pub fn debug_zones(cheats: Res<Cheats>, player: Single<(&Transform, &Player)>, ball: Single<&Ball>, mut gizmos: Gizmos) {
+    if !cheats.on(Cheat::ShowZones) {
+        return;
+    }
+    let (tf, p) = *player;
+    let flat = Quat::from_rotation_x(FRAC_PI_2);
+    let ground = Vec3::new(tf.translation.x, 0.02, tf.translation.z);
+    let fwd = crate::player::forward(p.facing);
+    let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
+    let (ahead, radius, _) = if p.locked {
+        CONTROL_LOCK_MOVE
+    } else if speed > 0.5 {
+        CONTROL_MOVING
+    } else {
+        CONTROL_STANDING
+    };
+    let off = p.magnet_off > 0.0 || ball.no_control > 0.0;
+    let colour = if off { Color::srgb(1.0, 0.2, 0.2) } else { Color::srgb(0.2, 1.0, 0.4) };
+    gizmos.circle(Isometry3d::new(ground + fwd * ahead, flat), radius, colour);
+    gizmos.circle(Isometry3d::new(ground, flat), EXTRA_EFFORT_KNOCK_REACH, Color::srgb(0.2, 0.9, 1.0));
+    gizmos.circle(Isometry3d::new(ground, flat), DASH_DRIBBLE_REACH, Color::srgba(1.0, 1.0, 1.0, 0.4));
+    gizmos.line(ground, ground + fwd * 1.5, Color::srgb(1.0, 0.9, 0.2));
 }

@@ -884,9 +884,9 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
             (THIGH_L, [10.0, 0.0, -4.0]),
             (SHIN_L, [24.0, 0.0, 0.0]),
             (FOOT_L, [10.0, 0.0, 4.0]),
-            (THIGH_R, [95.0, 0.0, -4.0]),
-            (SHIN_R, [15.0, 0.0, 0.0]),
-            (FOOT_R, [40.0, 0.0, 0.0]),
+            (THIGH_R, [45.0, 0.0, -4.0]),
+            (SHIN_R, [20.0, 0.0, 0.0]),
+            (FOOT_R, [30.0, 0.0, 0.0]),
             (UPPER_L, [25.0, 0.0, -65.0]),
             (FORE_L, [35.0, 0.0, 0.0]),
             (UPPER_R, [0.0, 0.0, 60.0]),
@@ -1321,7 +1321,8 @@ fn follow_time(kind: Kick) -> f32 {
     match kind {
         Kick::Shot => 0.5,
         Kick::PushBall | Kick::DribblePushBall => 0.2,
-        _ => 0.375,
+        // Passes and lobs are back in their run 0.15-0.28 s after the touch.
+        _ => 0.25,
     }
 }
 
@@ -1674,7 +1675,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
 
     // Kicks on top: wind up while charging, swing to the contact frame, follow through.
     match (anim.kick, p.kick) {
-        (Some(was), None) => anim.follow = Some((0.0, was.kind)),
+        (Some(was), None) if p.fake.is_none() => anim.follow = Some((0.0, was.kind)),
         (_, Some(_)) => anim.follow = None,
         _ => {}
     }
@@ -1728,14 +1729,22 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             let u = (t / end.max(1.0 / 60.0)).min(1.0);
             1.0 - (1.0 - u) * (1.0 - u)
         };
-        let (key, turn) = if !k.released {
+        // Passes and lobs don't cock the leg early or hold it while they charge: you run on until
+        // the standing foot plants PASS_PLANT before the strike, then the leg swings back and
+        // through (Kev's practice recording).
+        const PASS_PLANT: f32 = 0.06;
+        let late = k.kind.is_pass();
+        let release = (k.held - k.pre).max(0.0);
+        let strike_at = (first - STRIKE).max(if k.released { release } else { f32::INFINITY });
+        if late && k.elapsed < strike_at - PASS_PLANT {
+            None
+        } else {
+        let (key, turn) = if !k.released && !late {
             let w = up(k.elapsed, (first - STRIKE).min(WINDUP_IN));
             (clips.stand.lerp(&windup, w), 0.3 * w)
         } else {
-            let release = (k.held - k.pre).max(0.0);
-            let strike_at = (first - STRIKE).max(release);
             if k.elapsed < strike_at {
-                let w = up(k.elapsed, strike_at.min(WINDUP_IN));
+                let w = if late { up(k.elapsed - (strike_at - PASS_PLANT), PASS_PLANT) } else { up(k.elapsed, strike_at.min(WINDUP_IN)) };
                 (clips.stand.lerp(&windup, w), 0.3 * w)
             } else {
                 let s = ((k.elapsed - strike_at) / (first.max(release) - strike_at).max(4.0 / 60.0)).clamp(0.0, 1.0);
@@ -1744,6 +1753,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             }
         };
         Some((key, k.kind, turn))
+        }
     } else {
         // After the touch, as in Kev's practice recording of power shots on the run: the leg drives
         // up high by a fifth of the follow-through (0.1 s) with the body leaning back, stays up to
@@ -1756,9 +1766,11 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             let a = 1.0 - (1.0 - a) * (1.0 - a);
             let b = ((u - 0.4) / 0.3).clamp(0.0, 1.0);
             let b = b * b * (3.0 - 2.0 * b);
-            // A shot across or back to the right is the left foot's: it lands on the left.
+            // A shot across or back to the right is the left foot's: it lands on the left. A pass
+            // or lob lands in a plain stride, not the shot's lunge.
             let left_foot = kind == Kick::Shot && anim.kick_turn < -30.0;
             let land = if left_foot { clips.land.mirror() } else { clips.land };
+            let land = if kind == Kick::Shot { land } else { clips.stand.lerp(&land, 0.4) };
             (hit.lerp(&through, a).lerp(&land, b), kind, 0.7 + 0.15 * a)
         })
     };
@@ -1773,6 +1785,40 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         let w = push_touch * push_touch * (3.0 - 2.0 * push_touch) * 1.2;
         pose = pose.plus(&Pose(clips.control.0.map(|a| a * w)));
     }
+    // A fake shot: the kicking leg swings low over the ball, then you drop into a deep, wide crouch
+    // over it with the arms out low, rising as you can act again (Kev's practice recording).
+    if let Some((t, lock)) = p.fake {
+        let swing = clips.stand.with(&[
+            (SPINE_J, [22.0, 0.0, -4.0]),
+            (THIGH_L, [28.0, 0.0, -8.0]),
+            (SHIN_L, [55.0, 0.0, 0.0]),
+            (FOOT_L, [-28.0, 0.0, 6.0]),
+            (THIGH_R, [25.0, -20.0, 10.0]),
+            (SHIN_R, [45.0, 0.0, 0.0]),
+            (FOOT_R, [-10.0, 0.0, 0.0]),
+            (UPPER_L, [10.0, 0.0, -80.0]),
+            (UPPER_R, [-10.0, 0.0, 80.0]),
+        ]);
+        let crouch = clips.stand.with(&[
+            (SPINE_J, [28.0, 0.0, 0.0]),
+            (NECK_J, [-16.0, 0.0, 0.0]),
+            (THIGH_L, [50.0, 0.0, -14.0]),
+            (SHIN_L, [95.0, 0.0, 0.0]),
+            (FOOT_L, [-45.0, 0.0, 14.0]),
+            (THIGH_R, [50.0, 0.0, 14.0]),
+            (SHIN_R, [95.0, 0.0, 0.0]),
+            (FOOT_R, [-45.0, 0.0, -14.0]),
+            (UPPER_L, [20.0, 0.0, -55.0]),
+            (FORE_L, [20.0, 0.0, 0.0]),
+            (UPPER_R, [20.0, 0.0, 55.0]),
+            (FORE_R, [20.0, 0.0, 0.0]),
+        ]);
+        let into = ((t - FAKE_SHOT_SWING) / 0.12).clamp(0.0, 1.0);
+        let key = swing.lerp(&crouch, into * into * (3.0 - 2.0 * into));
+        let w = (t / 0.05).min(1.0) * ((lock - t) / 0.12).clamp(0.0, 1.0);
+        pose = pose.lerp(&key, w * w * (3.0 - 2.0 * w));
+    }
+
     // In over 0.08 s, out over 0.25 s (0.15 s running on) from the last pose shown, so the kick
     // never snaps off.
     let target = if kick_pose.is_some() { 1.0 } else { 0.0 };

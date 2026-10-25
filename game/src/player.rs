@@ -59,6 +59,8 @@ pub struct Player {
     pub push_sprinted: bool,
     /// Your magnet is off this long after an extra-effort touch on the ball or its end.
     pub magnet_off: f32,
+    /// A fake shot: how long since it, and how long until you can act again.
+    pub fake: Option<(f32, f32)>,
     /// How long extra effort has been on (0 when off), and an extra-effort tap's carry left.
     pub ee_on: f32,
     pub ee_carry: f32,
@@ -383,6 +385,7 @@ impl Default for Player {
             push_sprinted: false,
             ee_cut: 0.0,
             magnet_off: 0.0,
+            fake: None,
             ee_on: 0.0,
             ee_carry: 0.0,
             ee_cut_right: false,
@@ -608,7 +611,7 @@ pub fn player_move(
     // From a control's effect on the ball a dribble goes at once (Kev: no wait for the ball to
     // settle); the ball joins it as it does.
     let dribble_press = actions.pending(Action::PushBall) || actions.pending(Action::Dash);
-    if dribble_press && (p.has_ball || p.receiving.is_some()) && p.locked && p.kick.is_none() {
+    if dribble_press && (p.has_ball || p.receiving.is_some()) && p.locked && p.kick.is_none() && p.fake.is_none() {
         // The feint needs lock move held all through dribble 1 (Kev: let go and lock again, and the
         // next press is dribble 1 again, not the feint).
         let feint = !p.exhausted && p.dribble_lock && p.dribble.is_some_and(|d| !d.feint && !d.exhausted && d.t >= DRIBBLE_WINDOW_OPENS && d.t < d.length() - FEINT_WINDOW_CUT);
@@ -701,6 +704,9 @@ pub fn player_move(
     };
     if p.kick.is_some_and(|k| !matches!(k.kind, Kick::PushBall | Kick::DribblePushBall)) {
         top *= WINDUP_SPEED_SCALE;
+    }
+    if p.fake.is_some() {
+        top *= FAKE_SHOT_SPEED;
     }
 
     // Dash (mechanics.md §8): only without the ball, from lock move. While the first dash's cooldown
@@ -1271,8 +1277,15 @@ pub fn kicking(
     let dt = time.delta_secs();
     let p = &mut **player;
 
-    // A pass press while charging a shot is a fake shot (Rematch binds both to the same button).
-    if p.charging_shot() && actions.just_pressed(Action::FakeShot) {
+    // A pass press early in a shot's charge is a fake shot (Rematch binds both to the same button):
+    // the leg swings low over the ball and you crouch over it, no kicks until you can act again.
+    if let Some((t, lock)) = p.fake {
+        p.fake = (t + dt < lock).then_some((t + dt, lock));
+        return;
+    }
+    if p.charging_shot() && p.kick.is_some_and(|k| k.elapsed <= FAKE_SHOT_WINDOW) && actions.just_pressed(Action::FakeShot) {
+        let moving = Vec3::new(p.vel.x, 0.0, p.vel.z).length() > 1.0;
+        p.fake = Some((0.0, FAKE_SHOT_LOCK[2 * p.exhausted as usize + moving as usize]));
         p.kick = None;
         p.stamina = (p.stamina - FAKE_SHOT_COST).max(0.0);
         p.regen_wait = REGEN_DELAY;
@@ -1665,6 +1678,32 @@ mod tests {
         frames(&mut app, &[], 3, 1.0 / 60.0);
         let z = app.world().get::<Transform>(id).unwrap().translation.z;
         assert!((z + 6.5 * 3.0 / 60.0).abs() < 1e-4, "slid {z}");
+    }
+
+    #[test]
+    fn a_shot_fakes_only_early_and_the_fake_holds_off_kicks() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Bindings>().init_resource::<Time>().add_systems(Update, kicking);
+        app.world_mut().spawn(Player { has_ball: true, ..default() });
+        app.world_mut().spawn((Transform::default(), Ball::default()));
+        app.world_mut().spawn((Camera3d::default(), Transform::default()));
+        app.world_mut().spawn(CameraRig::default());
+        fn state(app: &mut App) -> (Option<Kick>, bool) {
+            let p = app.world_mut().query::<&Player>().single(app.world()).unwrap();
+            (p.kick.map(|k| k.kind), p.fake.is_some())
+        }
+        // 0.2 s into the charge, pass fakes the shot; no kick starts in the fake.
+        frames(&mut app, &[Action::Shoot], 12, 1.0 / 60.0);
+        frames(&mut app, &[Action::Shoot, Action::FakeShot], 1, 1.0 / 60.0);
+        assert_eq!(state(&mut app), (None, true));
+        frames(&mut app, &[], 2, 1.0 / 60.0);
+        frames(&mut app, &[Action::Shoot], 2, 1.0 / 60.0);
+        assert_eq!(state(&mut app).0, None, "no kick in the fake");
+        // Past the window (before the full charge fires it), the shot goes on.
+        frames(&mut app, &[], 40, 1.0 / 60.0);
+        frames(&mut app, &[Action::Shoot], 28, 1.0 / 60.0);
+        frames(&mut app, &[Action::Shoot, Action::FakeShot], 1, 1.0 / 60.0);
+        assert_eq!(state(&mut app), (Some(Kick::Shot), false));
     }
 
     #[test]

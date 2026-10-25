@@ -360,6 +360,15 @@ pub const TOP_SPIN_BY_CHARGE: [(f32, f32); 2] = [(0.0, 0.95), (1.0, 0.85)];
 /// Every shot's built-in spin: a small lift (the native code subtracts the forced axis).
 pub const SHOT_BASE_SPIN: f32 = -210.0;
 pub const FAKE_SHOT_COST: f32 = 1.5;
+/// A pass press fakes the shot only this early in its charge; later it goes on (Kev's practice
+/// recording: 0.17-0.36 s in always faked, 0.50-0.57 s never).
+pub const FAKE_SHOT_WINDOW: f32 = 0.45;
+/// The fake: the leg swings low over the ball for this long, then you crouch over it, and can act
+/// again after (standing, moving, tired standing, tired moving: the game's frame data).
+pub const FAKE_SHOT_SWING: f32 = 0.1;
+pub const FAKE_SHOT_LOCK: [f32; 4] = [0.33, 0.57, 0.67, 0.83];
+/// Through the fake you shuffle at this share of your top speed. TUNE.
+pub const FAKE_SHOT_SPEED: f32 = 0.35;
 
 // Fixed-force kicks (StaticShootForceComputation in each ability's data), m/s
 pub const SHORT_WINDUP: f32 = 16.0 / 60.0;
@@ -504,7 +513,8 @@ pub const CONTROL_TURN_SPOT: f32 = 0.45;
 /// Touches come up to 20% more often as your way turns, from 20 to 180 deg/s.
 pub const TOUCH_TURN_RATES: (f32, f32) = (20.0, 180.0);
 pub const CONTROL_MAX_HEIGHT: f32 = 2.0;
-pub const DRIBBLE_OFFSET: f32 = 0.7; // TUNE: where a control settles the ball, in front
+/// Where a control settles the ball in front of you (Kev's practice recording: 0.3-0.5 m). TUNE.
+pub const DRIBBLE_OFFSET: f32 = 0.4;
 /// Lock move with the ball: where the ball sits under the right sole (m ahead, m right), how far
 /// it rolls ahead the way you move (seconds of your velocity), and how fast it eases there (the
 /// stance's snap lands at 17f, so most of the way in about 0.3 s). TUNE: matched to our stance pose.

@@ -33,6 +33,14 @@ struct Score([u32; 2]);
 #[derive(Component)]
 struct Hud;
 
+/// The scoreboard's texts: left score, clock, right score.
+#[derive(Component)]
+enum Board {
+    Left,
+    Clock,
+    Right,
+}
+
 /// A scripted test run (RE_SCREENSHOT) is headless: no window, the camera renders into an image
 /// that the screenshot is taken from, and the app ticks at 60 Hz on its own.
 fn headless() -> bool {
@@ -92,7 +100,7 @@ fn main() {
                 on_goal,
                 body::animate_body,
                 camera::camera_follow,
-                update_hud,
+                (update_hud, update_board, fx::debug_zones),
                 reticle::update_reticle,
                 pass_line::update_pass_line,
                 gauges::update_gauges,
@@ -177,9 +185,45 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials
     commands.spawn((
         Hud,
         Text::new(""),
-        TextFont { font_size: 18.0, ..default() },
-        Node { position_type: PositionType::Absolute, left: Val::Px(12.0), top: Val::Px(10.0), ..default() },
+        TextFont { font_size: 16.0, ..default() },
+        Visibility::Hidden,
+        Node { position_type: PositionType::Absolute, left: Val::Px(12.0), top: Val::Px(70.0), ..default() },
     ));
+    // The scoreboard, as in Rematch: a dark banner at the top centre with the match clock between
+    // the two teams' goals, each beside its colour.
+    let text = |board: Board, size: f32, colour: Color| (board, Text::new(""), TextFont { font_size: size, ..default() }, TextColor(colour));
+    let chip = |colour: Color| (Node { width: Val::Px(6.0), height: Val::Px(30.0), ..default() }, BackgroundColor(colour));
+    commands
+        .spawn(Node { position_type: PositionType::Absolute, top: Val::Px(12.0), width: Val::Percent(100.0), justify_content: JustifyContent::Center, ..default() })
+        .with_children(|row| {
+            row.spawn((
+                Node { align_items: AlignItems::Center, column_gap: Val::Px(14.0), padding: UiRect::axes(Val::Px(12.0), Val::Px(4.0)), ..default() },
+                BackgroundColor(Color::srgba(0.04, 0.05, 0.08, 0.85)),
+                BorderRadius::all(Val::Px(4.0)),
+            ))
+            .with_children(|bar| {
+                bar.spawn(chip(Color::srgb(0.10, 0.30, 0.85)));
+                bar.spawn(text(Board::Left, 26.0, Color::WHITE));
+                bar.spawn(text(Board::Clock, 20.0, Color::srgb(0.85, 0.88, 0.95)));
+                bar.spawn(text(Board::Right, 26.0, Color::WHITE));
+                bar.spawn(chip(Color::srgb(0.85, 0.15, 0.15)));
+            });
+        });
+}
+
+/// The scoreboard: the goals at each end and the time played.
+fn update_board(score: Res<Score>, time: Res<Time>, mut texts: Query<(&Board, &mut Text)>) {
+    let secs = time.elapsed_secs() as u32;
+    for (board, mut text) in &mut texts {
+        let s = match board {
+            Board::Left => score.0[0].to_string(),
+            Board::Clock => format!("{:02}:{:02}", secs / 60, secs % 60),
+            Board::Right => score.0[1].to_string(),
+        };
+        if text.0 != s {
+            text.0 = s;
+        }
+    }
 }
 
 /// After a goal: count it, put the ball back on the centre spot and the player in their half.
@@ -202,13 +246,20 @@ fn on_goal(
     }
 }
 
+/// The "Debug info" cheat's readout: your state, the kick and the ball.
 fn update_hud(
-    mut hud: Single<&mut Text, With<Hud>>,
+    mut hud: Single<(&mut Text, &mut Visibility), With<Hud>>,
     player: Single<&Player>,
     ball: Single<&Ball>,
-    score: Res<Score>,
     axes: Res<Axes>,
+    cheats: Res<fx::Cheats>,
 ) {
+    let (hud, visibility) = &mut *hud;
+    let shown = cheats.on(fx::Cheat::DebugInfo);
+    visibility.set_if_neq(if shown { Visibility::Inherited } else { Visibility::Hidden });
+    if !shown {
+        return;
+    }
     let p = *player;
     let charge = match p.kick {
         Some(k) if !k.released => {
@@ -221,12 +272,12 @@ fn update_hud(
             let curve_info = if k.kind == Kick::Shot { format!("  curve ({:+.2}, {:+.2})", axes.curve.x, axes.curve.y) } else { String::new() };
             format!("{:?} {:.2}s -> {:.1} m/s{}", k.kind, k.held, force, curve_info)
         }
+        Some(k) => format!("{:?} {:.2}s{}", k.kind, k.elapsed, if k.released { " released" } else { "" }),
         _ => "-".into(),
     };
+    let dribble = p.dribble.map_or("-".into(), |d| format!("{:?}{} {:.2}s", d.heading, if d.feint { " feint" } else { "" }, d.t));
     let text = format!(
-        "Score  {} - {}\nStamina {:4.1}/10{}   Extra effort {:3.0}%{}\nSpeed {:4.1} m/s{}{}\nCharge {}\nBall {:4.1} m/s\n\nEsc Menu   F1 Settings",
-        score.0[0],
-        score.0[1],
+        "Stamina {:4.1}/10{}   Extra effort {:3.0}%{}\nSpeed {:4.1} m/s{}{}\nCharge {}\nDribble {}   drag {}   pivot {:.2}\nControl {}   magnet off {:.2}   ball no-control {:.2}\nBall {:4.1} m/s{}\n\nEsc Menu   F1 Settings",
         p.stamina,
         if p.exhausted { " EXHAUSTED" } else { "" },
         p.extra_effort * 100.0,
@@ -242,7 +293,14 @@ fn update_hud(
         },
         if p.turn.is_some() { "  turning" } else { "" },
         charge,
+        dribble,
+        if p.run.is_some() { "on" } else { "-" },
+        p.pivot.max(0.0),
+        p.receiving.map_or("-".into(), |t| format!("{t:.2}s")),
+        p.magnet_off.max(0.0),
+        ball.no_control,
         ball.vel.length(),
+        if ball.freeze > 0.0 { "  frozen" } else { "" },
     );
     // Set only when it changes: a changed text is laid out again.
     if hud.0 != text {
