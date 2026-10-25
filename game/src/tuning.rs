@@ -409,16 +409,58 @@ pub const TOP_SPIN: [(f32, f32); 8] = [(-1.0, 780.0), (-0.9, 660.0), (-0.5, 330.
 pub const TOP_SPIN_BY_CHARGE: [(f32, f32); 2] = [(0.0, 0.95), (1.0, 0.85)];
 /// Every shot's built-in spin: a small lift (the native code subtracts the forced axis).
 pub const SHOT_BASE_SPIN: f32 = -210.0;
-pub const FAKE_SHOT_COST: f32 = 1.5;
-/// A pass press fakes the shot only this early in its charge; later it goes on (Kev's practice
-/// recording: 0.17-0.36 s in always faked, 0.50-0.57 s never).
-pub const FAKE_SHOT_WINDOW: f32 = 0.45;
-/// The fake: the leg swings low over the ball for this long, then you crouch over it, and can act
-/// again after (standing, moving, tired standing, tired moving: the game's frame data).
-pub const FAKE_SHOT_SWING: f32 = 0.1;
-pub const FAKE_SHOT_LOCK: [f32; 4] = [0.33, 0.57, 0.67, 0.83];
-/// Through the fake you shuffle at this share of your top speed. TUNE.
-pub const FAKE_SHOT_SPEED: f32 = 0.35;
+/// The fake shot (kick-slides-and-fakes.md §1). It costs 1.5 stamina, or 4.0 within FAKE_REPEAT of
+/// your last fake with the same ball (CT_ShootAbilitiesCost_Stamina by GE_FakeShoot's count); one
+/// you can't pay is the tired fake, free. A paid one pauses regen as long as the "long" actions.
+pub const FAKE_SHOT_COST: [f32; 2] = [1.5, 4.0];
+pub const FAKE_REPEAT: f32 = 3.0;
+pub const FAKE_REGEN_DELAY: f32 = 1.36;
+/// A pass press fakes the shot only this early in its charge; later it goes on. The data's 0.33 s
+/// (GA_Shoot's FakeInputToSyncEarlier), and Kev's recordings: presses 0.36-0.37 s in still faked,
+/// 0.50-0.57 s never. Was 0.45 s.
+pub const FAKE_SHOT_WINDOW: f32 = 0.37;
+/// The leg passes over the ball this long into the fake (its animations' whoosh, 0.15-0.22 s in;
+/// the recordings' rings at 0.1-0.3 s).
+pub const FAKE_SHOT_SWING: f32 = 0.18;
+/// At or under this speed the fake is the standing one: no keys, no travel (the build-up picker).
+pub const FAKE_STANDING_SPEED: f32 = 1.5;
+/// Can act again: moving with a direction held, moving with none, standing; tired moving, tired
+/// standing (the fake montages' availability layers: 34f, 20f, 20f, 50f, 40f).
+pub const FAKE_ACT: [f32; 5] = [34.0 / 60.0, 20.0 / 60.0, 20.0 / 60.0, 50.0 / 60.0, 40.0 / 60.0];
+/// How long each fake runs if left alone: forward, side, back and stop, by the shot's way against
+/// your body (straight within 30 deg, to the side up to 150, back); then the standing and the
+/// tired moving ones (the montages' lengths).
+pub const FAKE_LENGTH: [[f32; 3]; 4] = [[1.83, 1.5, 1.33], [1.62, 1.0, 0.98], [0.83, 0.97, 1.45], [0.83, 0.72, 0.98]];
+pub const FAKE_STANDING_LENGTH: f32 = 1.55;
+pub const FAKE_TIRED_LENGTH: [f32; 3] = [1.8, 1.3, 1.3];
+/// The speed curves run over the whole animation, which starts this much before the montage does.
+pub const FAKE_ANIM_OFFSET: f32 = 0.15;
+/// The side and back fakes lead on straight, then turn (a quarter turn out, a half turn back)
+/// between these times (s; their root tracks).
+pub const FAKE_TURN: (f32, f32) = (0.05, 0.28);
+/// The forward and side fakes keep your speed at the press (VXFakeShoot_ScaleSpeedData): sprinting
+/// at FAKE_SPRINT_MIN or more it rises to x1.25 by the end; at FAKE_SLOW_MAX or under it bursts to
+/// x2 early. The half turn back dips and comes back (VXFakeShoot_BToS_ScaleSpeedData). Over the
+/// whole animation, 0 to 1.
+pub const FAKE_SPRINT_MIN: f32 = 2.0;
+pub const FAKE_SLOW_MAX: f32 = 2.25;
+pub const FAKE_SPEED: [(f32, f32); 2] = [(0.0, 1.0), (1.0, 1.0)];
+pub const FAKE_SPEED_SPRINT: [(f32, f32); 2] = [(0.0, 1.0), (1.0, 1.25)];
+pub const FAKE_SPEED_SLOW: [(f32, f32); 5] = [(0.0, 1.0), (0.09, 1.7), (0.18, 2.0), (0.5, 1.5), (1.0, 1.0)];
+pub const FAKE_BACK_SPEED: [(f32, f32); 5] = [(0.0, 1.0), (0.04, 1.0), (0.31, 0.59), (0.61, 1.0), (1.0, 1.0)];
+pub const FAKE_BACK_SPEED_SPRINT: [(f32, f32); 4] = [(0.0, 1.0), (0.04, 1.0), (0.31, 0.85), (1.0, 2.0)];
+pub const FAKE_BACK_SPEED_SLOW: [(f32, f32); 5] = [(0.0, 1.0), (0.11, 0.7), (0.5, 1.35), (0.89, 2.0), (1.0, 1.0)];
+/// The stop and tired fakes move on their own steps whatever your speed (m/s by seconds in): a step
+/// on and stop (0.7 m); the tired forward fake's run (its root track).
+pub const FAKE_STOP_STEP: [(f32, f32); 4] = [(0.0, 4.4), (0.1, 3.7), (0.18, 2.0), (0.25, 0.0)];
+pub const FAKE_TIRED_SPEED: [(f32, f32); 6] = [(0.0, 4.4), (0.1, 3.1), (0.55, 3.2), (0.75, 4.7), (1.0, 5.4), (1.4, 4.5)];
+/// The left side's fake. The data gives it the half turn back, the same as S (false); Kev expects a
+/// roulette each way, which true gives (the right's mirrored). For Kev to test.
+pub const FAKE_LEFT_ROULETTE: bool = false;
+/// The side fake's roulette: the body spins a whole turn over the ball between these times (s), on
+/// top of the quarter turn out (our own timing; in Kev's recording the body faces the camera 0.5-0.7
+/// s in).
+pub const FAKE_ROULETTE_SPIN: (f32, f32) = (0.22, 0.85);
 
 // Fixed-force kicks (StaticShootForceComputation in each ability's data), m/s
 pub const SHORT_WINDUP: f32 = 16.0 / 60.0;

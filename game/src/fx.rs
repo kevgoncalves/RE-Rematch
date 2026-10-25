@@ -1168,7 +1168,7 @@ pub fn action_fx(
 
     // The fake shot's rings, as the leg swings over the ball.
     match p.fake {
-        Some((t, _)) if t >= FAKE_SHOT_SWING && !state.fake_shown => {
+        Some(f) if f.t >= FAKE_SHOT_SWING && !state.fake_shown => {
             state.fake_shown = true;
             closing_rings(&mut s, &fx, &mut state.rng, at, [(0.42, 0.2), (0.3, 0.16)], 0.25, FAKE_RED, FAKE_PINK);
             s.bit(&fx.sphere, at, Bit::new(0.25, PEACH).to(FAKE_PINK).alpha(0.8).hold(0.3).size(1.35, 1.2).face(Facing::Fixed).follow());

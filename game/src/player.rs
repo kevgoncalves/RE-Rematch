@@ -61,8 +61,10 @@ pub struct Player {
     pub push_sprinted: bool,
     /// Your magnet is off this long after an extra-effort touch on the ball or its end.
     pub magnet_off: f32,
-    /// A fake shot: how long since it, and how long until you can act again.
-    pub fake: Option<(f32, f32)>,
+    /// A fake shot in progress, and the time since your last one with this ball (a second within
+    /// FAKE_REPEAT costs more).
+    pub fake: Option<FakeState>,
+    pub since_fake: f32,
     /// How long extra effort has been on (0 when off), and an extra-effort tap's carry left.
     pub ee_on: f32,
     pub ee_carry: f32,
@@ -243,6 +245,142 @@ impl DribbleState {
     pub fn moving(&self) -> bool {
         self.t < self.free()
     }
+}
+
+/// What a fake shot does, by the keys held at its press (kick-slides-and-fakes.md §1.2).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum FakeKind {
+    /// On ahead with the ball (the forward keys; any moving fake when tired).
+    Forward,
+    /// The roulette out to the side: a quarter turn and away that way (`FakeState::turn` says which).
+    Side,
+    /// The half turn back.
+    Back,
+    /// No keys: a step on and a stop over the ball.
+    Stop,
+    /// Standing (FAKE_STANDING_SPEED or slower): the swing over the ball, whatever the keys, no travel.
+    Standing,
+}
+
+/// A fake shot in progress: the leg swings over the ball, then the move its keys picked, on your
+/// speed at the press.
+#[derive(Clone, Copy, Debug)]
+pub struct FakeState {
+    pub t: f32,
+    /// From here you can act again: kicks and dribbles, and the stick takes over.
+    pub act: f32,
+    /// Its end, left alone.
+    pub len: f32,
+    pub kind: FakeKind,
+    /// Out of stamina for it: the tired fake, heavier and later to act.
+    pub tired: bool,
+    /// The turn it makes (radians, + left): a quarter turn out to the side, a half turn back.
+    pub turn: f32,
+    /// The way you were going and facing at the press.
+    dir: Vec3,
+    face: f32,
+    /// Its speed: the curve at (t + offset) / span, times `scale` (your speed at the press, or 1 for
+    /// the steps that ignore it).
+    speeds: &'static [(f32, f32)],
+    scale: f32,
+    span: f32,
+    offset: f32,
+}
+
+impl FakeState {
+    /// How much of its turn it has made (radians, + left).
+    pub fn turned(&self) -> f32 {
+        let (a, b) = FAKE_TURN;
+        let u = ((self.t - a) / (b - a)).clamp(0.0, 1.0);
+        self.turn * u * u * (3.0 - 2.0 * u)
+    }
+
+    /// The way it carries you now, the yaw you face and its speed.
+    pub fn motion(&self) -> (Vec3, f32, f32) {
+        let turned = self.turned();
+        let speed = curve(self.speeds, (self.t + self.offset) / self.span) * self.scale;
+        (forward(yaw_of(self.dir) + turned), self.face + turned, speed)
+    }
+}
+
+/// A moving fake by the keys at its press, and its turn (radians, + left). The fake picker's sectors
+/// run from the camera's forward with A at 90 deg and D at 270 (Kev's recordings: the D fake went
+/// right), each edge counted up to 180 deg but not past it (InputAngleAnimationPicker): within 45
+/// deg of ahead, forward; the right side and S+D, the roulette out to the right; A, S+A and S, the
+/// half turn back (FAKE_LEFT_ROULETTE: A and S+A the roulette out to the left); no keys, the stop.
+fn fake_by_keys(input: Vec2) -> (FakeKind, f32) {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    if input.length() < MOVE_DIRECTION_DEAD_ZONE {
+        return (FakeKind::Stop, 0.0);
+    }
+    // To the tenth of a degree, so keyboard diagonals sit exactly on the edges.
+    let ccw = ((-input.x).atan2(input.y).to_degrees().rem_euclid(360.0) * 10.0).round() / 10.0;
+    let mut rest = ccw;
+    let mut sector = 4;
+    for (i, range) in [45.0, 90.0, 90.0, 90.0].into_iter().enumerate() {
+        if rest < range || (ccw <= 180.0 && rest == range) {
+            sector = i;
+            break;
+        }
+        rest -= range;
+    }
+    match sector {
+        1 if FAKE_LEFT_ROULETTE => (FakeKind::Side, FRAC_PI_2),
+        1 | 2 => (FakeKind::Back, PI),
+        3 => (FakeKind::Side, -FRAC_PI_2),
+        _ => (FakeKind::Forward, 0.0),
+    }
+}
+
+/// The fake shot pressed during the shot `k`'s charge, with the movement keys `input`: which one,
+/// what it costs and how it moves you (kick-slides-and-fakes.md §1).
+fn start_fake(p: &mut Player, k: &KickState, input: Vec2) -> FakeState {
+    let flat = Vec3::new(p.vel.x, 0.0, p.vel.z).clamp_length_max(KICK_ENTRY_CAP);
+    let speed = flat.length();
+    let cost = FAKE_SHOT_COST[(p.since_fake < FAKE_REPEAT) as usize];
+    let tired = p.exhausted || p.stamina < cost;
+    if !tired {
+        p.stamina -= cost;
+        p.regen_wait = p.regen_wait.max(FAKE_REGEN_DELAY);
+    }
+    p.since_fake = 0.0;
+    // The shot's way against your body picks the set: straight on, to the side, or back.
+    let off = angle_diff(k.aim.x.to_radians(), p.facing);
+    let family = match off.abs().to_degrees() {
+        a if a <= 30.0 => 0,
+        a if a <= 150.0 => 1,
+        _ => 2,
+    };
+    let (kind, turn) = match () {
+        _ if speed <= FAKE_STANDING_SPEED => (FakeKind::Standing, 0.0),
+        _ if tired => (FakeKind::Forward, 0.0),
+        _ => fake_by_keys(input),
+    };
+    // The half turn back goes round to the right on a straight shot, else round the shot's side.
+    let turn = if kind == FakeKind::Back && (family == 0 || off < 0.0) { -turn } else { turn };
+    let (len, act) = match kind {
+        FakeKind::Standing => (FAKE_STANDING_LENGTH, FAKE_ACT[if tired { 4 } else { 2 }]),
+        _ if tired => (FAKE_TIRED_LENGTH[family], FAKE_ACT[3]),
+        FakeKind::Stop => (FAKE_LENGTH[3][family], FAKE_ACT[1]),
+        FakeKind::Forward => (FAKE_LENGTH[0][family], FAKE_ACT[0]),
+        FakeKind::Side => (FAKE_LENGTH[1][family], FAKE_ACT[0]),
+        FakeKind::Back => (FAKE_LENGTH[2][family], FAKE_ACT[0]),
+    };
+    let sprint = p.sprinting && speed >= FAKE_SPRINT_MIN;
+    let slow = speed <= FAKE_SLOW_MAX;
+    let span = len + FAKE_ANIM_OFFSET;
+    let (speeds, scale, span, offset): (&'static [(f32, f32)], f32, f32, f32) = match kind {
+        FakeKind::Standing => (&[(0.0, 0.0)], 0.0, 1.0, 0.0),
+        _ if tired => (&FAKE_TIRED_SPEED, 1.0, 1.0, 0.0),
+        FakeKind::Stop => (&FAKE_STOP_STEP, 1.0, 1.0, 0.0),
+        FakeKind::Back if sprint => (&FAKE_BACK_SPEED_SPRINT, speed, span, FAKE_ANIM_OFFSET),
+        FakeKind::Back if slow => (&FAKE_BACK_SPEED_SLOW, speed, span, FAKE_ANIM_OFFSET),
+        FakeKind::Back => (&FAKE_BACK_SPEED, speed, span, FAKE_ANIM_OFFSET),
+        _ if sprint => (&FAKE_SPEED_SPRINT, speed, span, FAKE_ANIM_OFFSET),
+        _ if slow => (&FAKE_SPEED_SLOW, speed, span, FAKE_ANIM_OFFSET),
+        _ => (&FAKE_SPEED, speed, span, FAKE_ANIM_OFFSET),
+    };
+    FakeState { t: 0.0, act, len, kind, tired, turn, dir: flat.normalize_or(forward(p.facing)), face: p.facing, speeds, scale, span, offset }
 }
 
 /// A big change of direction: brake along `from`, then re-accelerate along `to`.
@@ -527,6 +665,7 @@ impl Default for Player {
             ee_cut: 0.0,
             magnet_off: 0.0,
             fake: None,
+            since_fake: f32::INFINITY,
             ee_on: 0.0,
             ee_carry: 0.0,
             ee_cut_right: false,
@@ -798,7 +937,7 @@ pub fn player_move(
     // From a control's effect on the ball a dribble goes at once (Kev: no wait for the ball to
     // settle); the ball joins it as it does.
     let dribble_press = actions.pending(Action::PushBall) || actions.pending(Action::Dash);
-    if dribble_press && (p.has_ball || p.receiving.is_some()) && p.locked && p.kick.is_none() && p.fake.is_none() {
+    if dribble_press && (p.has_ball || p.receiving.is_some()) && p.locked && p.kick.is_none() && p.fake.is_none_or(|f| f.t >= f.act) {
         // The feint needs lock move held all through dribble 1 (Kev: let go and lock again, and the
         // next press is dribble 1 again, not the feint).
         let feint = !p.exhausted && p.dribble_lock && p.dribble.is_some_and(|d| !d.feint && !d.exhausted && d.t >= DRIBBLE_WINDOW_OPENS && d.t < d.length() - FEINT_WINDOW_CUT);
@@ -824,8 +963,9 @@ pub fn player_move(
             let dir = camera_relative(dir, rig.yaw);
             let facing = if heading == Heading::Forward { yaw_of(dir) } else { rig.yaw.to_radians() };
             p.dribble = Some(DribbleState { t: 0.0, feint, exhausted: p.exhausted, heading, dir, facing, cut, turn });
-            // A new move takes over from a kick's drag (or any other scripted run).
+            // A new move takes over from a kick's drag (or any other scripted run, or a fake).
             p.run = None;
+            p.fake = None;
             p.dribble_lock = true;
             actions.consume(Action::PushBall);
             actions.consume(Action::Dash);
@@ -902,9 +1042,6 @@ pub fn player_move(
     };
     if p.kick.is_some_and(|k| !k.kind.is_push()) {
         top *= WINDUP_SPEED_SCALE;
-    }
-    if p.fake.is_some() {
-        top *= FAKE_SHOT_SPEED;
     }
     // A control keeps the speed you came in with until you can act (CONTROL_SPEED_KEEP), above your
     // top with the ball, so a kick queued in it starts with it. The ippy's swing has its own.
@@ -990,6 +1127,16 @@ pub fn player_move(
             } else {
                 hand_back(p, dir_now, walking, top);
             }
+        }
+    } else if let Some(f) = p.fake {
+        // A fake shot: the move its keys picked, on your speed at the press (FakeState). From when you
+        // can act, the stick or lock move takes over; left alone it runs to its end.
+        let (way, face, speed) = f.motion();
+        p.vel = way * speed;
+        p.facing = face;
+        if f.t >= f.act && (wish != Vec3::ZERO || p.locked) {
+            p.fake = None;
+            soft_hand_back(p, dir_now);
         }
     } else if let Some((k, v)) = p.kick.and_then(|k| Some((k, k.volley?))) {
         // A volley: run to where the body meets the ball as it gets there, turning to the volley's way
@@ -1415,6 +1562,15 @@ fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3
         let ball = ball + Vec3::new(p.vel.x, 0.0, p.vel.z) * dt;
         return ball.lerp(Vec3::new(spot.x, BALL_RADIUS, spot.z), 1.0 - (-dt / FEINT_BALL_EASE).exp());
     }
+    // A fake keeps the ball at your feet, out the way it takes you (the sole rolls it round on the
+    // turns).
+    if let Some(f) = p.fake {
+        let (way, ..) = f.motion();
+        let spot = root + way * DRIBBLE_OFFSET;
+        p.carry = None;
+        let ball = ball + Vec3::new(p.vel.x, 0.0, p.vel.z) * dt;
+        return ball.lerp(Vec3::new(spot.x, BALL_RADIUS, spot.z), 1.0 - (-dt / FEINT_BALL_EASE).exp());
+    }
     // Lock move with the ball: the right sole goes onto the ball (players confirm) and rolls it
     // with you, a little ahead the way you move; it eases there as you lock.
     if p.locked && p.dribble.is_none() {
@@ -1534,17 +1690,26 @@ pub fn kicking(
     let p = &mut **player;
 
     // A pass press early in a shot's charge is a fake shot (Rematch binds both to the same button):
-    // the leg swings low over the ball and you crouch over it, no kicks until you can act again.
-    if let Some((t, lock)) = p.fake {
-        p.fake = (t + dt < lock).then_some((t + dt, lock));
-        return;
+    // the leg swings over the ball, then the move the keys pick (player_move runs it). No kicks until
+    // you can act again; a kick then ends it.
+    p.since_fake = if p.has_ball { p.since_fake + dt } else { f32::INFINITY };
+    if let Some(f) = p.fake.as_mut() {
+        f.t += dt;
+        if f.t >= f.len {
+            p.fake = None;
+        } else if f.t < f.act {
+            return;
+        }
     }
-    if p.charging_shot() && p.kick.is_some_and(|k| k.elapsed <= FAKE_SHOT_WINDOW) && actions.just_pressed(Action::FakeShot) {
-        let moving = Vec3::new(p.vel.x, 0.0, p.vel.z).length() > 1.0;
-        p.fake = Some((0.0, FAKE_SHOT_LOCK[2 * p.exhausted as usize + moving as usize]));
+    if p.charging_shot()
+        && let Some(k) = p.kick.filter(|k| k.elapsed <= FAKE_SHOT_WINDOW)
+        && actions.just_pressed(Action::FakeShot)
+    {
+        p.fake = Some(start_fake(p, &k, axes.movement));
         p.kick = None;
-        p.stamina = (p.stamina - FAKE_SHOT_COST).max(0.0);
-        p.regen_wait = REGEN_DELAY;
+        p.run = None;
+        p.turn = None;
+        p.pivot = 0.0;
         return;
     }
 
@@ -1617,6 +1782,7 @@ pub fn kicking(
             }
             p.push_buffered = false;
             p.flick_buffered = false;
+            p.fake = None;
             let released = kind.charge_action().is_none();
             let steer = if axes.movement.length() < PUSH_BALL_DEAD_ZONE {
                 Vec3::ZERO
@@ -2492,11 +2658,95 @@ mod tests {
         assert_eq!(state(&mut app), (Some(Kick::Shot), false));
     }
 
+    #[test]
+    fn the_keys_at_a_fake_pick_its_move() {
+        use std::f32::consts::{FRAC_PI_2, PI};
+        let d = Vec2::ONE.normalize();
+        let kind = |input: Vec2| fake_by_keys(input).0;
+        // Ahead within 45 deg, W+A and W+D included: on forward.
+        assert_eq!(kind(Vec2::Y), FakeKind::Forward);
+        assert_eq!(kind(Vec2::new(-d.x, d.y)), FakeKind::Forward, "W+A");
+        assert_eq!(kind(d), FakeKind::Forward, "W+D");
+        // The right side and S+D: the roulette out to the right.
+        assert_eq!(fake_by_keys(Vec2::X), (FakeKind::Side, -FRAC_PI_2));
+        assert_eq!(fake_by_keys(Vec2::new(d.x, -d.y)), (FakeKind::Side, -FRAC_PI_2), "S+D");
+        // A, S+A and S: the half turn back (the data; FAKE_LEFT_ROULETTE swaps A and S+A).
+        if !FAKE_LEFT_ROULETTE {
+            assert_eq!(fake_by_keys(Vec2::NEG_X), (FakeKind::Back, PI));
+            assert_eq!(kind(-d), FakeKind::Back, "S+A");
+        }
+        assert_eq!(kind(Vec2::NEG_Y), FakeKind::Back);
+        assert_eq!(kind(Vec2::ZERO), FakeKind::Stop);
+    }
+
     /// A player running at `speed` m/s straight ahead (-z), charging a shot aimed that way.
     fn faking_player(speed: f32, sprinting: bool) -> (Player, KickState) {
         let p = Player { has_ball: true, vel: Vec3::NEG_Z * speed, sprinting, ..default() };
         let k = KickState { kind: Kick::Shot, elapsed: 0.2, held: 0.2, pre: 0.0, released: false, aim: Vec2::ZERO, eye: Vec3::ZERO, entry: p.vel, from_dribble: false, steer: Vec3::ZERO, sprint: sprinting, heading: Heading::Forward, volley: None, slide: 0.0 };
         (p, k)
+    }
+
+    /// Where a fake takes you by `until` s (from the press), and its speed then.
+    fn fake_path(f: FakeState, until: f32) -> (Vec3, f32) {
+        let (mut f, mut at) = (f, Vec3::ZERO);
+        while f.t < until {
+            let (way, _, speed) = f.motion();
+            at += way * speed / 60.0;
+            f.t += 1.0 / 60.0;
+        }
+        (at, f.motion().2)
+    }
+
+    #[test]
+    fn a_moving_fake_keeps_your_speed_along_its_way() {
+        // Running with the ball, D: the roulette turns you right and runs you on that way at your
+        // speed, about 2.2 m out by the time you can act (34f).
+        let (mut p, k) = faking_player(4.5, false);
+        let f = start_fake(&mut p, &k, Vec2::X);
+        assert_eq!((f.kind, f.act), (FakeKind::Side, 34.0 / 60.0));
+        let (at, speed) = fake_path(f, f.act);
+        assert!((1.8..2.6).contains(&at.x) && at.z < 0.0, "right roulette {at}");
+        assert!((speed - 4.5).abs() < 0.05, "speed {speed}");
+        let turned = FakeState { t: FAKE_TURN.1, ..f };
+        assert!((angle_diff(turned.motion().1, p.facing) + std::f32::consts::FRAC_PI_2).abs() < 0.01, "faces right");
+        // S: the half turn back ends up coming back the way you came.
+        let (mut p, k) = faking_player(4.5, false);
+        let f = start_fake(&mut p, &k, Vec2::NEG_Y);
+        let (at, _) = fake_path(f, f.len);
+        assert!(at.z > 0.0, "back {at}");
+        // Sprinting it rises to x1.25 by its end; slow it bursts to x2 early.
+        let (mut p, k) = faking_player(6.0, true);
+        let f = start_fake(&mut p, &k, Vec2::Y);
+        assert!((fake_path(f, f.len).1 - 6.0 * 1.25).abs() < 0.2);
+        let (mut p, k) = faking_player(2.0, false);
+        let f = start_fake(&mut p, &k, Vec2::Y);
+        let peak = (0..30).map(|i| fake_path(f, i as f32 / 60.0).1).fold(0.0, f32::max);
+        assert!(peak > 3.5, "slow burst {peak}");
+        // No keys: a step and a stop; standing: no travel, free in 20f.
+        let (mut p, k) = faking_player(4.5, false);
+        let f = start_fake(&mut p, &k, Vec2::ZERO);
+        let (at, speed) = fake_path(f, 0.5);
+        assert!(f.kind == FakeKind::Stop && at.length() < 1.0 && speed == 0.0, "stop {at} {speed}");
+        let (mut p, k) = faking_player(1.0, false);
+        let f = start_fake(&mut p, &k, Vec2::X);
+        assert!(f.kind == FakeKind::Standing && f.act == 20.0 / 60.0 && fake_path(f, 0.5).0.length() < 1e-3);
+    }
+
+    #[test]
+    fn a_second_fake_with_the_ball_costs_more_and_a_tired_one_is_free() {
+        let (mut p, k) = faking_player(4.5, false);
+        start_fake(&mut p, &k, Vec2::Y);
+        assert!((p.stamina - (MAX_STAMINA - 1.5)).abs() < 1e-4);
+        p.since_fake = 2.0;
+        start_fake(&mut p, &k, Vec2::Y);
+        assert!((p.stamina - (MAX_STAMINA - 5.5)).abs() < 1e-4, "within 3 s: 4.0");
+        p.since_fake = 3.5;
+        start_fake(&mut p, &k, Vec2::Y);
+        assert!((p.stamina - (MAX_STAMINA - 7.0)).abs() < 1e-4, "after 3 s: 1.5 again");
+        // Can't pay: the tired fake, forward whatever the keys, free, can act at 50f.
+        p.stamina = 1.0;
+        let f = start_fake(&mut p, &k, Vec2::X);
+        assert!(f.tired && f.kind == FakeKind::Forward && f.act == 50.0 / 60.0 && p.stamina == 1.0);
     }
 
     #[test]
