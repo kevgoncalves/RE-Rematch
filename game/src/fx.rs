@@ -1,6 +1,7 @@
 //! Effects and practice aids: the dribble's blue glow on the ball, the marker where a kick lands,
-//! and the cheats from the F1 menu (infinite stamina and extra effort, the ball's trail and its
-//! predicted path). The look is our own; when and where they show is the game's (notes/hud.md).
+//! and the cheats from the menu's Cheats tab (infinite stamina and extra effort, the ball's trail
+//! and its predicted path). The look is our own; when and where they show is the game's
+//! (notes/hud.md).
 
 use std::f32::consts::{FRAC_PI_2, TAU};
 
