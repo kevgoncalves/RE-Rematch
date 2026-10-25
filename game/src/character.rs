@@ -1,7 +1,6 @@
 //! The animated character: Mixamo's "Shannon" and Kev's Mixamo clips (made into
-//! assets/characters/shannon.glb by tools/mixamo_to_glb.py), behind the "Animated character
-//! (Mixamo)" cheat. It stands in for the procedural body, which keeps running hidden underneath
-//! (the effects read its feet).
+//! assets/characters/shannon.glb by tools/mixamo_to_glb.py), the player's body. The procedural body
+//! keeps running hidden underneath, and shows instead only when the glb hasn't been made.
 //!
 //! One animation graph holds every clip under its root blend node. Each frame the mixer sets every
 //! clip's weight and time from the player's state, so the crossfades, the foot-synced cycles and
@@ -40,7 +39,7 @@ use bevy::render::view::NoFrustumCulling;
 use serde::Deserialize;
 
 use crate::body::Joint;
-use crate::fx::{Cheat, Cheats};
+use crate::fx::{Cheat, Cheats, TrailPoint};
 use crate::player::{FeintTurn, Heading, Kick, KickState, Player, contact_time, dribble_contact, roulette_turn, turn_out_angle, yaw_of};
 use crate::tuning::*;
 
@@ -800,12 +799,11 @@ impl Plugin for CharacterPlugin {
     }
 }
 
-/// `RE_CHEATS=mixamo,debug,...` turns cheats on at the start (for scripted runs).
+/// `RE_CHEATS=debug,zones,...` turns cheats on at the start (for scripted runs).
 fn cheats_from_env(mut cheats: ResMut<Cheats>) {
     let Ok(list) = std::env::var("RE_CHEATS") else { return };
     for name in list.split(',').map(str::trim) {
         let cheat = match name {
-            "mixamo" => Cheat::Mixamo,
             "stamina" => Cheat::InfiniteStamina,
             "effort" => Cheat::InfiniteEffort,
             "trail" => Cheat::BallTrail,
@@ -960,13 +958,12 @@ struct MixState {
 
 fn load(
     mut commands: Commands,
-    cheats: Res<Cheats>,
     mut state: ResMut<MixState>,
     character: Option<Res<Character>>,
     assets: Res<AssetServer>,
     player: Single<Entity, With<Player>>,
 ) {
-    if character.is_some() || state.tried || !cheats.on(Cheat::Mixamo) {
+    if character.is_some() || state.tried {
         return;
     }
     state.tried = true;
@@ -999,6 +996,7 @@ fn bind(
     mut players: Query<(Entity, &mut AnimationPlayer), Without<Rig>>,
     children: Query<&Children>,
     names: Query<(&Name, Option<&AnimationTarget>)>,
+    old_feet: Query<Entity, With<TrailPoint>>,
 ) {
     let Some(character) = character else { return };
     let Some(gltf) = gltfs.get(&character.gltf) else { return };
@@ -1035,6 +1033,14 @@ fn bind(
             player.play(*node).set_weight(0.0).pause();
         }
         commands.entity(entity).insert((AnimationGraphHandle(graphs.add(graph)), Rig { nodes, hips, spine, chest }));
+        // The foot trails follow the character's toes now, not the hidden body's boots.
+        if let (Some(left), Some(right)) = (bone("LeftToeBase"), bone("RightToeBase")) {
+            for e in &old_feet {
+                commands.entity(e).remove::<TrailPoint>();
+            }
+            commands.entity(left).with_child((Transform::default(), TrailPoint(-1.0)));
+            commands.entity(right).with_child((Transform::default(), TrailPoint(1.0)));
+        }
     }
 }
 
@@ -1108,9 +1114,10 @@ fn paint(kits: Query<(Entity, &Kit), Changed<Kit>>, children: Query<&Children>, 
     }
 }
 
-/// The cheat shows the character and hides the procedural body (which keeps animating).
-fn show(cheats: Res<Cheats>, character: Option<Res<Character>>, mut roots: Query<&mut Visibility, With<CharacterRoot>>, mut joints: Query<&mut Visibility, (With<Joint>, Without<CharacterRoot>)>, rigs: Query<(), With<Rig>>) {
-    let on = cheats.on(Cheat::Mixamo) && character.is_some() && !rigs.is_empty();
+/// Once loaded the character shows and the procedural body hides (it keeps animating); without the
+/// character's glb (run tools/mixamo_to_glb.py) the procedural body stays as a stand-in.
+fn show(character: Option<Res<Character>>, mut roots: Query<&mut Visibility, With<CharacterRoot>>, mut joints: Query<&mut Visibility, (With<Joint>, Without<CharacterRoot>)>, rigs: Query<(), With<Rig>>) {
+    let on = character.is_some() && !rigs.is_empty();
     for mut v in &mut roots {
         v.set_if_neq(if on { Visibility::Inherited } else { Visibility::Hidden });
     }
@@ -1123,7 +1130,6 @@ fn show(cheats: Res<Cheats>, character: Option<Res<Character>>, mut roots: Query
 /// character's root.
 fn drive(
     time: Res<Time>,
-    cheats: Res<Cheats>,
     character: Option<Res<Character>>,
     mut state: ResMut<MixState>,
     player: Single<(&Player, &Transform)>,
@@ -1131,17 +1137,6 @@ fn drive(
     mut roots: Query<&mut Transform, (With<CharacterRoot>, Without<Player>)>,
 ) {
     let Some(character) = character else { return };
-    if !cheats.on(Cheat::Mixamo) {
-        // Hidden: nothing to evaluate.
-        if cheats.is_changed() {
-            for (_, mut anim) in &mut rigs {
-                for (_, active) in anim.playing_animations_mut() {
-                    active.set_weight(0.0);
-                }
-            }
-        }
-        return;
-    }
     let (p, tf) = *player;
     // The kick's freeze holds the pose too.
     let dt = if p.freeze > 0.0 { 0.0 } else { time.delta_secs() };
@@ -1172,10 +1167,7 @@ fn drive(
 
 /// After the clips are applied: the lower body turned toward the velocity and the trunk back
 /// toward the facing (the procedural body's orientation warping), the trunk's lean forward.
-fn adjust(cheats: Res<Cheats>, state: Res<MixState>, rigs: Query<&Rig>, mut bones: Query<&mut Transform, Without<CharacterRoot>>) {
-    if !cheats.on(Cheat::Mixamo) {
-        return;
-    }
+fn adjust(state: Res<MixState>, rigs: Query<&Rig>, mut bones: Query<&mut Transform, Without<CharacterRoot>>) {
     let mix = &state.mix;
     for rig in &rigs {
         let Ok([mut hips, mut spine, mut chest]) = bones.get_many_mut([rig.hips, rig.spine, rig.chest]) else { continue };
