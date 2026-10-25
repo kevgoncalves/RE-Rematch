@@ -205,8 +205,8 @@ struct Transition {
 
 /// Time a start takes to reach the run, and the shortest stop.
 const START_TIME: f32 = 0.35;
-/// The fastest any joint may turn, degrees per second.
-const MAX_JOINT_SPEED: f32 = 1200.0;
+/// The fastest any joint may turn, degrees per second (a kick's strike needs about 2000).
+const MAX_JOINT_SPEED: f32 = 2400.0;
 const STOP_TIME: f32 = 0.45;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -567,19 +567,19 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
     // as the plant foot rises onto its toes.
     let shot_kick = [
         stand.with(&[
-            (PELVIS, [0.0, -22.0, -4.0]),
-            (SPINE_J, [8.0, 0.0, -8.0]),
-            (CHEST_J, [4.0, 14.0, -4.0]),
-            (NECK_J, [-6.0, 6.0, 0.0]),
-            (THIGH_L, [16.0, 0.0, -6.0]),
-            (SHIN_L, [40.0, 0.0, 0.0]),
-            (FOOT_L, [-24.0, 0.0, 6.0]),
-            (THIGH_R, [-45.0, 0.0, 8.0]),
-            (SHIN_R, [105.0, 0.0, 0.0]),
-            (FOOT_R, [-80.0, 0.0, 0.0]),
-            (UPPER_L, [45.0, 0.0, -75.0]),
+            (PELVIS, [0.0, -28.0, -6.0]),
+            (SPINE_J, [26.0, 0.0, -8.0]),
+            (CHEST_J, [6.0, 14.0, -4.0]),
+            (NECK_J, [-18.0, 6.0, 0.0]),
+            (THIGH_L, [32.0, 0.0, -8.0]),
+            (SHIN_L, [62.0, 0.0, 0.0]),
+            (FOOT_L, [-30.0, 0.0, 6.0]),
+            (THIGH_R, [-38.0, 0.0, 10.0]),
+            (SHIN_R, [118.0, 0.0, 0.0]),
+            (FOOT_R, [-70.0, 0.0, 0.0]),
+            (UPPER_L, [55.0, 0.0, -65.0]),
             (FORE_L, [25.0, 0.0, 0.0]),
-            (UPPER_R, [-40.0, 0.0, 30.0]),
+            (UPPER_R, [-50.0, 0.0, 35.0]),
             (FORE_R, [35.0, 0.0, 0.0]),
         ]),
         stand.with(&[
@@ -600,15 +600,15 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         ]),
         stand.with(&[
             (PELVIS, [0.0, 28.0, 4.0]),
-            (SPINE_J, [8.0, 0.0, -4.0]),
+            (SPINE_J, [2.0, 0.0, -4.0]),
             (CHEST_J, [0.0, -16.0, 0.0]),
             (NECK_J, [-6.0, 0.0, 0.0]),
             (THIGH_L, [12.0, 0.0, -4.0]),
             (SHIN_L, [30.0, 0.0, 0.0]),
             (FOOT_L, [14.0, 0.0, 4.0]),
-            (THIGH_R, [85.0, 0.0, -6.0]),
-            (SHIN_R, [20.0, 0.0, 0.0]),
-            (FOOT_R, [60.0, 0.0, 0.0]),
+            (THIGH_R, [100.0, 0.0, -6.0]),
+            (SHIN_R, [45.0, 0.0, 0.0]),
+            (FOOT_R, [50.0, 0.0, 0.0]),
             (UPPER_L, [55.0, 0.0, -45.0]),
             (FORE_L, [40.0, 0.0, 0.0]),
             (UPPER_R, [-35.0, 0.0, 30.0]),
@@ -1661,7 +1661,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     let run_out = speed > 1.5 && !p.kick_sliding();
     if let Some((t, kind)) = anim.follow.as_mut() {
         *t += dt;
-        let end = if run_out { 0.4 * follow_time(*kind) } else { follow_time(*kind) };
+        let end = if run_out { 0.25 * follow_time(*kind) } else { follow_time(*kind) };
         if *t > end && !p.kick_sliding() {
             anim.follow = None;
         }
@@ -1692,11 +1692,13 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         anim.kick_turn = wrap(aim - p.facing).to_degrees().clamp(-150.0, 150.0);
         anim.kick_power = charge(k.kind, k.held);
     }
-    // Wind up to the strike, which always takes the last 8 frames before contact (the game never
-    // stretches them: power only lengthens the backswing); a long charge holds the backswing and
-    // strikes at the release. The backswing eases into its top. The body turns toward the sector a
-    // third of the way by the strike, most of it by the hit.
-    const STRIKE: f32 = 8.0 / 60.0;
+    // The leg cocks back within WINDUP_IN and holds there (a long charge holds it until the
+    // release); the strike from the top of the backswing to the ball takes the last 4 frames
+    // before contact (Kev's Rematch clips: a power shot's leg reaches the ball in a frame or two of
+    // 30 fps video). The body turns toward the sector a third of the way by the strike, most of it
+    // by the hit.
+    const STRIKE: f32 = 4.0 / 60.0;
+    const WINDUP_IN: f32 = 0.12;
     let kick_pose = if let Some(k) = p.kick.filter(|k| !push(k.kind)) {
         let ([windup, hit, _], _) = keys(k.kind, anim.kick_turn);
         let first = contact_time(&k);
@@ -1705,13 +1707,13 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             1.0 - (1.0 - u) * (1.0 - u)
         };
         let (key, turn) = if !k.released {
-            let w = up(k.elapsed, first - STRIKE);
+            let w = up(k.elapsed, (first - STRIKE).min(WINDUP_IN));
             (clips.stand.lerp(&windup, w), 0.3 * w)
         } else {
             let release = (k.held - k.pre).max(0.0);
             let strike_at = (first - STRIKE).max(release);
             if k.elapsed < strike_at {
-                let w = up(k.elapsed, strike_at);
+                let w = up(k.elapsed, strike_at.min(WINDUP_IN));
                 (clips.stand.lerp(&windup, w), 0.3 * w)
             } else {
                 let s = ((k.elapsed - strike_at) / (first.max(release) - strike_at).max(4.0 / 60.0)).clamp(0.0, 1.0);
@@ -1725,7 +1727,9 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         // body rising out of it, and you glide on the standing foot while the kick slides you.
         anim.follow.filter(|(_, kind)| !push(*kind)).map(|(t, kind)| {
             let ([_, hit, through], _) = keys(kind, anim.kick_turn);
-            let swing = 0.4 * follow_time(kind);
+            // The leg drives through to the top of its follow-through fast (about 0.1 s after a
+            // shot's contact in Kev's clips).
+            let swing = 0.25 * follow_time(kind);
             let a = (t / swing).min(1.0);
             let a = 1.0 - (1.0 - a) * (1.0 - a);
             let b = ((t - swing) / KICK_SETTLE).clamp(0.0, 1.0);
