@@ -72,8 +72,7 @@ fn main() {
     }
     app
         .add_plugins((UiMaterialPlugin::<reticle::ReticleMaterial>::default(), UiMaterialPlugin::<gauges::GaugeMaterial>::default(), MaterialPlugin::<pass_line::PassLineMaterial>::default()))
-        .add_plugins((sfx::SfxPlugin, character::CharacterPlugin))
-        .insert_resource(ClearColor(Color::srgb(0.56, 0.68, 0.8)))
+        .add_plugins((sfx::SfxPlugin, character::CharacterPlugin, arena::ArenaPlugin))
         .init_resource::<Score>()
         .insert_resource(Bindings::load())
         .init_resource::<Actions>()
@@ -189,6 +188,8 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials
     let camera = commands
         .spawn((
             Camera3d::default(),
+            Camera { hdr: true, ..default() },
+            camera::look(),
             Projection::from(PerspectiveProjection { fov: FOV.to_radians(), ..default() }),
             CameraRig::default(),
             camera::CameraState::default(),
@@ -201,7 +202,7 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials
         image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT;
         let handle = images.add(image);
         // Bevy only draws the UI (HUD, reticle, menu) on a window's camera unless told otherwise.
-        commands.entity(camera).insert((Camera { target: RenderTarget::Image(handle.clone().into()), ..default() }, IsDefaultUiCamera));
+        commands.entity(camera).insert((Camera { target: RenderTarget::Image(handle.clone().into()), hdr: true, ..default() }, IsDefaultUiCamera));
         commands.insert_resource(HeadlessTarget(handle));
     }
     commands.spawn((
