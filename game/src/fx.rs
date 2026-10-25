@@ -28,10 +28,11 @@ pub enum Cheat {
     DebugInfo,
     SlowMotion,
     ShowZones,
+    Mixamo,
 }
 
 impl Cheat {
-    pub const ALL: [Cheat; 7] = [
+    pub const ALL: [Cheat; 8] = [
         Cheat::InfiniteStamina,
         Cheat::InfiniteEffort,
         Cheat::BallTrail,
@@ -39,6 +40,7 @@ impl Cheat {
         Cheat::DebugInfo,
         Cheat::SlowMotion,
         Cheat::ShowZones,
+        Cheat::Mixamo,
     ];
 
     pub fn label(self) -> &'static str {
@@ -50,12 +52,13 @@ impl Cheat {
             Cheat::DebugInfo => "Debug info",
             Cheat::SlowMotion => "Slow motion (25%)",
             Cheat::ShowZones => "Show control zones",
+            Cheat::Mixamo => "Animated character (Mixamo)",
         }
     }
 }
 
 #[derive(Resource, Default)]
-pub struct Cheats([bool; 7]);
+pub struct Cheats([bool; 8]);
 
 impl Cheats {
     pub fn on(&self, c: Cheat) -> bool {

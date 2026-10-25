@@ -4,6 +4,7 @@ mod arena;
 mod ball;
 mod body;
 mod camera;
+mod character;
 mod fx;
 mod gauges;
 mod input;
@@ -71,7 +72,7 @@ fn main() {
     }
     app
         .add_plugins((UiMaterialPlugin::<reticle::ReticleMaterial>::default(), UiMaterialPlugin::<gauges::GaugeMaterial>::default(), MaterialPlugin::<pass_line::PassLineMaterial>::default()))
-        .add_plugins(sfx::SfxPlugin)
+        .add_plugins((sfx::SfxPlugin, character::CharacterPlugin))
         .insert_resource(ClearColor(Color::srgb(0.56, 0.68, 0.8)))
         .init_resource::<Score>()
         .insert_resource(Bindings::load())
