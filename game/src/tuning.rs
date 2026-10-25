@@ -242,8 +242,8 @@ pub const FEINT_BACK: [(f32, f32); 5] = [(0.0, 3.0), (0.1, 5.8), (0.2, 5.8), (0.
 /// The forward feint out of a straight or side dribble is the roulette (Kev's practice recording,
 /// V1 634.07, 635.50, 640.47 s): the sole stops the ball, the turn to the left starts at 0.23 s,
 /// faces back at 0.45 s and holds there to 0.52 s, and is round again at 0.83 s (seconds from the
-/// press; 270 degrees comes at about 0.64 s). It travels at the forward feint's speeds (Kev: on
-/// its own slow speeds the player barely moved).
+/// press; 270 degrees comes at about 0.64 s). It travels as far and as fast as the fast cut (Kev),
+/// handing back when the fast cut does; the last of the turn then closes quickly.
 pub const ROULETTE_TURN: (f32, f32, f32, f32) = (0.23, 0.45, 0.52, 0.83);
 /// Out of a fast cut the forward feint turns you out the cut's way (degrees beyond your facing)
 /// into a deep crouch and back, facing on again by the second figure (s; V1 177.43, V2 200.10 s).
@@ -415,13 +415,9 @@ pub const PUSH_BALL_WINDUP: f32 = 8.0 / 60.0;
 pub const PUSH_BALL_NO_CONTROL: f32 = 0.5;
 pub const PUSH_BALL_COST: f32 = 0.375;
 pub const PUSH_BALL_REGEN_DELAY: f32 = 1.0;
-/// Sprinting switches the push ball's force up (BP_FastTap_ForceFromSpeed bytecode), but in Kev's
-/// practice recording a sprinted push straight on doesn't shoot away and die: the ball leads you by
-/// about 0.4 m at +0.27 s, 1.7-1.8 m at +0.53-0.67 s, still about 1.5 m at +1.0 s, and you take it
-/// back at about +1.33 s. A little more speed than a normal push and the ground's own friction match
-/// that, chasing at your sprint.
-pub const PUSH_BALL_SPRINT_FACTOR: f32 = 1.05;
-pub const SPRINT_PUSH_BALL_FRICTION: f32 = BASE_FRICTION;
+/// Sprinting switches the push ball's force up (BP_FastTap_ForceFromSpeed bytecode; Kev: the softer
+/// sprinted push tried from his recording felt wrong).
+pub const PUSH_BALL_SPRINT_FACTOR: f32 = 1.4;
 /// Ball speed by push direction against your facing: up to 60 deg, to 95 deg, beyond (Kev: the
 /// lower factors from his recording sent pushes back too short).
 pub const PUSH_BALL_SIDE_FACTOR: f32 = 0.89;

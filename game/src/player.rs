@@ -210,7 +210,7 @@ impl DribbleState {
             (true, _, Side) => &EXHAUSTED_DRIBBLE_SIDE,
             (true, _, Back) => &EXHAUSTED_DRIBBLE_BACK,
             (_, true, Forward) => match self.turn {
-                FeintTurn::Roulette => &FEINT_FORWARD,
+                FeintTurn::Roulette => &DRIBBLE_FORWARD,
                 FeintTurn::TurnOut(_) => &TURN_OUT_SPEED,
                 FeintTurn::None => &FEINT_FORWARD,
             },
@@ -228,6 +228,10 @@ impl DribbleState {
     }
 
     pub fn free(&self) -> f32 {
+        // The roulette goes as far and as fast as the fast cut (Kev): its speeds, its hand-back.
+        if self.feint && !self.exhausted && self.turn == FeintTurn::Roulette {
+            return DRIBBLE_FREE[Heading::Forward as usize];
+        }
         let free = if self.exhausted { EXHAUSTED_DRIBBLE_FREE } else if self.feint { FEINT_FREE } else { DRIBBLE_FREE };
         free[self.heading as usize]
     }
@@ -1246,6 +1250,9 @@ fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3
         let (ahead, right) = feint_ball_spot(&d);
         let spot = root + fwd * ahead + fwd.cross(Vec3::Y) * right;
         p.carry = None;
+        // The ball goes with you first, then eases to the spot, so it keeps up on the move (Kev: on
+        // the roulette's run it trailed behind).
+        let ball = ball + Vec3::new(p.vel.x, 0.0, p.vel.z) * dt;
         return ball.lerp(Vec3::new(spot.x, BALL_RADIUS, spot.z), 1.0 - (-dt / FEINT_BALL_EASE).exp());
     }
     // Lock move with the ball: the right sole goes onto the ball (players confirm) and rolls it
@@ -1546,7 +1553,7 @@ pub fn kicking(
         Kick::PushBall => (
             PUSH_BALL_SPEED * push_factor * sprint(PUSH_BALL_SPRINT_FACTOR),
             0.0,
-            if k.sprint { SPRINT_PUSH_BALL_FRICTION } else { PUSH_BALL_FRICTION },
+            PUSH_BALL_FRICTION,
             PUSH_BALL_NO_CONTROL,
         ),
         Kick::DribblePushBall => (DRIBBLE_PUSH_BALL_SPEED * sprint(DRIBBLE_PUSH_BALL_SPRINT_FACTOR), 0.0, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
@@ -1828,6 +1835,28 @@ mod tests {
             frames(&mut app, lock, 5, 0.04);
             frames(&mut app, press, 1, 0.016);
             assert!(dribble(&mut app).is_some_and(|d| d.feint && d.turn == want), "{first:?} then {second:?}");
+        }
+    }
+
+    #[test]
+    fn the_roulettes_ball_keeps_up_on_the_move() {
+        let mut p = Player { has_ball: true, vel: Vec3::NEG_Z * 6.0, ..default() };
+        let d = DribbleState { t: 0.0, feint: true, exhausted: false, heading: Heading::Forward, dir: Vec3::NEG_Z, facing: 0.0, cut: 0.0, turn: FeintTurn::Roulette };
+        p.dribble = Some(d);
+        let (mut root, mut ball) = (Vec3::new(0.0, 0.9, 0.0), Vec3::new(0.0, BALL_RADIUS, -0.3));
+        let dt = 1.0 / 60.0;
+        for i in 0..40 {
+            root += p.vel * dt;
+            if let Some(d) = p.dribble.as_mut() {
+                d.t += dt;
+            }
+            ball = carry_ball(&mut p, root, ball, i as f32 * dt, dt);
+            let (ahead, right) = feint_ball_spot(&p.dribble.unwrap());
+            let spot = root + Vec3::NEG_Z * ahead + Vec3::NEG_Z.cross(Vec3::Y) * right;
+            // Once it has settled (a few frames from where it was), it stays with the spot.
+            if i >= 8 {
+                assert!(Vec2::new(ball.x - spot.x, ball.z - spot.z).length() < 0.1, "frame {i}: ball {ball} spot {spot}");
+            }
         }
     }
 
