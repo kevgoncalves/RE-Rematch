@@ -684,6 +684,8 @@ enum Item {
     Bind(&'static str, &'static [Action]),
     /// Something fixed: its name, keyboard key and gamepad button ("MOUSE" draws the mouse).
     Fixed(&'static str, &'static str, &'static str),
+    /// One of Rematch's actions the prototype doesn't have yet, dimmed: name and Rematch's key.
+    Later(&'static str, &'static str),
 }
 
 /// The map's three columns of groups for a part, as Rematch lays out its Basics.
@@ -692,11 +694,24 @@ fn legend(part: Part) -> [&'static [Group]; 3] {
     match part {
         Part::Basics => [
             &[
-                Group { title: "Match infos", items: &[Item::Fixed("Show scoreboard (soon)", "TAB", "VIEW")] },
+                Group { title: "Match infos", items: &[Item::Later("Show scoreboard", "TAB")] },
                 Group { title: "Movement", items: &[Item::Bind("Move", MOVE), Item::Bind("Sprint", &[Sprint]), Item::Bind("Extra effort", &[ExtraEffort])] },
             ],
             &[Group { title: "Camera", items: &[Item::Fixed("Move camera", "MOUSE", "RIGHT STICK"), Item::Bind("Look at ball", &[LookAtBall])] }],
-            &[Group { title: "Communication", items: &[Item::Bind("Ball call", &[BallCall]), Item::Bind("Ping", &[Ping])] }],
+            &[Group {
+                title: "Communication",
+                items: &[
+                    Item::Bind("Ball call", &[BallCall]),
+                    Item::Bind("Ping", &[Ping]),
+                    Item::Later("Tactical communications", "1"),
+                    Item::Later("Compliment communications", "2"),
+                    Item::Later("Apologies communications", "3"),
+                    Item::Later("Send communication 1", "1"),
+                    Item::Later("Send communication 2", "2"),
+                    Item::Later("Send communication 3", "3"),
+                    Item::Later("Open/Close microphone", "4"),
+                ],
+            }],
         ],
         Part::WithBall => [
             &[Group { title: "Shooting", items: &[Item::Bind("Shoot", &[Shoot]), Item::Bind("Fake shoot", &[FakeShot])] }],
@@ -715,17 +730,17 @@ fn legend(part: Part) -> [&'static [Group]; 3] {
             &[Group { title: "Saves", items: &[Item::Bind("Dive", &[Dive])] }],
         ],
         Part::Goalkeeper => [
-            &[Group { title: "Goalkeeper", items: &[Item::Fixed("Goalkeeper dive (soon)", "", ""), Item::Fixed("Goalkeeper long range dive (soon)", "", "")] }],
+            &[Group { title: "Goalkeeper", items: &[Item::Later("Goalkeeper dive", ""), Item::Later("Goalkeeper long range dive", "")] }],
             &[],
             &[],
         ],
-        Part::Spectator => [&[Group { title: "Spectator", items: &[Item::Fixed("Spectator controls (soon)", "", "")] }], &[], &[]],
+        Part::Spectator => [&[Group { title: "Spectator", items: &[Item::Later("Spectator controls (soon)", "")] }], &[], &[]],
     }
 }
 
 // ------------------------------------------------------------------------------------------------
-// Look: colours and sizes (sampled from the recording; sizes for a 1280 x 720 window, Rematch's
-// 1080p layout scaled by 2/3)
+// Look: colours and sizes (sampled from the recording). Sizes are for a 720-pixel-high window
+// (Rematch's 1080p layout scaled by 2/3) and scale with the window's height, as Rematch's do.
 
 const ACCENT: Color = Color::srgb(0.443, 1.0, 0.627);
 const ACCENT_DIM: Color = Color::srgb(0.318, 0.859, 0.486);
@@ -734,7 +749,7 @@ const BAR: Color = Color::srgb(0.153, 0.184, 0.196);
 // UI blends in linear colour, so these need more alpha than they look to darken the game as much.
 const LEFT_PANEL: Color = Color::srgba(0.04, 0.09, 0.16, 0.985);
 const RIGHT_PANEL: Color = Color::srgba(0.06, 0.13, 0.24, 0.93);
-const PAUSE_SHADE: Color = Color::srgba(0.03, 0.08, 0.15, 0.85);
+const PAUSE_SHADE: Color = Color::srgba(0.03, 0.08, 0.15, 0.88);
 const DIALOG: Color = Color::srgba(0.153, 0.184, 0.196, 0.97);
 const TEXT: Color = Color::srgb(0.93, 0.95, 0.96);
 const TEXT_DIM: Color = Color::srgb(0.47, 0.52, 0.58);
@@ -763,19 +778,24 @@ const SLIDER_W: f32 = 234.0;
 const F_TAB: f32 = 14.0;
 const F_SECTION: f32 = 13.0;
 const F_ROW: f32 = 14.0;
-const F_CAP: f32 = 11.0;
+const F_CAP: f32 = 12.0;
+
+/// The menu's text size at a 720-pixel-high window (`scale_fonts` follows the window).
+#[derive(Component, Clone, Copy)]
+struct MenuFont(f32);
 
 fn text(s: impl Into<String>, size: f32, color: Color) -> impl Bundle {
-    (Text::new(s), TextFont { font_size: size, ..default() }, TextColor(color))
+    (Text::new(s), TextFont { font_size: size, ..default() }, TextColor(color), MenuFont(size))
 }
 
 /// Text with Rematch's roomy line spacing, for descriptions.
 fn prose(s: impl Into<String>, size: f32, color: Color) -> impl Bundle {
-    (Text::new(s), TextFont { font_size: size, line_height: LineHeight::RelativeToFont(1.45), ..default() }, TextColor(color))
+    (Text::new(s), TextFont { font_size: size, line_height: LineHeight::RelativeToFont(1.45), ..default() }, TextColor(color), MenuFont(size))
 }
 
+/// A length at a 720-pixel-high window, as a share of the window's height.
 fn px(v: f32) -> Val {
-    Val::Px(v)
+    Val::Vh(v / 7.2)
 }
 
 /// A node filling its parent, behind the parent's other children.
@@ -1085,8 +1105,8 @@ struct ConfirmText;
 fn keycap(p: &mut ChildSpawnerCommands, label: &str, bg: Color) {
     p.spawn((
         Node {
-            min_width: px(17.0),
-            height: px(17.0),
+            min_width: px(18.0),
+            height: px(18.0),
             padding: UiRect::horizontal(px(4.0)),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
@@ -1176,7 +1196,7 @@ fn menu_item(p: &mut ChildSpawnerCommands, kind: MenuButton, label: &str, width:
     let id = b.id();
     b.with_children(|b| {
         b.spawn((Skin(id), sliced(art.bar.clone(), 0.0, 12.0), fill()));
-        b.spawn((Skin(id), text(label, 15.0, TEXT)));
+        b.spawn((Skin(id), text(label, 16.0, TEXT)));
     });
 }
 
@@ -1223,12 +1243,13 @@ fn spawn_settings(p: &mut ChildSpawnerCommands, art: &MenuArt) {
             body.spawn((TabBody(tab), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), display: Display::None, ..default() })).with_children(|t| {
                 t.spawn((Node { width: Val::Percent(50.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(LEFT_PANEL)))
                     .with_children(|left| spawn_list(left, tab, art));
-                t.spawn((Node { width: Val::Percent(50.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(RIGHT_PANEL))).with_children(|right| {
+                // A long description is cut at the bottom, as in Rematch.
+                t.spawn((Node { width: Val::Percent(50.0), height: Val::Percent(100.0), overflow: Overflow::clip(), ..default() }, BackgroundColor(RIGHT_PANEL))).with_children(|right| {
                     if tab == Tab::Controls {
                         spawn_map(right, art);
                         right
                             .spawn(Node { position_type: PositionType::Absolute, left: px(43.0), right: px(30.0), top: px(528.0), flex_direction: FlexDirection::Column, ..default() })
-                            .with_children(|d| spawn_desc(d, tab, 13.0, art));
+                            .with_children(|d| spawn_desc(d, tab, 12.0, art));
                     } else {
                         right
                             .spawn(Node { position_type: PositionType::Absolute, left: px(43.0), width: px(420.0), top: px(52.0), flex_direction: FlexDirection::Column, ..default() })
@@ -1557,9 +1578,9 @@ fn spawn_map(right: &mut ChildSpawnerCommands, art: &MenuArt) {
             kb.spawn((KbKey(key), Node { border: UiRect::all(px(1.0)), ..at(top, left, KEY_H, KEY_H) }, BorderColor(MAP_LINE), BorderRadius::all(px(2.0))))
                 .with_child((KbLabel(key), text(input_name(&Input::Key(key)), 6.0, INK), Visibility::Hidden));
         }
-        kb.spawn((ImageNode::new(art.mouse_map.clone()).with_color(MAP_LINE), at(-6.0, 362.0, 44.0, 62.0)));
+        kb.spawn((ImageNode::new(art.mouse_map.clone()).with_color(MAP_LINE), at(-10.0, 359.0, 50.0, 70.0)));
         for (i, button) in MOUSE_BUTTONS.into_iter().enumerate() {
-            kb.spawn((MouseFill(button), ImageNode::new(art.mouse_fill[i].clone()).with_color(ACCENT), at(-6.0, 362.0, 44.0, 62.0), Visibility::Hidden));
+            kb.spawn((MouseFill(button), ImageNode::new(art.mouse_fill[i].clone()).with_color(ACCENT), at(-10.0, 359.0, 50.0, 70.0), Visibility::Hidden));
         }
     });
     right.spawn((DeviceOnly(Device::Gamepad), at(74.0, 93.0, 360.0, 120.0))).with_children(|pad| {
@@ -1626,6 +1647,7 @@ pub fn update_systems() -> ScheduleConfigs<ScheduleSystem> {
         describe,
         refresh_chrome,
         refresh_map,
+        scale_fonts,
     )
         .chain()
 }
@@ -1664,13 +1686,16 @@ pub fn menu_keys(keys: Res<ButtonInput<KeyCode>>, mut menu: ResMut<Menu>, mut bl
 
 /// Shows the open page and tab, and frees the cursor while the menu is open. It runs after
 /// `grab_cursor` (which frees the cursor on Esc), so closing the menu takes the cursor back: you're
-/// straight back in the game, without a click that would also shoot.
+/// straight back in the game, without a click that would also shoot. Like Rematch's, the menu
+/// hides the HUD (the other UI) while it's open.
 pub fn show_menu(
     menu: Res<Menu>,
     mut was_open: Local<bool>,
     mut root: Single<(&mut Node, &mut BackgroundColor), With<MenuRoot>>,
     mut pages: Query<(&PageNode, &mut Node), Without<MenuRoot>>,
     mut tabs: Query<(&TabBody, &mut Node), (Without<MenuRoot>, Without<PageNode>)>,
+    mut hud: Query<(Entity, &mut Visibility), (With<Node>, Without<ChildOf>, Without<MenuRoot>)>,
+    mut hidden: Local<HashMap<Entity, Visibility>>,
     window: Option<Single<&mut Window, With<PrimaryWindow>>>,
 ) {
     if !menu.is_changed() {
@@ -1688,6 +1713,14 @@ pub fn show_menu(
     }
     if menu.open() != *was_open {
         *was_open = menu.open();
+        for (entity, mut visibility) in &mut hud {
+            if menu.open() {
+                hidden.insert(entity, *visibility);
+                *visibility = Visibility::Hidden;
+            } else if let Some(was) = hidden.remove(&entity) {
+                *visibility = was;
+            }
+        }
         if let Some(mut window) = window {
             window.cursor_options.grab_mode = if menu.open() { CursorGrabMode::None } else { CursorGrabMode::Locked };
             window.cursor_options.visible = menu.open();
@@ -1988,11 +2021,12 @@ fn light_rows(
     mut menu: ResMut<Menu>,
     rows: Query<(Entity, &Row, &Interaction)>,
     slots: Query<&BindSlot>,
-    mut tints: Query<(&Tint, Option<&mut BackgroundColor>, Option<&mut TextColor>, Option<&mut ImageNode>, Option<&mut Visibility>)>,
+    mut tints: Query<(&Tint, Option<&mut BackgroundColor>, Option<&mut TextColor>, Option<&mut ImageNode>, Option<&mut Visibility>, Has<ClearBind>)>,
 ) {
     if !menu.open() {
         return;
     }
+    let capturing = menu.capturing.is_some();
     let mut lit: HashSet<Entity> = HashSet::new();
     if let Some((action, ..)) = &menu.capturing {
         match menu.capture_row {
@@ -2014,12 +2048,14 @@ fn light_rows(
         menu.bypass_change_detection().described = Some(row);
     }
     let soon: HashSet<Entity> = rows.iter().filter(|(_, r, _)| r.def.soon()).map(|(e, ..)| e).collect();
-    for (tint, bg, color, image, visibility) in &mut tints {
+    for (tint, bg, color, image, visibility, clear) in &mut tints {
         let (on, dim) = (lit.contains(&tint.row), soon.contains(&tint.row));
         if tint.ink == Ink::OnHover
             && let Some(mut visibility) = visibility
         {
-            visibility.set_if_neq(if on && !dim { Visibility::Inherited } else { Visibility::Hidden });
+            // While capturing, Rematch keeps only the edit icon.
+            let shown = on && !dim && !(clear && capturing);
+            visibility.set_if_neq(if shown { Visibility::Inherited } else { Visibility::Hidden });
             continue;
         }
         let c = ink_color(tint.ink, on, dim);
@@ -2199,6 +2235,21 @@ fn refresh_map(
     });
 }
 
+/// Text sizes follow the window's height, like the rest of the menu.
+fn scale_fonts(root: Single<&ComputedNode, With<MenuRoot>>, mut texts: Query<(&MenuFont, &mut TextFont)>, added: Query<(), Added<MenuFont>>, mut last: Local<f32>) {
+    let height = root.size.y * root.inverse_scale_factor;
+    if height <= 0.0 || (height == *last && added.is_empty()) {
+        return;
+    }
+    *last = height;
+    for (MenuFont(size), mut font) in &mut texts {
+        let scaled = size * height / 720.0;
+        if font.font_size != scaled {
+            font.font_size = scaled;
+        }
+    }
+}
+
 fn spawn_legend_item(r: &mut ChildSpawnerCommands, item: &Item, bindings: &Bindings, device: Device, art: &MenuArt) {
     match item {
         Item::Bind(name, actions) => {
@@ -2214,7 +2265,8 @@ fn spawn_legend_item(r: &mut ChildSpawnerCommands, item: &Item, bindings: &Bindi
                     spawn_chord(r, chord, art, None);
                 }
             }
-            r.spawn(text(*name, 12.0, if soon || bound.is_empty() { TEXT_DIM } else { TEXT }));
+            let stick = *actions == MOVE && device == Device::Gamepad;
+            r.spawn(text(*name, 12.0, if soon || (bound.is_empty() && !stick) { TEXT_DIM } else { TEXT }));
         }
         Item::Fixed(name, kb, pad) => {
             match if device == Device::Keyboard { *kb } else { *pad } {
@@ -2224,7 +2276,13 @@ fn spawn_legend_item(r: &mut ChildSpawnerCommands, item: &Item, bindings: &Bindi
                 }
                 cap => keycap(r, cap, KEYCAP),
             }
-            r.spawn(text(*name, 12.0, if name.ends_with("(soon)") { TEXT_DIM } else { TEXT }));
+            r.spawn(text(*name, 12.0, TEXT));
+        }
+        Item::Later(name, kb) => {
+            if device == Device::Keyboard && !kb.is_empty() {
+                keycap(r, kb, KEYCAP_DIM);
+            }
+            r.spawn(text(*name, 12.0, TEXT_DIM));
         }
     }
 }
