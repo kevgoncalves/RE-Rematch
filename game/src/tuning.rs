@@ -200,15 +200,20 @@ pub const LOCK_BRAKE_OUT: f32 = 0.2;
 pub const LOCK_BRAKE_UNTIL: f32 = 0.6;
 // Dash (mechanics.md §8): speed (m/s) over the seconds since the press. The game's curves are in
 // seconds: their keys fall on the dash's events (blend-in 6f, after-dash 14f, second dash free 42f).
-/// When you're free (the dash animation's blend-out), by sector: forward, side, back.
-pub const DASH_FREE: [f32; 3] = [32.0 / 60.0, 23.0 / 60.0, 32.0 / 60.0];
-pub const SECOND_DASH_FREE: [f32; 3] = [42.0 / 60.0, 24.0 / 60.0, 29.0 / 60.0];
-/// Keeping the stick within 15 deg of the dash's way leaves it early from these frames.
-pub const DASH_EXIT_FROM: f32 = 14.4 / 60.0;
+/// When you're free (the dash animation's blend-out), by sector: forward, side, back. Kev's
+/// practice recording has you back in the lock stance 0.40-0.50 s after a side dash's press.
+pub const DASH_FREE: [f32; 3] = [32.0 / 60.0, 27.0 / 60.0, 32.0 / 60.0];
+pub const SECOND_DASH_FREE: [f32; 3] = [42.0 / 60.0, 27.0 / 60.0, 29.0 / 60.0];
+/// Keeping the stick within 15 deg of the dash's way leaves it early from these frames (after the
+/// burst, which now comes later).
+pub const DASH_EXIT_FROM: f32 = 20.0 / 60.0;
 pub const SECOND_DASH_EXIT_FROM: f32 = 25.2 / 60.0;
 pub const DASH_EXIT_ANGLE: f32 = 15.0;
-pub const DASH_SPEED: [(f32, f32); 6] = [(0.0, 6.0), (0.1, 8.5), (0.233, 8.5), (0.331, 6.5), (0.5, 4.5), (1.0, 4.5)];
-pub const SECOND_DASH_SPEED: [(f32, f32); 5] = [(0.0, 6.0), (0.1, 7.2), (0.3, 7.2), (0.7, 2.0), (1.0, 2.0)];
+/// In Kev's practice recording the dash doesn't burst at the press: you gather for about 0.1 s, the
+/// lunge shows from +100-160 ms, is widest at +180-330 ms, and covers about 2.3 m by the time you
+/// are back in the stance. Both dashes run that shape, the second a little weaker.
+pub const DASH_SPEED: [(f32, f32); 6] = [(0.0, 2.5), (0.1, 3.0), (0.18, 7.5), (0.3, 7.5), (0.45, 3.0), (1.0, 3.0)];
+pub const SECOND_DASH_SPEED: [(f32, f32); 6] = [(0.0, 4.0), (0.1, 4.0), (0.2, 7.0), (0.3, 7.0), (0.5, 2.0), (1.0, 2.0)];
 pub const DASH_COOLDOWN: f32 = 0.8;
 pub const DASH_COST: f32 = 0.75;
 /// The second dash can cut into the first from here, while the first one's cooldown runs.
@@ -410,11 +415,18 @@ pub const PUSH_BALL_WINDUP: f32 = 8.0 / 60.0;
 pub const PUSH_BALL_NO_CONTROL: f32 = 0.5;
 pub const PUSH_BALL_COST: f32 = 0.375;
 pub const PUSH_BALL_REGEN_DELAY: f32 = 1.0;
-/// Sprinting switches the push ball's force up (BP_FastTap_ForceFromSpeed bytecode).
-pub const PUSH_BALL_SPRINT_FACTOR: f32 = 1.4;
-/// Ball speed by push direction against your facing: up to 60 deg, to 95 deg, beyond.
-pub const PUSH_BALL_SIDE_FACTOR: f32 = 0.89;
-pub const PUSH_BALL_BACK_FACTOR: f32 = 0.79;
+/// Sprinting switches the push ball's force up (BP_FastTap_ForceFromSpeed bytecode), but in Kev's
+/// practice recording a sprinted push straight on doesn't shoot away and die: the ball leads you by
+/// about 0.4 m at +0.27 s, 1.7-1.8 m at +0.53-0.67 s, still about 1.5 m at +1.0 s, and you take it
+/// back at about +1.33 s. A little more speed than a normal push and the ground's own friction match
+/// that, chasing at your sprint.
+pub const PUSH_BALL_SPRINT_FACTOR: f32 = 1.05;
+pub const SPRINT_PUSH_BALL_FRICTION: f32 = BASE_FRICTION;
+/// Ball speed by how far the push turns you: up to 60 deg, to 95 deg, beyond. A push into a turn
+/// in the recording stays within about 0.8 m of you and is yours again by about +0.8 s: chased at
+/// your run or your sprint, these keep it there (at a sprint it leads by 0.4 m at most).
+pub const PUSH_BALL_SIDE_FACTOR: f32 = 0.72;
+pub const PUSH_BALL_BACK_FACTOR: f32 = 0.64;
 pub const EXHAUSTED_PUSH_BALL_SPEED: f32 = 11.25;
 pub const EXHAUSTED_PUSH_BALL_LIFT: f32 = 13.0; // degrees
 /// After the touch you chase the ball on a scripted speed (m/s over the rest of the move),
@@ -445,7 +457,9 @@ pub const DRIBBLE_PUSH_BALL_LENGTH: [f32; 3] = [52.0 / 60.0, 47.0 / 60.0, 74.0 /
 
 // Extra effort (mechanics.md §10)
 pub const MAX_EXTRA_EFFORT: f32 = 1.0;
-pub const EXTRA_EFFORT_DRAIN: f32 = 0.5;
+/// Kev's practice recording (the gauge on the HUD, nine uses): held, the gauge drains 0.45-0.48 a
+/// second after its start cost, so a full gauge runs dry about 1.55 s in, Shift still held or not.
+pub const EXTRA_EFFORT_DRAIN: f32 = 0.48;
 pub const EXTRA_EFFORT_REGEN: f32 = 0.0625;
 /// With stamina full, the gauge refills 3x faster (ExtraEffortRegenMultiplier 3 at threshold 1.0; players confirm).
 pub const EXTRA_EFFORT_REGEN_FULL_STAMINA: f32 = 0.1875;
@@ -472,10 +486,13 @@ pub const EFFORT_CHOP_ANGLE: f32 = 20.0;
 pub const EXTRA_EFFORT_FRICTION: f32 = BASE_FRICTION * 1.5;
 /// At extra effort speed you catch the ball again about half a second after each tap, so a
 /// full gauge (one ~1.5 s hold) gives three cuts, as players report.
-/// The ability's cost effect takes a quarter of the gauge at activation, but players see no
-/// instant drop in the game, so the native code must apply it differently (open question).
-/// Until that is read, activation is free and only the 0.5/s hold drain applies (~2 s full).
-pub const EXTRA_EFFORT_START_COST: f32 = 0.0;
+/// Starting it takes a quarter of the gauge at once (the ability's cost effect): in Kev's practice
+/// recording the gauge drops from full to about 0.75 on the first frame after the second Shift
+/// press, every time.
+pub const EXTRA_EFFORT_START_COST: f32 = 0.25;
+/// Once started, extra effort runs at least this long (s) even if Shift is let go at once: a 0.1 s
+/// tap in the recording keeps draining the gauge for about 0.2 s and costs about 0.3 in all.
+pub const EE_MIN_ACTIVE: f32 = 0.2;
 /// The auto tap (starting extra effort with the ball) is weaker in the middle of a big turn:
 /// x0.8 in a 135 deg turn, x0.5 in a 180 deg one; x0.9 for a ball 20 cm or more off the ground.
 pub const EXTRA_EFFORT_TAP_IN_135_TURN: f32 = 0.8;

@@ -719,13 +719,16 @@ pub fn player_move(
     if p.locked {
         p.extra_active = false;
     }
-    if actions.just_pressed(Action::ExtraEffort) && p.extra_effort > 0.05 && !p.locked {
+    // Starting it takes its cost at once; pressing again while it still runs doesn't start it anew.
+    if actions.just_pressed(Action::ExtraEffort) && p.extra_effort > 0.05 && !p.locked && !p.extra_active {
         p.extra_effort -= EXTRA_EFFORT_START_COST;
         p.extra_active = true;
     }
     if p.extra_active {
         p.extra_effort -= EXTRA_EFFORT_DRAIN * dt;
-        if !actions.pressed(Action::ExtraEffort) || p.extra_effort <= 0.0 {
+        // A tap still runs its first EE_MIN_ACTIVE (p.ee_on counts up to the last frame).
+        let held = actions.pressed(Action::ExtraEffort) || p.ee_on + dt < EE_MIN_ACTIVE;
+        if !held || p.extra_effort <= 0.0 {
             p.extra_active = false;
         }
     } else {
@@ -1506,7 +1509,11 @@ pub fn kicking(
     // speed going sideways or back and gains it when sprinting; the dribble one only when sprinting.
     let push_dir = if k.steer == Vec3::ZERO { forward(p.facing) } else { k.steer };
     let push_angle = forward(p.facing).angle_between(push_dir).to_degrees();
-    let push_factor = match push_angle {
+    // How far the push turns you: against your facing at the touch, and against your run at the
+    // press, so turning toward the push during its wind-up still counts as pushing into a turn.
+    let run_way = Vec3::new(k.entry.x, 0.0, k.entry.z);
+    let turn_angle = if run_way.length() > 1.0 { push_angle.max(run_way.angle_between(push_dir).to_degrees()) } else { push_angle };
+    let push_factor = match turn_angle {
         a if a <= 60.0 => 1.0,
         a if a <= 95.0 => PUSH_BALL_SIDE_FACTOR,
         _ => PUSH_BALL_BACK_FACTOR,
@@ -1538,7 +1545,13 @@ pub fn kicking(
         // Tired push balls ignore sprinting and pop up a little.
         Kick::PushBall if p.exhausted => (EXHAUSTED_PUSH_BALL_SPEED * push_factor, EXHAUSTED_PUSH_BALL_LIFT, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
         Kick::DribblePushBall if p.exhausted => (EXHAUSTED_PUSH_BALL_SPEED, EXHAUSTED_PUSH_BALL_LIFT, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
-        Kick::PushBall => (PUSH_BALL_SPEED * push_factor * sprint(PUSH_BALL_SPRINT_FACTOR), 0.0, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
+        // Sprinting pushes the ball a little harder and it runs on longer.
+        Kick::PushBall => (
+            PUSH_BALL_SPEED * push_factor * sprint(PUSH_BALL_SPRINT_FACTOR),
+            0.0,
+            if k.sprint { SPRINT_PUSH_BALL_FRICTION } else { PUSH_BALL_FRICTION },
+            PUSH_BALL_NO_CONTROL,
+        ),
         Kick::DribblePushBall => (DRIBBLE_PUSH_BALL_SPEED * sprint(DRIBBLE_PUSH_BALL_SPRINT_FACTOR), 0.0, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
     };
     let yaw = match k.kind {
@@ -1900,7 +1913,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "activation cost on hold until the native cost code is read"]
     fn full_extra_effort_gives_three_cuts() {
         let mut app = App::new();
         app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
@@ -1915,9 +1927,77 @@ mod tests {
                 cuts += 1;
             }
             frames(&mut app, &[Action::ExtraEffort], 10, 0.016); // a short cut, ~0.17 s held
-            frames(&mut app, &[], 1, 0.016);
+            frames(&mut app, &[], 15, 0.016); // let go, and the next double tap
         }
         assert_eq!(cuts, 3, "a full gauge gives three cuts, gauge left {}", gauge(&mut app));
+    }
+
+    #[test]
+    fn side_dash_gathers_then_lunges_about_2_3_m() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+        let dash = DashState { t: 0.0, second: false, dir: Vec3::X, facing: 0.0, heading: Heading::Side };
+        app.world_mut().spawn((Transform::default(), Player { dash: Some(dash), locked: true, ..default() }));
+        app.world_mut().spawn(CameraRig::default());
+        let dt = 1.0 / 60.0;
+        let (mut t, mut x, mut fastest) = (0.0, 0.0, (0.0, 0.0));
+        let mut gathered = 0.0;
+        while app.world_mut().query::<&Player>().single(app.world()).unwrap().dash.is_some() {
+            frames(&mut app, &[Action::Lock], 1, dt);
+            let v = app.world_mut().query::<&Player>().single(app.world()).unwrap().vel.x;
+            t += dt;
+            x += v * dt;
+            if t <= 0.1 + 1e-4 {
+                gathered = x;
+            }
+            if v > fastest.1 {
+                fastest = (t, v);
+            }
+        }
+        // Kev's practice recording: barely moving for the first 0.1 s, fastest at +180-330 ms,
+        // about 2.3 m to the side by the time you are back in the stance (0.40-0.50 s).
+        assert!(gathered < 0.35, "{gathered} m in the gather");
+        assert!((0.17..0.31).contains(&fastest.0), "fastest at {} s", fastest.0);
+        assert!((0.4..0.5).contains(&t), "free at {t} s");
+        assert!((2.1..2.6).contains(&x), "{x} m");
+    }
+
+    #[test]
+    fn extra_effort_gauge_runs_as_in_kevs_recording() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+        app.world_mut().spawn((Transform::default(), Player::default()));
+        app.world_mut().spawn(CameraRig::default());
+        let state = |app: &mut App| {
+            let p = app.world_mut().query::<&Player>().single(app.world()).unwrap();
+            (p.extra_effort, p.extra_active)
+        };
+        let dt = 1.0 / 60.0;
+        // Held from full: about a quarter goes at once, then it runs dry about 1.55 s in.
+        frames(&mut app, &[Action::ExtraEffort], 1, dt);
+        let (first, _) = state(&mut app);
+        assert!((first - 0.74).abs() < 0.02, "after the first frame {first}");
+        let mut held = dt;
+        while state(&mut app).1 && held < 3.0 {
+            frames(&mut app, &[Action::ExtraEffort], 1, dt);
+            held += dt;
+        }
+        assert!((1.5..1.62).contains(&held), "a full hold lasts {held} s");
+        // Refilled, a 0.1 s tap still runs about 0.2 s and costs about a third of the gauge.
+        app.world_mut().query::<&mut Player>().single_mut(app.world_mut()).unwrap().extra_effort = MAX_EXTRA_EFFORT;
+        frames(&mut app, &[], 1, dt);
+        frames(&mut app, &[Action::ExtraEffort], 6, dt);
+        let mut on = 6.0 * dt;
+        while state(&mut app).1 && on < 1.0 {
+            frames(&mut app, &[], 1, dt);
+            on += dt;
+        }
+        let (left, _) = state(&mut app);
+        assert!((0.18..0.24).contains(&on), "a tap runs {on} s");
+        assert!((0.62..0.7).contains(&left), "a tap leaves {left}");
+        // It still counts as a tap: its burst carries you on and your magnet stays off a moment.
+        let p = app.world_mut().query::<&Player>().single(app.world()).unwrap();
+        assert!(p.ee_carry > 0.0 && p.magnet_off > 0.0, "carry {} magnet off {}", p.ee_carry, p.magnet_off);
     }
 
     #[test]
