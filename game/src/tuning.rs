@@ -422,7 +422,9 @@ pub const DRIBBLE_PUSH_BALL_LENGTH: [f32; 3] = [52.0 / 60.0, 47.0 / 60.0, 74.0 /
 
 // Extra effort (mechanics.md §10)
 pub const MAX_EXTRA_EFFORT: f32 = 1.0;
-pub const EXTRA_EFFORT_DRAIN: f32 = 0.5;
+/// Kev's practice recording (the gauge on the HUD, nine uses): held, the gauge drains 0.45-0.48 a
+/// second after its start cost, so a full gauge runs dry about 1.55 s in, Shift still held or not.
+pub const EXTRA_EFFORT_DRAIN: f32 = 0.48;
 pub const EXTRA_EFFORT_REGEN: f32 = 0.0625;
 /// With stamina full, the gauge refills 3x faster (ExtraEffortRegenMultiplier 3 at threshold 1.0; players confirm).
 pub const EXTRA_EFFORT_REGEN_FULL_STAMINA: f32 = 0.1875;
@@ -449,10 +451,13 @@ pub const EFFORT_CHOP_ANGLE: f32 = 20.0;
 pub const EXTRA_EFFORT_FRICTION: f32 = BASE_FRICTION * 1.5;
 /// At extra effort speed you catch the ball again about half a second after each tap, so a
 /// full gauge (one ~1.5 s hold) gives three cuts, as players report.
-/// The ability's cost effect takes a quarter of the gauge at activation, but players see no
-/// instant drop in the game, so the native code must apply it differently (open question).
-/// Until that is read, activation is free and only the 0.5/s hold drain applies (~2 s full).
-pub const EXTRA_EFFORT_START_COST: f32 = 0.0;
+/// Starting it takes a quarter of the gauge at once (the ability's cost effect): in Kev's practice
+/// recording the gauge drops from full to about 0.75 on the first frame after the second Shift
+/// press, every time.
+pub const EXTRA_EFFORT_START_COST: f32 = 0.25;
+/// Once started, extra effort runs at least this long (s) even if Shift is let go at once: a 0.1 s
+/// tap in the recording keeps draining the gauge for about 0.2 s and costs about 0.3 in all.
+pub const EE_MIN_ACTIVE: f32 = 0.2;
 /// The auto tap (starting extra effort with the ball) is weaker in the middle of a big turn:
 /// x0.8 in a 135 deg turn, x0.5 in a 180 deg one; x0.9 for a ball 20 cm or more off the ground.
 pub const EXTRA_EFFORT_TAP_IN_135_TURN: f32 = 0.8;

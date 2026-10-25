@@ -671,13 +671,16 @@ pub fn player_move(
     if p.locked {
         p.extra_active = false;
     }
-    if actions.just_pressed(Action::ExtraEffort) && p.extra_effort > 0.05 && !p.locked {
+    // Starting it takes its cost at once; pressing again while it still runs doesn't start it anew.
+    if actions.just_pressed(Action::ExtraEffort) && p.extra_effort > 0.05 && !p.locked && !p.extra_active {
         p.extra_effort -= EXTRA_EFFORT_START_COST;
         p.extra_active = true;
     }
     if p.extra_active {
         p.extra_effort -= EXTRA_EFFORT_DRAIN * dt;
-        if !actions.pressed(Action::ExtraEffort) || p.extra_effort <= 0.0 {
+        // A tap still runs its first EE_MIN_ACTIVE (p.ee_on counts up to the last frame).
+        let held = actions.pressed(Action::ExtraEffort) || p.ee_on + dt < EE_MIN_ACTIVE;
+        if !held || p.extra_effort <= 0.0 {
             p.extra_active = false;
         }
     } else {
@@ -1773,7 +1776,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "activation cost on hold until the native cost code is read"]
     fn full_extra_effort_gives_three_cuts() {
         let mut app = App::new();
         app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
@@ -1788,9 +1790,44 @@ mod tests {
                 cuts += 1;
             }
             frames(&mut app, &[Action::ExtraEffort], 10, 0.016); // a short cut, ~0.17 s held
-            frames(&mut app, &[], 1, 0.016);
+            frames(&mut app, &[], 15, 0.016); // let go, and the next double tap
         }
         assert_eq!(cuts, 3, "a full gauge gives three cuts, gauge left {}", gauge(&mut app));
+    }
+
+    #[test]
+    fn extra_effort_gauge_runs_as_in_kevs_recording() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+        app.world_mut().spawn((Transform::default(), Player::default()));
+        app.world_mut().spawn(CameraRig::default());
+        let state = |app: &mut App| {
+            let p = app.world_mut().query::<&Player>().single(app.world()).unwrap();
+            (p.extra_effort, p.extra_active)
+        };
+        let dt = 1.0 / 60.0;
+        // Held from full: about a quarter goes at once, then it runs dry about 1.55 s in.
+        frames(&mut app, &[Action::ExtraEffort], 1, dt);
+        let (first, _) = state(&mut app);
+        assert!((first - 0.74).abs() < 0.02, "after the first frame {first}");
+        let mut held = dt;
+        while state(&mut app).1 && held < 3.0 {
+            frames(&mut app, &[Action::ExtraEffort], 1, dt);
+            held += dt;
+        }
+        assert!((1.5..1.62).contains(&held), "a full hold lasts {held} s");
+        // Refilled, a 0.1 s tap still runs about 0.2 s and costs about a third of the gauge.
+        app.world_mut().query::<&mut Player>().single_mut(app.world_mut()).unwrap().extra_effort = MAX_EXTRA_EFFORT;
+        frames(&mut app, &[], 1, dt);
+        frames(&mut app, &[Action::ExtraEffort], 6, dt);
+        let mut on = 6.0 * dt;
+        while state(&mut app).1 && on < 1.0 {
+            frames(&mut app, &[], 1, dt);
+            on += dt;
+        }
+        let (left, _) = state(&mut app);
+        assert!((0.18..0.24).contains(&on), "a tap runs {on} s");
+        assert!((0.62..0.7).contains(&left), "a tap leaves {left}");
     }
 
     #[test]
