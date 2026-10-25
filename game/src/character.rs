@@ -58,6 +58,13 @@ const SIDEWAYS: (f32, f32) = (60.0, 40.0);
 /// A late release still gets this long a strike: the foot meets the ball up to 4 frames after it
 /// left (as the procedural body).
 const STRIKE: f32 = 4.0 / 60.0;
+/// The kick clip's strike never runs faster than this many times its own speed: a release with
+/// only a frame or two to the contact would swing the leg 90 degrees in a frame. The foot then
+/// reaches its contact pose a frame or two after the ball has gone.
+const STRIKE_RATE: f32 = 2.0;
+/// A running cycle's legs turn over at most this many times its own cadence; past that its
+/// stride lengthens instead (the sprint is the fast run's clip, 5 m/s, played up to 9.5).
+const CADENCE_MAX: f32 = 1.35;
 /// The chest control's share of the upper body at most.
 const CONTROL_SHARE: f32 = 0.85;
 /// Where the control's clip has the ball (bent over it, arms out), against the game's snap.
@@ -381,6 +388,8 @@ pub struct Mixer {
     lateral: f32,
     roll: f32,
     pitch: f32,
+    /// The hips' turn toward the travel (deg), eased.
+    warp: f32,
     spin: f32,
     kick_turn: f32,
     kick_key: u32,
@@ -459,11 +468,11 @@ pub fn kick_time(t: f32, k: &KickState, dt: f32, m: &ClipMeta) -> f32 {
     // Game seconds left to the contact after this frame.
     let left = at - k.elapsed;
     if left <= 0.0 {
-        return contact.max(t);
+        return (t + STRIKE_RATE * dt).min(contact.max(t));
     }
     let to_go = contact - t;
     if to_go > left + dt {
-        t + to_go * dt / (left + dt)
+        t + (to_go * dt / (left + dt)).min(STRIKE_RATE * dt)
     } else {
         (t + dt).min(windup.max(contact - left)).max(t)
     }
@@ -557,13 +566,16 @@ impl Mixer {
         for (w, t) in self.loco.iter_mut().zip(target) {
             *w += (t - *w) * ease;
         }
-        let (mut stride, mut moving) = (0.0, 0.0);
+        let (mut stride, mut cadence, mut moving) = (0.0, 0.0, 0.0);
         for c in Clip::ALL.iter().filter(|c| m.get(**c).speed > 0.0) {
-            stride += self.loco[*c as usize] * m.stride(*c);
-            moving += self.loco[*c as usize];
+            let w = self.loco[*c as usize];
+            stride += w * m.stride(*c);
+            cadence += w / m.get(*c).duration.max(1e-3);
+            moving += w;
         }
         if moving > 1e-3 && stride > 1e-3 {
-            self.phase = (self.phase + speed * dt / (stride / moving)).rem_euclid(1.0);
+            let cycles = (speed / (stride / moving)).min(CADENCE_MAX * cadence / moving);
+            self.phase = (self.phase + cycles * dt).rem_euclid(1.0);
         }
         self.idle += dt;
 
@@ -609,10 +621,15 @@ impl Mixer {
         let lean = (self.lateral / lean_max).clamp(-1.0, 1.0) * (speed / SPRINT_SPEED).min(1.0) * 14.0;
         self.roll += (lean - self.roll) * (8.0 * dt).min(1.0);
         mix.lean = self.roll;
-        if !directional && speed > 0.5 {
+        // Eased, so locking on or starting a turn doesn't snap the hips round.
+        let warp = if !directional && speed > 0.5 {
             let in_turn = if p.turn.is_some() { 0.5 } else { 1.0 };
-            mix.warp = -angle.clamp(-60.0, 60.0) * (speed / 2.0).min(1.0) * in_turn * rest;
-        }
+            -angle.clamp(-60.0, 60.0) * (speed / 2.0).min(1.0) * in_turn * rest
+        } else {
+            0.0
+        };
+        self.warp += (warp - self.warp) * (dt / 0.1).min(1.0);
+        mix.warp = self.warp;
         let pitch = (1.0 - p.stamina / MAX_STAMINA).max(0.0) * 6.0 + if p.extra_active { 12.0 } else { 0.0 };
         self.pitch += (pitch - self.pitch) * (6.0 * dt).min(1.0);
         mix.pitch = self.pitch;
@@ -674,11 +691,12 @@ impl Mixer {
         if let Some(track) = self.kick.take()
             && p.fake.is_none()
         {
-            let contact = m.get(track.clip).contact.unwrap_or(track.t);
-            self.follow = Some(Follow { key: track.key, kind: track.kind, clip: track.clip, t: track.t.max(contact), since: 0.0 });
+            // A strike still catching up with the touch carries on to it at its strike speed.
+            self.follow = Some(Follow { key: track.key, kind: track.kind, clip: track.clip, t: track.t, since: 0.0 });
         }
         if let Some(f) = self.follow.as_mut() {
-            f.t += dt;
+            let contact = m.get(f.clip).contact.unwrap_or(0.0);
+            f.t = if f.t < contact { (f.t + STRIKE_RATE * dt).min(contact) } else { f.t + dt };
             f.since += dt;
             // It holds while the kick slides you on, then fades, quicker running on out of it.
             if f.since <= follow_time(f.kind) || p.kick_sliding() {
@@ -746,7 +764,8 @@ impl Mixer {
             let t = turn_time(u, brake, m);
             self.set_current(t, u);
             let clip = if right { Clip::Turn180 } else { Clip::Turn180Left };
-            return Some(Want { clip, key, t, weight: if big { 1.0 } else { 0.6 }, fade_in: 0.1, fade_out: 0.15 });
+            // In over 0.15 s: quicker, the arms whip from the run's swing to the turn's.
+            return Some(Want { clip, key, t, weight: if big { 1.0 } else { 0.6 }, fade_in: 0.15, fade_out: 0.15 });
         }
 
         // A stop: letting go running, the clip's braking steps as you brake (its first half: the
@@ -825,7 +844,7 @@ impl Plugin for CharacterPlugin {
         .init_resource::<MixState>()
             .add_systems(Startup, cheats_from_env)
             .add_systems(Update, (load, bind, dress, paint, show).chain())
-            .add_systems(PostUpdate, (drive.before(Animation), adjust.after(Animation).before(TransformSystem::TransformPropagate)));
+            .add_systems(PostUpdate, (drive.before(Animation), adjust.after(Animation).before(TransformSystem::TransformPropagate), pops.after(TransformSystem::TransformPropagate)));
     }
 }
 
@@ -1231,6 +1250,36 @@ fn adjust(state: Res<MixState>, rigs: Query<&Rig>, mut bones: Query<&mut Transfo
     }
 }
 
+/// RE_POPS=25: logs every frame where a bone turns more than that many degrees against the body (a
+/// snap in the animation), with the clips playing then.
+fn pops(
+    time: Res<Time>,
+    state: Res<MixState>,
+    character: Option<Res<Character>>,
+    rigs: Query<Entity, With<Rig>>,
+    children: Query<&Children>,
+    bones: Query<(&Name, &GlobalTransform)>,
+    globals: Query<&GlobalTransform>,
+    mut last: Local<std::collections::HashMap<Entity, Quat>>,
+) {
+    let Some(limit) = std::env::var("RE_POPS").ok().and_then(|v| v.parse::<f32>().ok()) else { return };
+    let Some(character) = character else { return };
+    let Ok(root) = globals.get(character.root).map(|g| g.rotation()) else { return };
+    for rig in &rigs {
+        for e in children.iter_descendants(rig) {
+            let Ok((name, g)) = bones.get(e) else { continue };
+            let now = root.inverse() * g.rotation();
+            if let Some(was) = last.insert(e, now) {
+                let deg = was.angle_between(now).to_degrees();
+                if deg > limit {
+                    let playing: Vec<String> = (0..NODES).filter(|&i| state.mix.weights[i] > 0.05).map(|i| format!("{}:{:.2}@{:.2}", Clip::ALL[i % CLIPS].name(), state.mix.weights[i], state.mix.times[i])).collect();
+                    eprintln!("POP t={:.3} {} {deg:.0} deg  [{}]", time.elapsed_secs(), name.as_str().rsplit(':').next().unwrap_or(""), playing.join(" "));
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1381,11 +1430,15 @@ mod tests {
         k.released = true;
         let at = kick_contact(&k).unwrap();
         assert!((at - (k.held + STRIKE)).abs() < 1e-5);
-        while k.elapsed + dt <= at + 1e-4 {
+        let mut late = 0;
+        while t < contact - 1e-4 {
             k.elapsed += dt;
-            t = kick_time(t, &k, dt, meta);
+            let next = kick_time(t, &k, dt, meta);
+            assert!(next - t <= STRIKE_RATE * dt + 1e-5, "the strike swings at most at twice its speed");
+            t = next;
+            late += (k.elapsed > at + 1e-4) as u32;
         }
-        assert!((t - contact).abs() < 1e-3, "{t}");
+        assert!(late <= 3, "the foot meets the ball's contact {late} frames late");
     }
 
     #[test]
