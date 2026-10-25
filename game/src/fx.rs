@@ -146,10 +146,9 @@ struct MarkerSpot {
     t: f32,
 }
 
-/// Where a kicked ball first hits a goal end's wall (the backboard), a post or the crossbar, or
-/// else comes to rest: its own physics run on until it rolls slower than 0.5 m/s on the ground
-/// (the game's prediction stop speed), up to 10 s. The side walls get no marker (Kev). None if it
-/// goes in.
+/// Where a kicked ball first hits a wall (the side walls too, Kev), a post or the crossbar, or else
+/// comes to rest: its own physics run on until it rolls slower than 0.5 m/s on the ground (the
+/// game's prediction stop speed), up to 10 s. None if it goes in.
 fn marker_for(pos: Vec3, ball: &Ball) -> Option<MarkerSpot> {
     let (mut pos, mut ball) = (pos, ball.clone());
     let dt = 1.0 / 240.0;
@@ -158,9 +157,7 @@ fn marker_for(pos: Vec3, ball: &Ball) -> Option<MarkerSpot> {
             return None;
         }
         let t = i as f32 * dt;
-        if let Some((at, normal)) = ball.hit
-            && (at.x.abs() - HALF_WIDTH).abs() > 0.05
-        {
+        if let Some((at, normal)) = ball.hit {
             return Some(MarkerSpot { at, normal, t });
         }
         if pos.y <= BALL_RADIUS + 0.01 && Vec2::new(ball.vel.x, ball.vel.z).length() < 0.5 && ball.vel.y.abs() < 0.5 {
@@ -1386,10 +1383,10 @@ mod tests {
         let wide = Ball { vel: Vec3::new(0.0, 1.0, -35.0), ..default() };
         let s = marker_for(Vec3::new(GOAL_HALF_WIDTH + 3.0, BALL_RADIUS, -20.0), &wide).expect("marked on the wall");
         assert!(s.normal == Vec3::Z && (s.at.z + HALF_LENGTH).abs() < 0.01, "{} {}", s.at, s.normal);
-        // A ball across to a side wall is marked past it, not on it.
+        // A ball across to a side wall is marked on it, lying on it.
         let across = Ball { vel: Vec3::new(30.0, 0.0, -2.0), friction: PASS_FRICTION, ..default() };
-        let s = marker_for(Vec3::new(0.0, BALL_RADIUS, 0.0), &across).expect("marked");
-        assert!((s.at.x.abs() - HALF_WIDTH).abs() > 0.05, "{}", s.at);
+        let s = marker_for(Vec3::new(HALF_WIDTH - 5.0, BALL_RADIUS, 0.0), &across).expect("marked");
+        assert!((s.at.x - HALF_WIDTH).abs() < 0.01 && s.normal == Vec3::NEG_X, "{} {}", s.at, s.normal);
     }
 
     #[test]
