@@ -1868,6 +1868,9 @@ mod tests {
         let (left, _) = state(&mut app);
         assert!((0.18..0.24).contains(&on), "a tap runs {on} s");
         assert!((0.62..0.7).contains(&left), "a tap leaves {left}");
+        // It still counts as a tap: its burst carries you on and your magnet stays off a moment.
+        let p = app.world_mut().query::<&Player>().single(app.world()).unwrap();
+        assert!(p.ee_carry > 0.0 && p.magnet_off > 0.0, "carry {} magnet off {}", p.ee_carry, p.magnet_off);
     }
 
     #[test]
