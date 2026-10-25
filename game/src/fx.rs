@@ -440,6 +440,7 @@ pub fn trails(
             Effect::ExtraEffort => player.extra_active,
             Effect::Kick => state.kick_trail,
         };
+        let was_empty = trail.points.is_empty();
         for point in &mut trail.points {
             point.1 += dt;
         }
@@ -452,6 +453,10 @@ pub fn trails(
             if let Some(at) = at {
                 trail.points.push((at, 0.0));
             }
+        }
+        // An idle trail's mesh is already empty: rebuilding it would only re-upload it.
+        if was_empty && trail.points.is_empty() {
+            continue;
         }
         if let Some(mesh) = meshes.get_mut(&trail.mesh) {
             *mesh = ribbon(&trail.points, eye, width, life, colour);
@@ -503,7 +508,12 @@ pub struct LegMaterials(pub [Handle<StandardMaterial>; 2]);
 /// slow pulse; it eases in and out over 0.15 s.
 pub fn effort_legs(time: Res<Time>, player: Single<&Player>, legs: Res<LegMaterials>, mut materials: ResMut<Assets<StandardMaterial>>, mut glow: Local<f32>) {
     let target = if player.extra_active { 1.0 } else { 0.0 };
+    let before = *glow;
     *glow += (target - *glow).clamp(-time.delta_secs() / 0.15, time.delta_secs() / 0.15);
+    // Unlit, the legs keep their black emissive: writing it again would only re-upload them.
+    if before == 0.0 && *glow == 0.0 {
+        return;
+    }
     let pulse = 0.8 + 0.2 * (time.elapsed_secs() * 12.0).sin();
     let c = Vec3::new(0.0, 1.0, 0.8) * *glow * pulse * 1.5;
     for handle in &legs.0 {

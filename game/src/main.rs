@@ -217,7 +217,7 @@ fn update_hud(
         }
         _ => "-".into(),
     };
-    hud.0 = format!(
+    let text = format!(
         "Score  {} - {}\nStamina {:4.1}/10{}   Extra effort {:3.0}%{}\nSpeed {:4.1} m/s{}{}\nCharge {}\nBall {:4.1} m/s\n\nF1 Controls",
         score.0[0],
         score.0[1],
@@ -238,4 +238,8 @@ fn update_hud(
         charge,
         ball.vel.length(),
     );
+    // Set only when it changes: a changed text is laid out again.
+    if hud.0 != text {
+        hud.0 = text;
+    }
 }

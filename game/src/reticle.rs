@@ -132,9 +132,13 @@ pub fn update_reticle(
     node.width = Val::Px(size);
     node.height = Val::Px(size);
     node.margin = UiRect { left: Val::Px(-size / 2.0), top: Val::Px(-size / 2.0), ..default() };
-    if let Some(m) = materials.get_mut(&handle.0) {
-        let (aim, closed) = (ease(anim.aim), ease(anim.aim.max(anim.defense)));
-        m.shape = Vec4::new(IDLE_OPENING.lerp(1.0, closed), 1.0.lerp(AIM_ARC_OPACITY, aim), anim.force, ease(anim.force_shown));
-        m.magnus = Vec4::new(anim.curve.x, anim.curve.y, aim, 0.0);
+    let (aim, closed) = (ease(anim.aim), ease(anim.aim.max(anim.defense)));
+    let shape = Vec4::new(IDLE_OPENING.lerp(1.0, closed), 1.0.lerp(AIM_ARC_OPACITY, aim), anim.force, ease(anim.force_shown));
+    let magnus = Vec4::new(anim.curve.x, anim.curve.y, aim, 0.0);
+    // Written only when it changes: each write re-uploads the material.
+    if materials.get(&handle.0).is_some_and(|m| (m.shape, m.magnus) != (shape, magnus))
+        && let Some(m) = materials.get_mut(&handle.0)
+    {
+        (m.shape, m.magnus) = (shape, magnus);
     }
 }
