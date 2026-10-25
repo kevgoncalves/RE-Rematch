@@ -392,11 +392,18 @@ pub const PUSH_BALL_WINDUP: f32 = 8.0 / 60.0;
 pub const PUSH_BALL_NO_CONTROL: f32 = 0.5;
 pub const PUSH_BALL_COST: f32 = 0.375;
 pub const PUSH_BALL_REGEN_DELAY: f32 = 1.0;
-/// Sprinting switches the push ball's force up (BP_FastTap_ForceFromSpeed bytecode).
-pub const PUSH_BALL_SPRINT_FACTOR: f32 = 1.4;
-/// Ball speed by push direction against your facing: up to 60 deg, to 95 deg, beyond.
-pub const PUSH_BALL_SIDE_FACTOR: f32 = 0.89;
-pub const PUSH_BALL_BACK_FACTOR: f32 = 0.79;
+/// Sprinting switches the push ball's force up (BP_FastTap_ForceFromSpeed bytecode), but in Kev's
+/// practice recording a sprinted push straight on doesn't shoot away and die: the ball leads you by
+/// about 0.4 m at +0.27 s, 1.7-1.8 m at +0.53-0.67 s, still about 1.5 m at +1.0 s, and you take it
+/// back at about +1.33 s. A little more speed than a normal push and the ground's own friction match
+/// that, chasing at your sprint.
+pub const PUSH_BALL_SPRINT_FACTOR: f32 = 1.05;
+pub const SPRINT_PUSH_BALL_FRICTION: f32 = BASE_FRICTION;
+/// Ball speed by how far the push turns you: up to 60 deg, to 95 deg, beyond. A push into a turn
+/// in the recording stays within about 0.8 m of you and is yours again by about +0.8 s: chased at
+/// your run or your sprint, these keep it there (at a sprint it leads by 0.4 m at most).
+pub const PUSH_BALL_SIDE_FACTOR: f32 = 0.72;
+pub const PUSH_BALL_BACK_FACTOR: f32 = 0.64;
 pub const EXHAUSTED_PUSH_BALL_SPEED: f32 = 11.25;
 pub const EXHAUSTED_PUSH_BALL_LIFT: f32 = 13.0; // degrees
 /// After the touch you chase the ball on a scripted speed (m/s over the rest of the move),

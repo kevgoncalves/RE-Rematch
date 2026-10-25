@@ -1426,7 +1426,11 @@ pub fn kicking(
     // speed going sideways or back and gains it when sprinting; the dribble one only when sprinting.
     let push_dir = if k.steer == Vec3::ZERO { forward(p.facing) } else { k.steer };
     let push_angle = forward(p.facing).angle_between(push_dir).to_degrees();
-    let push_factor = match push_angle {
+    // How far the push turns you: against your facing at the touch, and against your run at the
+    // press, so turning toward the push during its wind-up still counts as pushing into a turn.
+    let run_way = Vec3::new(k.entry.x, 0.0, k.entry.z);
+    let turn_angle = if run_way.length() > 1.0 { push_angle.max(run_way.angle_between(push_dir).to_degrees()) } else { push_angle };
+    let push_factor = match turn_angle {
         a if a <= 60.0 => 1.0,
         a if a <= 95.0 => PUSH_BALL_SIDE_FACTOR,
         _ => PUSH_BALL_BACK_FACTOR,
@@ -1458,7 +1462,13 @@ pub fn kicking(
         // Tired push balls ignore sprinting and pop up a little.
         Kick::PushBall if p.exhausted => (EXHAUSTED_PUSH_BALL_SPEED * push_factor, EXHAUSTED_PUSH_BALL_LIFT, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
         Kick::DribblePushBall if p.exhausted => (EXHAUSTED_PUSH_BALL_SPEED, EXHAUSTED_PUSH_BALL_LIFT, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
-        Kick::PushBall => (PUSH_BALL_SPEED * push_factor * sprint(PUSH_BALL_SPRINT_FACTOR), 0.0, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
+        // Sprinting pushes the ball a little harder and it runs on longer.
+        Kick::PushBall => (
+            PUSH_BALL_SPEED * push_factor * sprint(PUSH_BALL_SPRINT_FACTOR),
+            0.0,
+            if k.sprint { SPRINT_PUSH_BALL_FRICTION } else { PUSH_BALL_FRICTION },
+            PUSH_BALL_NO_CONTROL,
+        ),
         Kick::DribblePushBall => (DRIBBLE_PUSH_BALL_SPEED * sprint(DRIBBLE_PUSH_BALL_SPRINT_FACTOR), 0.0, PUSH_BALL_FRICTION, PUSH_BALL_NO_CONTROL),
     };
     let yaw = match k.kind {
