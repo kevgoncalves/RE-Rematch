@@ -942,6 +942,19 @@ is one; anything else is a guess marked TUNE in `tuning.rs`.
   0.15 s before the touch; a jump leaves the ground 16f before to 22f after the touch, as high as the
   chest (1.35 m) or head (1.75 m) needs, 0.15-0.8 m; the touch poses are ours.
 
+### 11.4 Volley lobbed push ball (`Kick::VolleyLobbedPushBall`)
+- **Start:** the flick button with a volley target; or a volley push that RB joins within 0.1 s
+  (its buffer layer), keeping the same meeting with the body part picked again.
+- **Body part:** foot under 0.4 m, thigh under 0.8, stomach under 1.2, chest under 1.6, head to 2.1;
+  above, the jumping flick (chest to 2.4 m, head higher: the same guess as §11.3). Off the foot it
+  is the rainbow flick's scoop; higher, the touch poses lift it.
+- **Ball:** §6 exactly: 13.5 m/s x r at 75° + r x -10°, r from the touch's height (1 on the ground,
+  0.7 at 1.79 m, 0.5 at 3 m), sprinting at the press x1.1 and 10° flatter, tired 14.5 m/s at 68°;
+  spin.y +2500, base friction, no-control 0.5 s, cost 0.75. Jumping (above 2.1 m): 10 m/s at 65°,
+  x0.7 sideways, x0.65 back, no forced spin.
+- **After:** you turn after the ball at 3 → 5.25 m/s (5 → 7.5 coming in faster than 1 m/s) for 22f.
+- **Not built:** the kicker's 0.8 s low priority on his own flick (one player, no contest).
+
 ## Sources
 **Extracted game files** (`RE Rematch (main)/tools/rmx/out` and `out_bp`):
 - **Abilities:** `GA_VolleyBaseShoot`, `GA_VolleyShoot`, `GA_VolleyTap` (+ `_LowPower`),
