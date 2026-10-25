@@ -183,3 +183,25 @@ Strips: `v1_dive1035`, `v2_ee_11633`.
 9. **Grass blades on shots** and the **ball's straight-down shadow**.
 10. **The team-tint plumbing** (an ally/enemy colour pair feeding the rings and the trail), the control flash on the player, and sprint lines.
 11. **When the mechanics exist:** the fake-shot rings, then wall bounce and goal burst (data only, not seen here).
+
+## What the prototype has now (branch `game/fx-effects`)
+
+All in `game/src/fx.rs` and `game/src/pass_line.rs`. One `Bit` piece (delay, life, scale, colour, fade, motion, facing) drives every short effect.
+
+| # | Effect | Now |
+|---|---|---|
+| 1 | Shot impact | A spike star and flare at the contact point. Weak: cyan-white with cyan slivers. Mid/high (29.4 / 34.8 m/s): white, a second star, a gold glow, 6–10 gold shards falling and tumbling |
+| 2 | Control | Two broken yellow rings close on the ball in 0.2 s, turning against each other. The shell goes yellow → white → light blue. Teal ghost balls are left where the ball came from. A yellow rim flashes on the shins and boots for 0.4 s |
+| 3 | Volley diamond | Four separate pale-cyan arrows in a soft blue bloom. They flash white as it appears and settle by 0.17 s |
+| 4 | Extra effort | A white-cyan swirl disc with three arms bursts on the ground, with lightning flung out. Bolts flicker at the feet and calves every 0.07 s, each foot plant leaves a cyan streak, the shins and boots get a lavender rim, and the boots glow cyan. The foot ribbons are shorter |
+| 5 | Push ball | White spikes for a frame or two, then a blue shell and close blue ghosts (a smear) |
+| 6 | Dribble | A cyan puff, a 0.2 s light-blue shell, and teal ghost balls spaced along the path (no ribbon) |
+| 7 | Pass line | Thin pale blue for 0.1 s, green within 0.1 s more (brighter with charge), four shards drifting over it near the ball, and a 0.1 s cyan fade as the ball leaves. Release: a blue ground flash and blue sparks |
+| 8 | Landing marker | A green ring and glow with a bobbing down arrow |
+| 9 | Grass, ball shadow | Turf blades fly up and on from shot contacts (more with power). A soft dark disc lies straight under the ball at any height (the ball no longer casts a light shadow) |
+| 11 | Fake shot | Orange-red broken rings and a peach shell on the ball as the leg passes over it, fading to pink in 0.25 s |
+
+Not done:
+- the team-tint plumbing (the colours are constants: the ally/practice look);
+- sprint lines;
+- the wall/glass bounce and the goal burst.
