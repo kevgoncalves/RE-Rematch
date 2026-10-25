@@ -21,7 +21,16 @@ impl Plugin for SfxPlugin {
         app.add_audio_source::<Synth>()
             .init_resource::<SfxSettings>()
             .add_systems(Startup, build_bank)
-            .add_systems(Update, (listen.after(ball::ball_physics), reap));
+            .add_systems(Update, (follow_volumes, listen.after(ball::ball_physics), reap));
+    }
+}
+
+/// The Audio tab's global and sound-effect volumes (0-100, saved with the bindings) drive these.
+fn follow_volumes(bindings: Res<crate::input::Bindings>, mut settings: ResMut<SfxSettings>) {
+    let volume = bindings.global_volume / 100.0 * bindings.sfx_volume / 100.0;
+    if settings.volume != volume {
+        settings.volume = volume;
+        settings.on = volume > 0.0;
     }
 }
 

@@ -126,6 +126,15 @@ pub struct Bindings {
     pub invert_y: bool,
     #[serde(default)]
     pub invert_x: bool,
+    /// The global and sound-effect volumes, 0-100 (the Audio tab).
+    #[serde(default = "seventy")]
+    pub global_volume: f32,
+    #[serde(default = "seventy")]
+    pub sfx_volume: f32,
+}
+
+fn seventy() -> f32 {
+    70.0
 }
 
 /// The mouse sensitivity options' range (Rematch's slider puts the default of 1 near its left end).
@@ -221,6 +230,8 @@ impl Default for Bindings {
             mouse_vertical_scale: one(),
             invert_y: false,
             invert_x: false,
+            global_volume: seventy(),
+            sfx_volume: seventy(),
         }
     }
 }

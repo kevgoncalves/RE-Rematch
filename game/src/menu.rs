@@ -149,11 +149,9 @@ impl Menu {
         self.page = if self.page == Some(Page::Settings) { None } else { Some(Page::Settings) };
     }
 
-    /// L asks before resetting the tab (Audio has nothing to reset yet).
+    /// L asks before resetting the tab.
     fn ask_reset(&mut self) {
-        if self.tab != Tab::Audio {
-            self.confirm = Some(Confirm::Reset(self.tab));
-        }
+        self.confirm = Some(Confirm::Reset(self.tab));
     }
 
     fn start_capture(&mut self, action: Action, row: Entity) {
@@ -296,7 +294,7 @@ fn reset_tab(b: &Bindings, tab: Tab, cheats: &mut Cheats) -> Bindings {
             }
             b.clone()
         }
-        Tab::Audio => b.clone(),
+        Tab::Audio => Bindings { global_volume: d.global_volume, sfx_volume: d.sfx_volume, ..b.clone() },
     }
 }
 
@@ -307,6 +305,8 @@ enum Setting {
     MouseVerticalScale,
     MagnusSensitivity,
     Fov,
+    GlobalVolume,
+    SfxVolume,
 }
 
 impl Setting {
@@ -315,12 +315,13 @@ impl Setting {
             Setting::MouseSensitivity | Setting::MouseVerticalScale => MOUSE_SENSITIVITY_RANGE,
             Setting::MagnusSensitivity => MAGNUS_SENSITIVITY_RANGE,
             Setting::Fov => FOV_OPTION_RANGE,
+            Setting::GlobalVolume | Setting::SfxVolume => (0.0, 100.0),
         }
     }
 
     fn step(self) -> f32 {
         match self {
-            Setting::Fov => 1.0,
+            Setting::Fov | Setting::GlobalVolume | Setting::SfxVolume => 1.0,
             _ => 0.1,
         }
     }
@@ -331,6 +332,8 @@ impl Setting {
             Setting::MouseVerticalScale => b.mouse_vertical_scale,
             Setting::MagnusSensitivity => b.magnus_sensitivity,
             Setting::Fov => b.fov,
+            Setting::GlobalVolume => b.global_volume,
+            Setting::SfxVolume => b.sfx_volume,
         }
     }
 
@@ -340,6 +343,8 @@ impl Setting {
             Setting::MouseVerticalScale => b.mouse_vertical_scale = v,
             Setting::MagnusSensitivity => b.magnus_sensitivity = v,
             Setting::Fov => b.fov = v,
+            Setting::GlobalVolume => b.global_volume = v,
+            Setting::SfxVolume => b.sfx_volume = v,
         }
     }
 
@@ -578,10 +583,10 @@ fn sections(tab: Tab) -> Vec<Section> {
         ],
         Tab::Audio => vec![
             s("VOLUMES", vec![
-                row("Global volume", "The volume of the music and every sound.", soon_slider(70.0, 0.0, 100.0)),
+                row("Global volume", "The volume of the music and every sound.", Control::Slider(Setting::GlobalVolume)),
                 row("Gameplay music volume", "The music during matches.", soon_slider(70.0, 0.0, 100.0)),
                 row("Menu music volume", "The music in the menus.", soon_slider(70.0, 0.0, 100.0)),
-                row("Sound effects", "Kicks, the ball, footsteps and the rest of the game's sounds.", soon_slider(70.0, 0.0, 100.0)),
+                row("Sound effects", "Kicks, the ball, footsteps and the rest of the game's sounds.", Control::Slider(Setting::SfxVolume)),
                 row("Crowd volume", "The crowd in the stands.", soon_slider(70.0, 0.0, 100.0)),
                 row("Voice chat volume", "Your teammates' voices.", soon_slider(70.0, 0.0, 100.0)),
                 row("Communications volume", "The quick communications players send.", soon_slider(70.0, 0.0, 100.0)),
