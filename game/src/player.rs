@@ -447,8 +447,19 @@ fn volley_jump(part: Part, h: f32) -> f32 {
     (h - reach).clamp(VOLLEY_JUMP_LIMITS.0, VOLLEY_JUMP_LIMITS.1)
 }
 
-/// A volley's body part for the ball's height `h` (m).
+/// The volley shot's body part for the ball's height `h` (m), standing or moving at the press, and
+/// whether the shot goes off to your side.
+fn volley_shot_part(h: f32, moving: bool, sideways: bool) -> Part {
+    let (heights, parts): (&[f32], &[Part]) = if moving {
+        (&VOLLEY_SHOT_MOVING_HEIGHTS, &[Part::Foot, Part::Thigh, Part::Chest, Part::JumpChest])
+    } else {
+        (&VOLLEY_SHOT_STANDING_HEIGHTS, &[Part::Foot, Part::Thigh, Part::Pelvis, Part::Chest, Part::Head, Part::JumpChest])
+    };
+    let part = heights.iter().zip(parts).find(|(top, _)| h < **top).map_or(Part::JumpHead, |(_, part)| *part);
+    if part == Part::Thigh && sideways && !moving { Part::Pelvis } else { part }
+}
 
+/// A volley's body part for the ball's height `h` (m).
 fn volley_part(kind: Kick, h: f32) -> Part {
     let parts = [Part::Foot, Part::Thigh, Part::Pelvis, Part::Chest];
     match kind {
@@ -541,6 +552,9 @@ pub enum Kick {
     /// A first-time pass of a loose ball, charged by how long you hold it: off the foot, thigh,
     /// stomach, chest or head, or a jumping header.
     VolleyPass,
+    /// A first-time shot of a loose ball, charged by how long you hold it: struck with the foot (on
+    /// the half-volley or across the body), the head, or a scissor kick high up.
+    VolleyShot,
 }
 
 impl Kick {
@@ -556,13 +570,18 @@ impl Kick {
 
     /// First-time kicks of a loose ball.
     pub fn is_volley(self) -> bool {
-        matches!(self, Kick::VolleyPushBall | Kick::VolleyLobbedPushBall | Kick::VolleyPass)
+        matches!(self, Kick::VolleyPushBall | Kick::VolleyLobbedPushBall | Kick::VolleyPass | Kick::VolleyShot)
+    }
+
+    /// Shots: the shot camera, the reticle, a shot's strike.
+    pub fn is_shot(self) -> bool {
+        matches!(self, Kick::Shot | Kick::VolleyShot)
     }
 
     /// The held action for kicks you charge; instant kicks have none.
     fn charge_action(self) -> Option<Action> {
         match self {
-            Kick::Shot => Some(Action::Shoot),
+            Kick::Shot | Kick::VolleyShot => Some(Action::Shoot),
             Kick::Pass | Kick::VolleyPass => Some(Action::Pass),
             Kick::Lob => Some(Action::Lob),
             _ => None,
@@ -583,7 +602,7 @@ impl Kick {
             // the gauge (charge) still reads against a push ball's wind-up.
             Kick::VolleyPushBall | Kick::VolleyLobbedPushBall => PUSH_BALL_WINDUP,
             // Charged volleys fill their gauge in VOLLEY_CHARGE_FULL (less the gauge's frame).
-            Kick::VolleyPass => VOLLEY_CHARGE_FULL + 1.0 / 60.0,
+            Kick::VolleyPass | Kick::VolleyShot => VOLLEY_CHARGE_FULL + 1.0 / 60.0,
 
         }
     }
@@ -593,6 +612,7 @@ impl Kick {
     fn freeze_frames(self, speed: f32) -> f32 {
         match self {
             Kick::Shot if speed >= SHOT_HIGH_POWER_SPEED => 5.0,
+            Kick::VolleyShot => VOLLEY_SHOT_FREEZE,
             Kick::Shot | Kick::Pass | Kick::Lob | Kick::VolleyPass => 3.0,
             Kick::ShortPass | Kick::ShortLob => 2.0,
             Kick::PushBall | Kick::DribblePushBall | Kick::LobbedPushBall | Kick::DribbleLobbedPushBall | Kick::VolleyPushBall | Kick::VolleyLobbedPushBall => 0.0,
@@ -617,7 +637,9 @@ impl Player {
 
     /// While charging, the mouse feeds the curve or a virtual stick instead of the camera.
     pub fn mouse_steers_kick(&self, aim: PassAim) -> bool {
-        self.charging_shot() || (aim == PassAim::JoystickEmulation && self.kick.is_some_and(|k| k.kind.is_pass() && !k.released))
+        // A volley shot's charge curves the ball like a shot's.
+        let volley_shot = self.kick.is_some_and(|k| k.kind == Kick::VolleyShot && !k.released);
+        self.charging_shot() || volley_shot || (aim == PassAim::JoystickEmulation && self.kick.is_some_and(|k| k.kind.is_pass() && !k.released))
     }
 }
 
@@ -1599,16 +1621,29 @@ pub fn kicking(
         && p.fake.is_none()
         && let Some(root) = root.map(|r| *r.into_inner())
     {
-        let volleys = [(Action::LobbedPushBall, Kick::VolleyLobbedPushBall), (Action::PushBall, Kick::VolleyPushBall), (Action::Pass, Kick::VolleyPass)];
+        let volleys = [(Action::LobbedPushBall, Kick::VolleyLobbedPushBall), (Action::PushBall, Kick::VolleyPushBall), (Action::Pass, Kick::VolleyPass), (Action::Shoot, Kick::VolleyShot)];
         if let Some((action, kind)) = volleys.into_iter().find(|(a, _)| actions.pending(*a))
             && let Some(spot) = crate::fx::volley_target(p, &root, ball_tf.translation, &ball)
         {
             actions.consume(action);
             let steer = if axes.movement.length() < PUSH_BALL_DEAD_ZONE { Vec3::ZERO } else { camera_relative(axes.movement.normalize(), rig.yaw).normalize() };
             // Push volleys turn you to the push by the touch; the volley pass keeps your facing (its
-            // snap keeps the actor's forward).
-            let face = if steer == Vec3::ZERO || kind == Kick::VolleyPass { p.facing } else { yaw_of(steer) };
-            let part = volley_part(kind, spot.at.y);
+            // snap keeps the actor's forward); the volley shot turns you to the shot (its snap is
+            // placed along the shot's direction).
+            let shot_yaw = crosshair_yaw(camera.translation, rig.yaw, spot.at);
+            let face = match kind {
+                Kick::VolleyShot => shot_yaw,
+                Kick::VolleyPass => p.facing,
+                _ if steer == Vec3::ZERO => p.facing,
+                _ => yaw_of(steer),
+            };
+            let part = if kind == Kick::VolleyShot {
+                let off = angle_diff(shot_yaw, p.facing).abs().to_degrees();
+                let moving = Vec3::new(p.vel.x, 0.0, p.vel.z).length() >= VOLLEY_SHOT_MOVING;
+                volley_shot_part(spot.at.y, moving, (VOLLEY_SHOT_SIDE.0..=VOLLEY_SHOT_SIDE.1).contains(&off))
+            } else {
+                volley_part(kind, spot.at.y)
+            };
             let jump = volley_jump(part, spot.at.y);
             let left = (spot.at - root.translation).dot(forward(face).cross(Vec3::Y)) < 0.0;
             let volley = Volley { at: spot.at, t: spot.t, part, left, face, jump };
@@ -1711,8 +1746,9 @@ pub fn kicking(
     }
 
     let t = charge(k.kind, k.held);
-    // Spin scales with the raw seconds held, not the charge (shot-aim.md).
-    let ratio = (k.held / MAX_HOLD).min(1.0);
+    // Spin scales with the raw seconds held, not the charge (shot-aim.md); a volley's against its
+    // own 0.25 s.
+    let ratio = (k.held / if k.volley.is_some() { VOLLEY_CHARGE_FULL } else { MAX_HOLD }).min(1.0);
     let side = axes.curve.x;
     // Push balls go the way you steer, or straight on with no direction. The normal one loses
     // speed going sideways or back and gains it when sprinting; the dribble one only when sprinting.
@@ -1739,6 +1775,18 @@ pub fn kicking(
             SHOT_FRICTION,
             NO_RECONTROL_TIME,
         ),
+        // A first-time shot: as a shot, by seconds held, with the incoming ball's pace sent back, and
+        // a high one kept down.
+        Kick::VolleyShot => {
+            let h = ball_tf.translation.y;
+            let dir = forward(crosshair_yaw(eye, aim.x, ball_tf.translation));
+            (
+                volley_shot_speed(&k, h, ball.vel, dir),
+                curve(&ELEVATION_BY_PITCH, aim.y) + SHOT_DIP_PITCH_CORRECTION * (-axes.curve.y).max(0.0) + curve(&VOLLEY_SHOT_HEIGHT_PITCH, h),
+                SHOT_FRICTION,
+                NO_RECONTROL_TIME,
+            )
+        }
         Kick::Pass => (curve(&PASS_FORCE, t), curve(&PASS_LIFT_BY_HOLD, t), PASS_FRICTION, NO_RECONTROL_TIME),
         Kick::ShortPass => (SHORT_PASS_SPEED, 0.0, SHORT_PASS_FRICTION, NO_RECONTROL_TIME),
         Kick::Lob => (curve(&LOB_FORCE, t), curve(&LOB_ANGLE_BY_HOLD, t), SHOT_FRICTION, NO_RECONTROL_TIME),
@@ -1822,7 +1870,7 @@ pub fn kicking(
         Kick::VolleyPushBall | Kick::VolleyLobbedPushBall => yaw_of(push_dir),
         // Toward the crosshair's point on the walls (`aim` above), turned a little against the
         // curve so the ball bends back toward it.
-        Kick::Shot => crosshair_yaw(eye, aim.x, ball_tf.translation) + (side * AIM_NUDGE).to_radians(),
+        Kick::Shot | Kick::VolleyShot => crosshair_yaw(eye, aim.x, ball_tf.translation) + (side * AIM_NUDGE).to_radians(),
         _ => pass_yaw(bindings.pass_aim, &axes, &rig, crosshair_yaw(camera.translation, rig.yaw, ball_tf.translation)),
     };
     let flat = forward(yaw);
@@ -1831,7 +1879,7 @@ pub fn kicking(
     p.has_ball = false;
     ball.held = false;
     ball.vel = dir * speed;
-    ball.spin = if k.kind == Kick::Shot {
+    ball.spin = if k.kind.is_shot() {
         // Flight-frame spin: z curves right, y dips. Pulling the curve input down dips the ball,
         // pushing it up lifts it (confirmed in-game); every shot also carries a small lift.
         let dip = curve(&TOP_SPIN, axes.curve.y) * curve(&TOP_SPIN_BY_CHARGE, ratio) + SHOT_BASE_SPIN;
@@ -1870,12 +1918,12 @@ pub fn kicking(
         p.push_way = flat;
         p.push_sprinted = k.sprint;
     }
-    // After a first-time pass you slow out of your approach until you can act again (the touch's
-    // recovery, by body part).
-    if k.kind == Kick::VolleyPass
+    // After a first-time pass or shot you slow out of your approach until you can act again (the
+    // touch's recovery, by body part).
+    if matches!(k.kind, Kick::VolleyPass | Kick::VolleyShot)
         && let Some(v) = k.volley
     {
-        let act = VOLLEY_PASS_ACT[v.part as usize];
+        let act = if k.kind == Kick::VolleyShot { VOLLEY_SHOT_ACT } else { VOLLEY_PASS_ACT }[v.part as usize];
         let flat_vel = Vec3::new(p.vel.x, 0.0, p.vel.z);
         p.run = Some(Run { t: 0.0, length: act, free_at: act, dir: flat_vel.normalize_or_zero(), speeds: &VOLLEY_RECOVERY, tables: None, scale: flat_vel.length(), exit: 180.0, soft: true, face: None });
     }
@@ -1993,8 +2041,20 @@ pub fn contact_time(k: &KickState) -> f32 {
     }
 }
 
+/// A volley shot's ball speed (`h` the touch's height, `ball` the incoming ball's velocity, `dir`
+/// the shot's way): the force by seconds held, plus your run-up's bonus kept down off a high touch,
+/// plus the incoming ball's pace sent back; both bonuses only for stronger shots.
+fn volley_shot_speed(k: &KickState, h: f32, ball: Vec3, dir: Vec3) -> f32 {
+    let force = curve(&VOLLEY_SHOT_FORCE, k.held);
+    let strength = curve(&SHOT_RUN_BONUS_BY_FORCE, (force - VOLLEY_SHOT_FORCE[0].1) / (VOLLEY_SHOT_FORCE[2].1 - VOLLEY_SHOT_FORCE[0].1));
+    let run = curve(&SHOT_FORCE_BY_RUN_SPEED, Vec3::new(k.entry.x, 0.0, k.entry.z).length()) * curve(&SHOT_BONUS_BY_IMPACT_HEIGHT, h);
+    let pace = curve(&SHOT_FORCE_BY_BALL_SPEED, ball.length()) * curve(&SHOT_BALL_DIR_RATIO, ball.normalize_or_zero().dot(dir));
+    force + (run + pace) * strength
+}
+
 /// A shot's ball speed: the force curve by seconds held (at least the build-up), plus your run-up
 /// speed's bonus, which only counts for stronger shots.
+
 fn shot_speed(k: &KickState) -> f32 {
     let force = curve(&SHOT_FORCE, charge(Kick::Shot, k.held));
     let strength = (force - SHOT_FORCE[0].1) / (SHOT_FORCE[2].1 - SHOT_FORCE[0].1);
@@ -2294,6 +2354,39 @@ mod tests {
         assert_eq!(volley_part(Kick::VolleyPass, 1.5), Part::Chest);
         assert_eq!(volley_part(Kick::VolleyPass, 2.0), Part::Head);
         assert_eq!(volley_part(Kick::VolleyPass, 2.5), Part::JumpHead);
+    }
+
+    #[test]
+    fn a_volley_shot_strikes_the_ball_back_with_its_pace() {
+        // Trigger: shoot held as a ball rolls at you: a half-volley off the foot, turned to the aim.
+        let mut app = volley_app(Vec3::new(0.0, BALL_RADIUS, -6.0), Vec3::new(0.0, 0.0, 9.0));
+        frames(&mut app, &[Action::Shoot], 1, 1.0 / 60.0);
+        let k = player(&mut app).kick.expect("a volley shot");
+        let v = k.volley.expect("aimed at the ball");
+        assert!(k.kind == Kick::VolleyShot && v.part == Part::Foot && !k.released, "{:?} {v:?}", k.kind);
+        // Timing: the strike as the ball arrives, the gauge full at 0.25 s held.
+        let n = 1 + frames_to_touch(&mut app, &[Action::Shoot]);
+        assert!((n as f32 / 60.0 - v.t).abs() <= 1.5 / 60.0, "touch at {n}f, meeting at {}", v.t);
+        // The ball: 38 m/s plus some of the incoming ball's pace sent back, at the camera's height,
+        // frozen 5 frames.
+        let b = ball(&mut app);
+        assert!((38.3..39.5).contains(&b.vel.length()) && b.vel.z < 0.0 && b.vel.y > 0.0, "{}", b.vel);
+        assert!((b.freeze - 4.0 / 60.0).abs() < 0.02 && b.friction == SHOT_FRICTION);
+
+        // Tapped: 24 m/s, and no bonus at that strength.
+        let mut app = volley_app(Vec3::new(0.0, BALL_RADIUS, -6.0), Vec3::new(0.0, 0.0, 9.0));
+        frames(&mut app, &[Action::Shoot], 1, 1.0 / 60.0);
+        frames_to_touch(&mut app, &[]);
+        assert!((ball(&mut app).vel.length() - 24.0).abs() < 0.05, "{}", ball(&mut app).vel);
+
+        // Its body parts: standing or moving, and the stomach for a thigh-high ball shot sideways.
+        assert_eq!(volley_shot_part(0.5, false, false), Part::Thigh);
+        assert_eq!(volley_shot_part(0.5, false, true), Part::Pelvis);
+        assert_eq!(volley_shot_part(0.5, true, true), Part::Thigh);
+        assert_eq!(volley_shot_part(1.9, false, false), Part::Head);
+        assert_eq!(volley_shot_part(1.9, true, false), Part::JumpChest);
+        assert_eq!(volley_shot_part(2.3, false, false), Part::JumpChest);
+        assert_eq!(volley_shot_part(2.6, false, false), Part::JumpHead);
     }
 
     #[test]

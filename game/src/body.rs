@@ -239,6 +239,8 @@ struct Clips {
     /// foot, the thigh, the stomach, the chest and the head; and a jumping header.
     touch: [[Pose; 3]; 5],
     jump_head: [Pose; 3],
+    /// The scissor kick: a volley shot struck high off the ground, falling back.
+    scissor: [Pose; 3],
     /// Landing out of a kick (the right foot), after its follow-through.
     land: Pose,
     start: OneShot,
@@ -1348,6 +1350,54 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         ]),
     ];
     let touch = [touch_foot, touch_thigh, touch_belly, touch_chest, touch_head];
+    // The scissor kick (Kev's recording of a jumping volley: the knee up a moment before the touch,
+    // the body almost flat, the foot at head height, then the fall): the left knee drives up to take
+    // off; in the air the body tilts back and the right leg swings up through the ball, the left
+    // tucked; then the body falls on back, the arms reaching back for the ground.
+    let scissor = [
+        stand.with(&[
+            (SPINE_J, [10.0, 0.0, 0.0]),
+            (NECK_J, [-10.0, 0.0, 0.0]),
+            (THIGH_L, [70.0, 0.0, -6.0]),
+            (SHIN_L, [90.0, 0.0, 0.0]),
+            (FOOT_L, [-10.0, 0.0, 6.0]),
+            (THIGH_R, [10.0, 0.0, 6.0]),
+            (SHIN_R, [40.0, 0.0, 0.0]),
+            (FOOT_R, [-20.0, 0.0, -6.0]),
+            (UPPER_L, [20.0, 0.0, -70.0]),
+            (UPPER_R, [-10.0, 0.0, 70.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [-40.0, 0.0, 0.0]),
+            (SPINE_J, [-10.0, 0.0, 0.0]),
+            (NECK_J, [20.0, 0.0, 0.0]),
+            (THIGH_L, [40.0, 0.0, -6.0]),
+            (SHIN_L, [80.0, 0.0, 0.0]),
+            (FOOT_L, [0.0, 0.0, 6.0]),
+            (THIGH_R, [115.0, 0.0, -4.0]),
+            (SHIN_R, [10.0, 0.0, 0.0]),
+            (FOOT_R, [40.0, 0.0, 0.0]),
+            (UPPER_L, [30.0, 0.0, -80.0]),
+            (FORE_L, [20.0, 0.0, 0.0]),
+            (UPPER_R, [0.0, 0.0, 80.0]),
+            (FORE_R, [20.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [-55.0, 0.0, 0.0]),
+            (SPINE_J, [-6.0, 0.0, 0.0]),
+            (NECK_J, [16.0, 0.0, 0.0]),
+            (THIGH_L, [70.0, 0.0, -6.0]),
+            (SHIN_L, [60.0, 0.0, 0.0]),
+            (FOOT_L, [0.0, 0.0, 6.0]),
+            (THIGH_R, [70.0, 0.0, 0.0]),
+            (SHIN_R, [30.0, 0.0, 0.0]),
+            (FOOT_R, [30.0, 0.0, 0.0]),
+            (UPPER_L, [-40.0, 0.0, -40.0]),
+            (FORE_L, [10.0, 0.0, 0.0]),
+            (UPPER_R, [-40.0, 0.0, 40.0]),
+            (FORE_R, [10.0, 0.0, 0.0]),
+        ]),
+    ];
 
     // Dribbles, timed to their touch. A fast cut drops into a deep crouch on the left foot, drives
     // the ball on with the right at 17f low and leaning in, then runs out of it.
@@ -1797,6 +1847,7 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         flick_side,
         touch,
         jump_head,
+        scissor,
         land,
         start,
         stop,
@@ -1869,7 +1920,7 @@ fn follow_time(k: &KickState) -> f32 {
         // A jumping volley follows through until it lands.
         _ if k.volley.is_some_and(|v| v.jump > 0.0) => VOLLEY_AIR.1 + 0.15,
         Kick::VolleyPushBall => 0.25,
-        Kick::Shot => 0.5,
+        Kick::Shot | Kick::VolleyShot => 0.5,
         Kick::PushBall | Kick::DribblePushBall => 0.2,
         // The knee stays up a moment after the scoop.
         Kick::LobbedPushBall | Kick::DribbleLobbedPushBall => 0.3,
@@ -1888,6 +1939,7 @@ fn kick_size(kind: Kick) -> f32 {
         Kick::LobbedPushBall | Kick::DribbleLobbedPushBall => 0.9,
         Kick::VolleyPushBall | Kick::VolleyLobbedPushBall => 0.85,
         Kick::VolleyPass => 0.9,
+        Kick::VolleyShot => 1.0,
     }
 }
 
@@ -1897,6 +1949,12 @@ fn volley_keys(clips: &Clips, kind: Kick, part: Part) -> [Pose; 3] {
         // A flick off the foot is the rainbow flick's scoop; a pass, the inside of the foot's.
         Part::Foot if kind.is_flick() => clips.flick,
         Part::Foot if kind == Kick::VolleyPass => clips.kicks[1],
+        // A shot: the half-volley is the shot's strike, the thigh to chest a volley swept across the
+        // body, the head a header, a jumping one the scissor kick.
+        Part::Foot if kind == Kick::VolleyShot => clips.kicks[0],
+        Part::Thigh | Part::Pelvis | Part::Chest if kind == Kick::VolleyShot => clips.shot_side,
+        Part::JumpChest | Part::JumpHead if kind == Kick::VolleyShot => clips.scissor,
+
 
 
         Part::Foot => clips.touch[0],

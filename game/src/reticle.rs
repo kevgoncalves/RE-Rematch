@@ -80,6 +80,8 @@ pub fn spawn_reticle(mut commands: Commands, mut materials: ResMut<Assets<Reticl
 /// Charge as a 0..1 share of the kick's own force range, for the reticle and the line colour.
 pub fn power(kind: Kick, held: f32) -> f32 {
     let (points, min, max): (&[(f32, f32)], f32, f32) = match kind {
+        // A volley shot's curve runs on seconds held, not on a charge.
+        Kick::VolleyShot => return ((curve(&VOLLEY_SHOT_FORCE, held) - VOLLEY_SHOT_FORCE[0].1) / (VOLLEY_SHOT_FORCE[2].1 - VOLLEY_SHOT_FORCE[0].1)).clamp(0.0, 1.0),
         Kick::Shot => (&SHOT_FORCE, SHOT_FORCE[0].1, SHOT_FORCE[2].1),
         Kick::Pass => (&PASS_FORCE, PASS_FORCE[0].1, PASS_FORCE[2].1), // peak is the 60% sweet spot
         Kick::Lob => (&LOB_FORCE, LOB_FORCE[0].1, LOB_FORCE[2].1),
@@ -108,14 +110,15 @@ pub fn update_reticle(
 ) {
     let dt = time.delta_secs();
     let charging = player.kick.filter(|k| !k.released);
-    let shot = charging.filter(|k| k.kind == Kick::Shot);
+    let shot = charging.filter(|k| k.kind.is_shot());
     if let Some(k) = shot {
         anim.force = power(k.kind, k.held).max(MIN_FORCE_FILL);
         anim.curve = axes.curve.clamp_length_max(1.0);
     }
     // Aiming lasts the whole shot, until the ball leaves, and the aim-in always plays to the end
     // (as the game's widget animations do), so a tapped shot still shows.
-    let shooting = player.kick.is_some_and(|k| k.kind == Kick::Shot);
+    let shooting = player.kick.is_some_and(|k| k.kind.is_shot());
+
     if shooting {
         anim.aim_latched = true;
     }

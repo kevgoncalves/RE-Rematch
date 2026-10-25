@@ -1140,7 +1140,8 @@ pub fn action_fx(
     *last_kick = p.kick.map(|k| k.kind);
     if let Some(kind) = kicked {
         match kind {
-            Kick::Shot => shot_strike(&mut s, &fx, &mut state.rng, at, b.vel.normalize_or(Vec3::NEG_Z), b.vel.length()),
+            _ if kind.is_shot() => shot_strike(&mut s, &fx, &mut state.rng, at, b.vel.normalize_or(Vec3::NEG_Z), b.vel.length()),
+
             _ if kind.is_push() => push_touch(&mut s, &fx, &mut state.rng, &mut state.ghosts, at),
             _ => pass_release(&mut s, &fx, &mut state.rng, at),
         }

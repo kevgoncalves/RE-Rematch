@@ -755,6 +755,37 @@ pub const VOLLEY_PASS_ACT: [f32; 7] = [10.0 / 60.0, 9.0 / 60.0, 13.0 / 60.0, 15.
 /// Through that recovery you slow from your approach to this share of it. TUNE.
 pub const VOLLEY_RECOVERY: [(f32, f32); 2] = [(0.0, 1.0), (1.0, 0.3)];
 
+// The volley shot (§2, GA_VolleyShoot).
+/// The body part by the ball's height (m), standing (under 3 m/s at the press): foot under 0.3, thigh
+/// under 0.6 (the stomach to the sides, 40-125 deg off your facing), stomach under 1.3, chest under
+/// 1.6, head under 2.1, jumping chest under 2.5. Moving: foot under 0.4, thigh under 1.2, chest
+/// under 1.8, jumping chest under 2.3. Higher, the jumping head (moving's set; standing, the data
+/// falls back to the moving foot volley, which can't reach a ball that high: a deliberate change)
+/// (BP_VolleyShootMontagePicker).
+pub const VOLLEY_SHOT_MOVING: f32 = 3.0;
+pub const VOLLEY_SHOT_STANDING_HEIGHTS: [f32; 6] = [0.30, 0.60, 1.30, 1.60, 2.10, 2.50];
+pub const VOLLEY_SHOT_MOVING_HEIGHTS: [f32; 4] = [0.40, 1.20, 1.80, 2.30];
+pub const VOLLEY_SHOT_SIDE: (f32, f32) = (40.0, 125.0);
+/// Speed by seconds held: 24 m/s to 0.05 s, 38 at 0.25 s (BP_ShootForceFromInputCurve).
+pub const VOLLEY_SHOT_FORCE: [(f32, f32); 3] = [(0.0, 24.0), (0.05, 24.0), (0.25, 38.0)];
+/// On top, the shot's own bonuses (BP_Shoot_BallCharaOrientationModifier), scaled by the charge as
+/// for a shot (SHOT_RUN_BONUS_BY_FORCE): your run-up's (SHOT_FORCE_BY_RUN_SPEED), less off a high
+/// contact (x1 to 1.2 m, 0.9 at 1.5, 0.75 at 1.8, 0.4 at 2.2); and the incoming ball's pace sent
+/// back the way it came (+0 at 2 m/s to +3.25 at 30 m/s, all of it when the shot goes back within
+/// 120 deg of the ball's way in, none from 87 deg).
+pub const SHOT_BONUS_BY_IMPACT_HEIGHT: [(f32, f32); 5] = [(0.0, 1.0), (1.2, 1.0), (1.5, 0.9), (1.8, 0.75), (2.2, 0.4)];
+pub const SHOT_FORCE_BY_BALL_SPEED: [(f32, f32); 2] = [(2.0, 0.0), (30.0, 3.25)];
+pub const SHOT_BALL_DIR_RATIO: [(f32, f32); 4] = [(-1.0, 1.0), (-0.5, 1.0), (0.05, 0.0), (1.0, 0.0)];
+/// Degrees added to the camera's elevation by the ball's height (m): high volleys are kept down
+/// (BP_VolleyShoot_PitchDependingBallHeigh).
+pub const VOLLEY_SHOT_HEIGHT_PITCH: [(f32, f32); 5] = [(0.5, 0.5), (1.54, -3.25), (1.541, -3.5), (2.1, -6.0), (3.0, -8.0)];
+/// Every volley shot freezes 5 frames at the touch (ShootDataTable's VolleyShoot), and you can act
+/// again this long after it, by body part (the clips' cancel-window ends and GenericAll frames,
+/// rounded over the standing and moving sets): foot, thigh, stomach and head 30f, chest 35, jumping
+/// chest 33, jumping head 43.
+pub const VOLLEY_SHOT_FREEZE: f32 = 5.0;
+pub const VOLLEY_SHOT_ACT: [f32; 7] = [30.0 / 60.0, 30.0 / 60.0, 30.0 / 60.0, 35.0 / 60.0, 30.0 / 60.0, 33.0 / 60.0, 43.0 / 60.0];
+
 // Freeplay ball call
 pub const FEED_DISTANCE: f32 = 15.0; // TUNE
 pub const FEED_SPEED: f32 = 16.0; // TUNE

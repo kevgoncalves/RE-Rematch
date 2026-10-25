@@ -288,13 +288,15 @@ fn update_hud(
         Some(k) if !k.released => {
             let force = match k.kind {
                 Kick::Shot => curve(&SHOT_FORCE, player::charge(k.kind, k.held)),
+                Kick::VolleyShot => curve(&VOLLEY_SHOT_FORCE, k.held),
                 Kick::Pass => curve(&PASS_FORCE, player::charge(k.kind, k.held)),
                 Kick::VolleyPass => curve(&VOLLEY_PASS_FORCE, k.held),
 
                 Kick::Lob => curve(&LOB_FORCE, player::charge(k.kind, k.held)),
                 _ => 0.0,
             };
-            let curve_info = if k.kind == Kick::Shot { format!("  curve ({:+.2}, {:+.2})", axes.curve.x, axes.curve.y) } else { String::new() };
+            let curve_info = if k.kind.is_shot() { format!("  curve ({:+.2}, {:+.2})", axes.curve.x, axes.curve.y) } else { String::new() };
+
             format!("{:?} {:.2}s -> {:.1} m/s{}", k.kind, k.held, force, curve_info)
         }
         Some(k) => format!("{:?} {:.2}s{}", k.kind, k.elapsed, if k.released { " released" } else { "" }),

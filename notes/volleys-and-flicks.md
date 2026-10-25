@@ -972,6 +972,29 @@ is one; anything else is a guess marked TUNE in `tuning.rs`.
 - **Headless check hook:** `RE_BALL=t:x,y,z:vx,vy,vz` throws the ball at `t` s in a scripted run, to
   set up high balls for headers and volleys.
 
+### 11.6 Volley shot (`Kick::VolleyShot`)
+- **Start:** shoot pressed or held with a volley target. You turn to the shot (the camera's aim at the
+  press) by the touch, as the game's snap places you along the shot's way. The shot camera, the aim
+  lock, the mouse curve and the reticle work as for a shot.
+- **Charge:** by seconds held, 24 m/s to 0.05 s, 38 m/s at 0.25 s; still held at the touch, it takes
+  the charge so far.
+- **Body part:** §2's standing and moving tables (the stomach for a thigh-high ball shot 40-125° off
+  your facing, standing). Above the top band, the jumping head: the data's fallback (the moving foot
+  volley) can't reach a ball that high, so that one is changed on purpose.
+- **Poses:** the half-volley is the shot's strike; thigh, stomach and chest a volley swept across the
+  body (the side shot's keys, mirrored for a ball on the left); the head a header; both jumping ones
+  the scissor kick from Kev's recording (knee up, body flat, foot at head height, the fall).
+- **Ball:** the force, plus the shot's run-up bonus (kept down off a high touch: x1 to 1.2 m, 0.4 at
+  2.2 m) and the incoming ball's pace sent back (up to +3.25 m/s at 30 m/s, when the shot goes back
+  roughly the way the ball came), both scaled by the charge as the shot's run-up bonus is; the
+  camera's elevation plus §2's height pitch (+0.5° at 0.5 m to -8° at 3 m); the shot's spin by
+  seconds held against 0.25 s; hitstop 5 frames at every power; no stamina.
+- **After:** you slow out of the approach until you can act (30f after the touch, chest 35, jumping
+  chest 33, jumping head 43). The fall after the scissor kick gets up sooner than the 0.5 s Kev's
+  recording shows (TUNE).
+- **Not built:** the shot's pitch-by-force curve and its against-the-run penalty (the prototype's
+  normal shot has neither); the analog trigger's slower fill (our input is digital).
+
 ## Sources
 **Extracted game files** (`RE Rematch (main)/tools/rmx/out` and `out_bp`):
 - **Abilities:** `GA_VolleyBaseShoot`, `GA_VolleyShoot`, `GA_VolleyTap` (+ `_LowPower`),
