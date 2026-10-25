@@ -1121,16 +1121,19 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         ]),
         10.0 / 65.0,
     );
-    // Lock move with the ball: the right sole up on the ball, the weight on a bent left leg.
-    let sole = stance.with(&[
+    // Lock move with the ball: the weight on a bent left leg planted wide, the right knee up and the
+    // right sole flat on top of the ball, out by the right hip (STANCE_BALL), the arms out wide.
+    let sole = lock.with(&[
         (PELVIS, [0.0, 0.0, -4.0]),
-        (SPINE_J, [16.0, 0.0, -4.0]),
-        (THIGH_L, [16.0, 0.0, -8.0]),
-        (SHIN_L, [36.0, 0.0, 0.0]),
-        (FOOT_L, [-20.0, 0.0, 8.0]),
-        (THIGH_R, [50.0, 0.0, 4.0]),
-        (SHIN_R, [72.0, 0.0, 0.0]),
-        (FOOT_R, [-14.0, 0.0, -4.0]),
+        (SPINE_J, [18.0, 0.0, -4.0]),
+        (THIGH_L, [36.0, 0.0, -22.0]),
+        (SHIN_L, [72.0, 0.0, 0.0]),
+        (FOOT_L, [-36.0, 0.0, 22.0]),
+        (THIGH_R, [62.0, 0.0, 17.0]),
+        (SHIN_R, [102.0, 0.0, 0.0]),
+        (FOOT_R, [-40.0, 0.0, -17.0]),
+        (UPPER_L, [15.0, 0.0, -45.0]),
+        (UPPER_R, [15.0, 0.0, 45.0]),
     ]);
     // Dashes, timed on their clips (front and back 50f, side 41f; the second dash 60/42/43f): a
     // short gather, the big push-off around 6-15f where the speed peaks (after the 0.1 s blend-in),

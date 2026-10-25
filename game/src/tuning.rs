@@ -517,8 +517,9 @@ pub const CONTROL_MAX_HEIGHT: f32 = 2.0;
 pub const DRIBBLE_OFFSET: f32 = 0.4;
 /// Lock move with the ball: where the ball sits under the right sole (m ahead, m right), how far
 /// it rolls ahead the way you move (seconds of your velocity), and how fast it eases there (the
-/// stance's snap lands at 17f, so most of the way in about 0.3 s). TUNE: matched to our stance pose.
-pub const STANCE_BALL: (f32, f32) = (0.27, 0.15);
+/// stance's snap lands at 17f, so most of the way in about 0.3 s). Kev's practice recording has it
+/// about 0.3 m right of the body and only a little ahead, under the sole of the lock stance.
+pub const STANCE_BALL: (f32, f32) = (0.17, 0.30);
 pub const STANCE_BALL_LEAD: f32 = 0.03;
 pub const STANCE_BALL_TIME: f32 = 0.1;
 /// Where a push ball's touch draws the ball to, ahead of you the way you push (m). TUNE.
