@@ -64,6 +64,11 @@ const CONTROL_SHARE: f32 = 0.85;
 const CONTROL_CATCH: f32 = 0.55;
 /// A stop plays the stop clip up to where it has braked this share of its travel.
 const STOP_SHARE: f32 = 0.55;
+/// The most the chest, upper chest, neck and head may lean forward (degrees from upright) while the
+/// legs run or stand: the Mixamo soccer clips hunch over a ball, Rematch's players stand and run
+/// tall with the head up. A bone leaning further is straightened to it; kicks and touches, which
+/// look down at the ball, keep their clip's pose. TUNE by eye.
+const POSTURE: [f32; 4] = [14.0, 14.0, 12.0, 6.0];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Clip {
@@ -947,6 +952,8 @@ struct Rig {
     hips: Entity,
     spine: Entity,
     chest: Entity,
+    /// Spine2, Neck and Head, straightened by POSTURE.
+    upper: [Entity; 3],
 }
 
 #[derive(Resource, Default)]
@@ -1005,8 +1012,8 @@ fn bind(
             continue;
         }
         let bone = |name: &str| children.iter_descendants(entity).find(|e| names.get(*e).is_ok_and(|(n, _)| n.as_str().rsplit(':').next() == Some(name)));
-        let (Some(hips), Some(spine), Some(chest)) = (bone("Hips"), bone("Spine"), bone("Spine1")) else {
-            warn!("The character has no Hips/Spine/Spine1 bones");
+        let (Some(hips), Some(spine), Some(chest), Some(spine2), Some(neck), Some(head)) = (bone("Hips"), bone("Spine"), bone("Spine1"), bone("Spine2"), bone("Neck"), bone("Head")) else {
+            warn!("The character has no Hips/Spine/Spine1/Spine2/Neck/Head bones");
             continue;
         };
         let mut graph = AnimationGraph::new();
@@ -1032,7 +1039,7 @@ fn bind(
         for node in nodes.iter().flatten() {
             player.play(*node).set_weight(0.0).pause();
         }
-        commands.entity(entity).insert((AnimationGraphHandle(graphs.add(graph)), Rig { nodes, hips, spine, chest }));
+        commands.entity(entity).insert((AnimationGraphHandle(graphs.add(graph)), Rig { nodes, hips, spine, chest, upper: [spine2, neck, head] }));
         // The foot trails follow the character's toes now, not the hidden body's boots.
         if let (Some(left), Some(right)) = (bone("LeftToeBase"), bone("RightToeBase")) {
             for e in &old_feet {
@@ -1166,18 +1173,36 @@ fn drive(
 }
 
 /// After the clips are applied: the lower body turned toward the velocity and the trunk back
-/// toward the facing (the procedural body's orientation warping), the trunk's lean forward.
+/// toward the facing (the procedural body's orientation warping), the trunk's lean forward, and the
+/// upper body straightened while running or standing (POSTURE).
 fn adjust(state: Res<MixState>, rigs: Query<&Rig>, mut bones: Query<&mut Transform, Without<CharacterRoot>>) {
     let mix = &state.mix;
+    // The locomotion clips' share of the pose (the clips before the pass in Clip::ALL).
+    let loco: f32 = (0..NODES).filter(|i| i % CLIPS < Clip::Pass as usize).map(|i| mix.weights[i]).sum::<f32>().min(1.0);
+    // A bone's forward lean in the character's frame (it faces -z; a bone points along its y), and
+    // the turn back that brings it to `most`.
+    let straighten = |r: Quat, most: f32| {
+        let up = r * Vec3::Y;
+        let lean = (-up.z).atan2(up.y).to_degrees();
+        Quat::from_rotation_x(((lean - most).clamp(0.0, 40.0) * loco).to_radians())
+    };
     for rig in &rigs {
-        let Ok([mut hips, mut spine, mut chest]) = bones.get_many_mut([rig.hips, rig.spine, rig.chest]) else { continue };
+        let Ok([mut hips, mut spine, mut chest, mut spine2, mut neck, mut head]) = bones.get_many_mut([rig.hips, rig.spine, rig.chest, rig.upper[0], rig.upper[1], rig.upper[2]]) else { continue };
         let warp = mix.warp.to_radians();
         // The hips' parent (the armature) is the character's root: its frame is the character's.
+        // A turn about one of its axes is put into a bone's own frame through the bones above it.
         hips.rotation = Quat::from_rotation_y(warp) * hips.rotation;
         let above = hips.rotation;
         spine.rotation = above.inverse() * Quat::from_rotation_y(-0.6 * warp) * above * spine.rotation;
         let above = above * spine.rotation;
-        chest.rotation = above.inverse() * Quat::from_rotation_y(-0.4 * warp) * Quat::from_rotation_x(-mix.pitch.to_radians()) * above * chest.rotation;
+        // Tiredness and extra effort lean the trunk on top of the straightened posture.
+        let turn = Quat::from_rotation_y(-0.4 * warp) * Quat::from_rotation_x(-mix.pitch.to_radians()) * straighten(above * chest.rotation, POSTURE[0]);
+        chest.rotation = above.inverse() * turn * above * chest.rotation;
+        let mut above = above * chest.rotation;
+        for (bone, most) in [(&mut spine2, POSTURE[1]), (&mut neck, POSTURE[2]), (&mut head, POSTURE[3])] {
+            bone.rotation = above.inverse() * straighten(above * bone.rotation, most) * above * bone.rotation;
+            above = above * bone.rotation;
+        }
     }
 }
 
