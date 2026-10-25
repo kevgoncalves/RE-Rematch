@@ -955,6 +955,23 @@ is one; anything else is a guess marked TUNE in `tuning.rs`.
 - **After:** you turn after the ball at 3 → 5.25 m/s (5 → 7.5 coming in faster than 1 m/s) for 22f.
 - **Not built:** the kicker's 0.8 s low priority on his own flick (one player, no contest).
 
+### 11.5 Volley pass (`Kick::VolleyPass`)
+- **Start:** pass pressed or still held while the volley target exists (so a press shortly before
+  the target appears also counts, as the pass report saw in Kev's recordings). The facing is kept
+  (the game's volley pass snap keeps the actor's forward).
+- **Charge:** by seconds held, full at 0.25 s (the open question on the time axis is answered with the
+  data read as seconds; TUNE). The touch can't wait for a release: still held, it takes the charge
+  so far.
+- **Body part:** foot under 0.2 m, thigh under 0.7, stomach under 1.2, chest under 1.7, head under
+  2.3, then the jumping header. Off the foot it is the pass's inside-of-the-foot pose.
+- **Ball:** §1 exactly: the squeezed pass curve (20 → 32 → 25.6 → 30.65 m/s), the height factors
+  (lifted past 69% or flat), lift +3.9 → 6° past 69%, pitch down to -8° by 2.9 m; the pass's aim,
+  friction x1.2 and forced lift; hitstop 3 frames; no stamina.
+- **After:** you slow from your approach to 30% of it until you can act (foot 10f, thigh 9, stomach
+  13, chest 15, head 16, jumping header 31 after the touch). The 30% is a guess (TUNE).
+- **Headless check hook:** `RE_BALL=t:x,y,z:vx,vy,vz` throws the ball at `t` s in a scripted run, to
+  set up high balls for headers and volleys.
+
 ## Sources
 **Extracted game files** (`RE Rematch (main)/tools/rmx/out` and `out_bp`):
 - **Abilities:** `GA_VolleyBaseShoot`, `GA_VolleyShoot`, `GA_VolleyTap` (+ `_LowPower`),

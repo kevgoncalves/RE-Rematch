@@ -728,6 +728,33 @@ pub const AERIAL_FLICK: (f32, f32) = (10.0, 65.0);
 pub const VOLLEY_FLICK_RUN: [&[(f32, f32)]; 2] = [&[(0.0, 3.0), (0.1, 3.0), (0.5, 5.25), (1.0, 5.25)], &[(0.0, 5.0), (0.1, 5.0), (0.5, 7.5), (1.0, 7.5)]];
 pub const VOLLEY_FLICK_AFTER: f32 = 22.0 / 60.0;
 
+// The volley pass (§1, GA_VolleyTap).
+/// Volleys charge by seconds held, full at 0.25 s (their force curves' last key; read as seconds,
+/// TUNE if Kev finds it too quick). Still held at the touch, the touch reads it then.
+pub const VOLLEY_CHARGE_FULL: f32 = 0.25;
+/// The body part by the ball's height (m): foot under 0.2, thigh under 0.7, stomach under 1.2, chest
+/// under 1.7, head under 2.3, then the jumping header (BP_VolleyTapBuildupMontagePicker).
+pub const VOLLEY_PASS_HEIGHTS: [f32; 5] = [0.20, 0.70, 1.20, 1.70, 2.30];
+/// Speed by seconds held: the pass's curve squeezed into 0.25 s (BP_VolleyTapAbilityData_AnalogPower).
+pub const VOLLEY_PASS_FORCE: [(f32, f32); 5] = [(0.0, 20.0), (0.087, 20.0), (0.1725, 32.0), (0.1726, 25.6), (0.25, 30.65)];
+/// x by the ball's height (m): charged past 69% (a lifted pass) gently, otherwise down to 0.8 by
+/// 0.7 m; a ball above 1 m also x (1 to 35%, 0.89 at 69%, 1 full) of the charge
+/// (BP_VolleyTap_ForceDependingBallHeightAndTime).
+pub const VOLLEY_PASS_FLAT_BY_HEIGHT: [(f32, f32); 6] = [(0.11, 1.0), (0.115, 1.05), (0.18, 1.0), (0.20, 0.96), (0.70, 0.80), (3.2, 0.72)];
+pub const VOLLEY_PASS_LIFTED_BY_HEIGHT: [(f32, f32); 3] = [(0.15, 1.0), (1.0, 0.93), (3.2, 0.9)];
+pub const VOLLEY_PASS_HIGH_BALL: [(f32, f32); 4] = [(0.0, 1.0), (0.348, 1.0), (0.69, 0.89), (1.0, 1.0)];
+pub const VOLLEY_PASS_LIFTED_FROM: f32 = 0.69;
+/// Degrees up by the charge (lifted past 69%), and down by the ball's height (m) so a high ball
+/// isn't skied (Curve_VolleyTapPitchModifierDependingTime, BP_VolleyTap_AngleDependingBallHeight).
+pub const VOLLEY_PASS_LIFT: [(f32, f32); 4] = [(0.0, 0.0), (0.69, 0.0), (0.691, 3.9), (1.0, 6.0)];
+pub const VOLLEY_PASS_HEIGHT_PITCH: [(f32, f32); 3] = [(0.0, 0.0), (0.15, 0.0), (2.9, -8.0)];
+/// The touch freezes 3 frames (ShootDataTable's VolleyTap); you can act again this long after it,
+/// by body part (DT_VolleyTap): foot 10f, thigh 9, stomach 13, chest 15, head 16, jumping chest 26,
+/// jumping head 31.
+pub const VOLLEY_PASS_ACT: [f32; 7] = [10.0 / 60.0, 9.0 / 60.0, 13.0 / 60.0, 15.0 / 60.0, 16.0 / 60.0, 26.0 / 60.0, 31.0 / 60.0];
+/// Through that recovery you slow from your approach to this share of it. TUNE.
+pub const VOLLEY_RECOVERY: [(f32, f32); 2] = [(0.0, 1.0), (1.0, 0.3)];
+
 // Freeplay ball call
 pub const FEED_DISTANCE: f32 = 15.0; // TUNE
 pub const FEED_SPEED: f32 = 16.0; // TUNE

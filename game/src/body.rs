@@ -1887,14 +1887,17 @@ fn kick_size(kind: Kick) -> f32 {
         Kick::PushBall | Kick::DribblePushBall => 0.4,
         Kick::LobbedPushBall | Kick::DribbleLobbedPushBall => 0.9,
         Kick::VolleyPushBall | Kick::VolleyLobbedPushBall => 0.85,
+        Kick::VolleyPass => 0.9,
     }
 }
 
 /// A volley's keys by the body part it meets the ball with, for the right side.
 fn volley_keys(clips: &Clips, kind: Kick, part: Part) -> [Pose; 3] {
     match part {
-        // A flick off the foot is the rainbow flick's scoop.
+        // A flick off the foot is the rainbow flick's scoop; a pass, the inside of the foot's.
         Part::Foot if kind.is_flick() => clips.flick,
+        Part::Foot if kind == Kick::VolleyPass => clips.kicks[1],
+
 
         Part::Foot => clips.touch[0],
         Part::Thigh => clips.touch[1],

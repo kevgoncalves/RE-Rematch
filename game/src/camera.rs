@@ -275,7 +275,8 @@ pub fn camera_look(
         // Otherwise the stick still turns the camera while you kick (a shot's camera at its slower
         // 120/60 deg/s, then not at all from the release), but only so far from where it pointed
         // at the press (Kev).
-        Some(k) if actions.device == Device::Gamepad && matches!(k.kind, Kick::Shot | Kick::Pass | Kick::Lob) => {
+        Some(k) if actions.device == Device::Gamepad && matches!(k.kind, Kick::Shot | Kick::Pass | Kick::Lob | Kick::VolleyPass) => {
+
             (rig.yaw, rig.pitch) = kick_limit(rig.yaw, rig.pitch, k.aim);
         }
         _ => {}

@@ -208,7 +208,8 @@ pub fn kick_sound(kind: Kick, held: f32, speed: f32, spin: Vec3) -> (Sound, f32)
     let max = player::charge(kind, held) >= 1.0;
     match kind {
         Kick::Shot => (Sound::Shot(shot_power(speed), shot_spin(spin)), 0.85 + 0.15 * ((speed - SHOT_FORCE[0].1) / 14.0).clamp(0.0, 1.0)),
-        Kick::Pass => (Sound::Pass { max }, 1.0),
+        Kick::Pass | Kick::VolleyPass => (Sound::Pass { max }, 1.0),
+
         Kick::Lob => (Sound::Lob { max }, 1.0),
         Kick::ShortPass => (Sound::Pass { max: false }, 0.75),
         Kick::ShortLob => (Sound::Lob { max: false }, 0.75),

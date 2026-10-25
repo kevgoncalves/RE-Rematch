@@ -91,7 +91,8 @@ fn main() {
                 menu::update_systems(),
                 (player::grab_cursor, menu::show_menu).chain(),
                 camera::camera_look,
-                player::player_move,
+                (scripted_ball, player::player_move).chain(),
+
                 player::kicking,
                 player::ball_call,
                 player::ball_control,
@@ -112,7 +113,27 @@ fn main() {
         .run();
 }
 
+/// For checking volleys in a scripted (headless) run: `RE_BALL=t:x,y,z:vx,vy,vz` throws the ball
+/// from that point at that velocity at `t` s, like a practice cannon.
+fn scripted_ball(time: Res<Time>, mut ball: Single<(&mut Transform, &mut Ball)>, mut done: Local<bool>) {
+    if *done || !headless() {
+        return;
+    }
+    let Some(script) = std::env::var("RE_BALL").ok() else { return };
+    let parts: Vec<Vec<f32>> = script.split(':').map(|s| s.split(',').filter_map(|n| n.trim().parse().ok()).collect()).collect();
+    let [at, from, vel] = parts.as_slice() else { return };
+    if at.len() != 1 || from.len() != 3 || vel.len() != 3 || time.elapsed_secs() < at[0] {
+        return;
+    }
+    let (tf, b) = &mut *ball;
+    **b = Ball::default();
+    tf.translation = Vec3::new(from[0], from[1], from[2]);
+    b.vel = Vec3::new(vel[0], vel[1], vel[2]);
+    *done = true;
+}
+
 /// For checking visuals: `RE_SCREENSHOT=out.png` saves a frame after 2 s (or `RE_SHOT_AT` s), then quits.
+
 /// `RE_VIEW=x,y,z[,tx,ty,tz]` looks from that point at the centre spot (or the target) instead;
 /// `RE_VIEW=@x,y,z` looks at the player from that offset.
 /// `RE_MENU=1` opens the Esc menu after 1 s; `RE_MENU=gameplay`, `audio`, `controls` or `cheats`
@@ -268,6 +289,8 @@ fn update_hud(
             let force = match k.kind {
                 Kick::Shot => curve(&SHOT_FORCE, player::charge(k.kind, k.held)),
                 Kick::Pass => curve(&PASS_FORCE, player::charge(k.kind, k.held)),
+                Kick::VolleyPass => curve(&VOLLEY_PASS_FORCE, k.held),
+
                 Kick::Lob => curve(&LOB_FORCE, player::charge(k.kind, k.held)),
                 _ => 0.0,
             };
