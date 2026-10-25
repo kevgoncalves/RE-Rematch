@@ -443,7 +443,6 @@ const CONTROL_BLUE: Vec3 = Vec3::new(0.3, 0.68, 0.84);
 const TEAL: Vec3 = Vec3::new(0.11, 0.42, 0.38);
 const DRIBBLE_BLUE: Vec3 = Vec3::new(0.22, 0.56, 0.69);
 const PUFF: Vec3 = Vec3::new(0.3, 0.8, 1.0);
-const PUSH_BLUE: Vec3 = Vec3::new(0.12, 0.28, 0.85);
 const WHITE: Vec3 = Vec3::ONE;
 const ICE: Vec3 = Vec3::new(0.6, 0.95, 1.0);
 const GOLD: Vec3 = Vec3::new(1.0, 0.72, 0.18);
@@ -1072,11 +1071,11 @@ fn shot_strike(s: &mut Spawner, fx: &FxAssets, rng: &mut Rng, at: Vec3, way: Vec
 }
 
 /// A push ball's touch (NS_Impact_PushBall, NS_BallLost): white spikes for a frame or two, then a
-/// blue smear behind the ball (a blue shell and blue ghosts left close together).
+/// few faint pale ghosts behind the ball (Kev: the dark blue shell and smear didn't look like
+/// Rematch).
 fn push_touch(s: &mut Spawner, fx: &FxAssets, rng: &mut Rng, state_ghosts: &mut Vec<Ghosts>, at: Vec3) {
     s.bit(&fx.star, at, Bit::new(0.06, WHITE).alpha(1.6).size(0.12, 0.3).pulse().spin(rng.next() * TAU, 0.0));
-    s.bit(&fx.sphere, at, Bit::new(0.13, PUSH_BLUE).alpha(0.55).hold(0.4).size(1.3, 1.1).delay(0.04).face(Facing::Fixed).follow().blend());
-    state_ghosts.push(Ghosts { delay: 0.03, left: 0.15, spacing: 0.05, colour: PUSH_BLUE, alpha: 0.35, life: 0.12, blend: true, last: None });
+    state_ghosts.push(Ghosts { delay: 0.03, left: 0.1, spacing: 0.08, colour: ICE, alpha: 0.2, life: 0.1, blend: true, last: None });
 }
 
 /// A pass or lob leaving the foot (NS_Impact_Tap): a blue flash on the ground under the ball, a few
