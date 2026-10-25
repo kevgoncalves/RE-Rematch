@@ -57,6 +57,20 @@ overlay lights each key yellow while it is held. It sits at (0, 861) in the firs
   - the contact flash shows within a frame of the release (0.73 s).
 - **Where these went:** the shot's backswing holds the arms out wide, and `KICK_STRIKE_MIN` drops from
   4 to 2 frames.
+- **The 29 shots on the run at 184–292 s:** the gold contact flash was found in 21 of them by counting
+  gold pixels around the player.
+  - Counted from the press, the contact falls at 0.73–0.83 s in almost all of them, whatever the
+    charge (0.53–0.80 s held). The press comes during the control (about 0.2 s), then the power
+    shot's 32f build-up runs.
+  - One shot without a control took 0.533 s (exactly 32f). A 0.40 s charge took 0.47 s.
+  - Our timeline is built the same way (the shot waits for the control, then its build-up).
+- **Power shot follow-through on the run** (230.3 s sprinting, 250.5 s running), from the contact:
+  - **to 0.2 s:** the kicking leg drives up high and the body leans back;
+  - **0.27–0.43 s:** the leg comes down into a long lunging stride, torso forward and arms wide;
+  - **0.47–0.53 s:** the player straightens;
+  - **from about 0.55–0.6 s:** the run picks up.
+
+  `follow_time` is now 0.5 s for shots and 0.375 s for passes and lobs, in these phases.
 
 ## Still wanted
 These clips are matches, so the moments of the presses are unknown and the camera moves. Short

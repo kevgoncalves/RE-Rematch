@@ -603,7 +603,7 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         ]),
         stand.with(&[
             (PELVIS, [0.0, 28.0, 4.0]),
-            (SPINE_J, [2.0, 0.0, -4.0]),
+            (SPINE_J, [-12.0, 0.0, -4.0]),
             (CHEST_J, [0.0, -16.0, 0.0]),
             (NECK_J, [-6.0, 0.0, 0.0]),
             (THIGH_L, [12.0, 0.0, -4.0]),
@@ -764,19 +764,19 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
     // kick carries you forward into your next step.
     let land = stand.with(&[
         (PELVIS, [0.0, 10.0, 0.0]),
-        (SPINE_J, [18.0, 0.0, 0.0]),
+        (SPINE_J, [28.0, 0.0, 0.0]),
         (CHEST_J, [4.0, -6.0, 0.0]),
-        (NECK_J, [-10.0, 0.0, 0.0]),
-        (THIGH_R, [38.0, 0.0, -4.0]),
-        (SHIN_R, [20.0, 0.0, 0.0]),
-        (FOOT_R, [-10.0, 0.0, 0.0]),
-        (THIGH_L, [-28.0, 0.0, 4.0]),
-        (SHIN_L, [55.0, 0.0, 0.0]),
-        (FOOT_L, [20.0, 0.0, 0.0]),
-        (UPPER_L, [40.0, 0.0, -55.0]),
-        (FORE_L, [30.0, 0.0, 0.0]),
-        (UPPER_R, [-30.0, 0.0, 40.0]),
-        (FORE_R, [30.0, 0.0, 0.0]),
+        (NECK_J, [-16.0, 0.0, 0.0]),
+        (THIGH_R, [42.0, 0.0, -4.0]),
+        (SHIN_R, [28.0, 0.0, 0.0]),
+        (FOOT_R, [-14.0, 0.0, 0.0]),
+        (THIGH_L, [-34.0, 0.0, 4.0]),
+        (SHIN_L, [50.0, 0.0, 0.0]),
+        (FOOT_L, [24.0, 0.0, 0.0]),
+        (UPPER_L, [20.0, 0.0, -80.0]),
+        (FORE_L, [20.0, 0.0, 0.0]),
+        (UPPER_R, [-10.0, 0.0, 80.0]),
+        (FORE_R, [20.0, 0.0, 0.0]),
     ]);
 
     // Controlling the ball: lean over it, the right foot reaches out to cushion it.
@@ -1314,14 +1314,14 @@ fn play_rate(speed: f32, clip: &Clip, corner: f32) -> f32 {
     if clip.speed <= 0.0 { 1.0 } else { (speed / clip.speed).clamp(0.7, 1.5) * corner }
 }
 
-/// How long a kick's leg takes to come down into its landing stride after the follow-through.
-const KICK_SETTLE: f32 = 0.15;
 
+/// A kick's follow-through after its contact, to where the run picks up again (a power shot's
+/// in Kev's practice recording; lighter kicks go through the same in less time).
 fn follow_time(kind: Kick) -> f32 {
     match kind {
-        Kick::Shot => 0.4,
+        Kick::Shot => 0.5,
         Kick::PushBall | Kick::DribblePushBall => 0.2,
-        _ => 0.3,
+        _ => 0.375,
     }
 }
 
@@ -1679,14 +1679,12 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         _ => {}
     }
     anim.kick = p.kick;
-    // The follow-through holds while the kick still slides you on (its drag), then fades. Running
-    // on out of it, it ends with the swing and fades quicker, so the legs pick the run back up
-    // instead of skating in the pose.
+    // The follow-through holds while the kick still slides you on (its drag), then fades; running
+    // on out of it, it fades quicker into the run.
     let run_out = speed > 1.5 && !p.kick_sliding();
     if let Some((t, kind)) = anim.follow.as_mut() {
         *t += dt;
-        let end = if run_out { 0.25 * follow_time(*kind) + KICK_SETTLE } else { follow_time(*kind) };
-        if *t > end && !p.kick_sliding() {
+        if *t > follow_time(*kind) && !p.kick_sliding() {
             anim.follow = None;
         }
     }
@@ -1747,17 +1745,16 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         };
         Some((key, k.kind, turn))
     } else {
-        // After the touch the leg swings on through (easing out), then lands ahead in a long
-        // stride that carries you on (held while the kick slides you); running on, the run picks
-        // up from that stride.
+        // After the touch, as in Kev's practice recording of power shots on the run: the leg drives
+        // up high by a fifth of the follow-through (0.1 s) with the body leaning back, stays up to
+        // two fifths, comes down into a long lunging stride by seven tenths, and the run picks up
+        // from it at the end (held while the kick slides you).
         anim.follow.filter(|(_, kind)| !push(*kind)).map(|(t, kind)| {
             let ([_, hit, through], _) = keys(kind, anim.kick_turn);
-            // The leg drives through to the top of its follow-through fast (about 0.1 s after a
-            // shot's contact in Kev's clips).
-            let swing = 0.25 * follow_time(kind);
-            let a = (t / swing).min(1.0);
+            let u = t / follow_time(kind);
+            let a = (u / 0.2).min(1.0);
             let a = 1.0 - (1.0 - a) * (1.0 - a);
-            let b = ((t - swing) / KICK_SETTLE).clamp(0.0, 1.0);
+            let b = ((u - 0.4) / 0.3).clamp(0.0, 1.0);
             let b = b * b * (3.0 - 2.0 * b);
             // A shot across or back to the right is the left foot's: it lands on the left.
             let left_foot = kind == Kick::Shot && anim.kick_turn < -30.0;
