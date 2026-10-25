@@ -612,10 +612,10 @@ pub fn player_move(
         // The feint needs lock move held all through dribble 1 (Kev: let go and lock again, and the
         // next press is dribble 1 again, not the feint).
         let feint = !p.exhausted && p.dribble_lock && p.dribble.is_some_and(|d| !d.feint && !d.exhausted && d.t >= DRIBBLE_WINDOW_OPENS && d.t < d.length() - FEINT_WINDOW_CUT);
-        // A new dribble 1 from FEINT_WINDOW_CUT before a dribble 1's end, and never sooner, lock
-        // let go or not (Kev: two back to back were too quick; the game has none before the end).
-        // After a feint, only once it ends (Kev; the game's 1 s lock after it made dribbles late).
-        let again = p.dribble.is_none_or(|d| !d.feint && d.t >= d.length() - FEINT_WINDOW_CUT);
+        // A new dribble 1 from FEINT_WINDOW_CUT before a dribble 1's end, or with lock move let go
+        // from DRIBBLE_REPEAT. After a feint, only once it ends (Kev; the game's 1 s lock after it
+        // made dribbles late).
+        let again = p.dribble.is_none_or(|d| !d.feint && (d.t >= d.length() - FEINT_WINDOW_CUT || (!p.dribble_lock && d.t >= DRIBBLE_REPEAT)));
         if feint || again {
             // No direction is a forward dribble. Keyboard diagonals sit on the 45/135 deg sector edges:
             // W+A and W+D are fast cuts, S+A and S+D side dribbles going back (players confirm).
@@ -774,9 +774,10 @@ pub fn player_move(
             }
         }
     } else if let Some(drag) = p.kick.and_then(|k| pass_drag(&k)) {
-        // A pass or lob drags you on at your speed at the press, that way, with no steering
-        // (players confirm: a pass out of a dribble carries you like a shot).
-        p.vel = drag;
+        // A pass or lob carries you on at your speed at the press (players confirm: a pass out of a
+        // dribble carries you like a shot); the stick steers it at your turn rate (Kev: locked
+        // straight, kicks felt stuck).
+        p.vel = steer(p, wish, turn, dt) * drag.length();
     } else if let Some(mut d) = p.dribble.filter(|d| d.moving()) {
         d.t += dt;
         // The body turns to the dribble's way linearly over its redirect time.
@@ -787,7 +788,7 @@ pub fn player_move(
             soft_hand_back(p, dir_now);
         }
     } else if let Some(k) = p.kick.filter(|k| k.kind == Kick::Shot) {
-        // A shot keeps your run-up: no steering, sliding on at a shrinking share of your speed.
+        // A shot keeps your run-up, sliding on at a shrinking share of your speed, steerable.
         let end = if Vec3::new(k.entry.x, 0.0, k.entry.z).length() > BALL_SPRINT_SPEED {
             // Faster than you can run with the ball (an extra-effort tap's carry): all of it.
             1.0
@@ -798,7 +799,8 @@ pub fn player_move(
         } else {
             SHOT_SLIDE
         };
-        p.vel = k.entry * (1.0 + (end - 1.0) * (k.elapsed / SHOT_BUILDUP).min(1.0));
+        let entry = Vec3::new(k.entry.x, 0.0, k.entry.z).length();
+        p.vel = steer(p, wish, turn, dt) * entry * (1.0 + (end - 1.0) * (k.elapsed / SHOT_BUILDUP).min(1.0));
     } else if let Some(mut d) = p.dash {
         d.t += dt;
         // Turn as a dribble would. Dashing onto the ball controls it and carries it on in front,
@@ -1482,12 +1484,13 @@ pub fn kicking(
     p.freeze = ball.freeze;
     if k.kind == Kick::Shot {
         let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
-        p.run = Some(Run { t: 0.0, length: SHOT_AFTER_TOUCH, free_at: SHOT_FOLLOW_THROUGH, dir: k.entry.normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: speed, exit: RUN_TURN_LIMIT, soft: true, face: None });
+        p.run = Some(Run { t: 0.0, length: SHOT_AFTER_TOUCH, free_at: 0.0, dir: Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: speed, exit: 180.0, soft: true, face: None });
     }
-    // After the touch a pass or lob keeps dragging you until its move interrupt; steering the
-    // same way leaves it at once.
+    // After the touch a pass or lob keeps dragging you until its move interrupt. Either drag only
+    // lasts while you leave the stick alone: any stick hands you back at once (Kev: held on, they
+    // felt stuck).
     if let Some(drag) = pass_drag(&k) {
-        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: PASS_DRAG_FREE, dir: drag.normalize(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: drag.length(), exit: 180.0, soft: true, face: None });
+        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: 0.0, dir: Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or(drag.normalize()), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: drag.length(), exit: 180.0, soft: true, face: None });
     }
     if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) {
         p.own_push = 0.0;
@@ -1518,6 +1521,19 @@ pub fn kicking(
         // The chase runs to the animation's blend-out, or ends earlier on a stick exit.
         p.run = Some(Run { t: 0.0, length: length - BLEND_OUT - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, dir: flat, speeds, tables: Some(tables), scale: 1.0, exit: RUN_TURN_LIMIT, soft: false, face });
     }
+}
+
+/// The way a kick carries you, turned toward the stick by at most `rate` (deg/s) this frame; the
+/// body turns with it.
+fn steer(p: &mut Player, wish: Vec3, rate: f32, dt: f32) -> Vec3 {
+    let now = Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or_zero();
+    if wish == Vec3::ZERO || now == Vec3::ZERO {
+        return now;
+    }
+    let max = rate.to_radians() * dt;
+    let by = angle_diff(yaw_of(wish), yaw_of(now)).clamp(-max, max);
+    p.facing += by;
+    forward(yaw_of(now) + by)
 }
 
 /// A pass or lob's drag: your velocity at the press, or out of a dribble your run speed with the
@@ -1708,9 +1724,9 @@ mod tests {
         frames(&mut app, lock, 2, 0.016);
         frames(&mut app, press, 1, 0.016);
         assert!(dribble(&mut app).is_some_and(|d| !d.feint && d.t > 0.2), "the first dribble goes on");
-        // Late in it, the press is dribble 1 again, not the feint.
-        let length = dribble(&mut app).unwrap().length();
-        frames(&mut app, lock, ((length - FEINT_WINDOW_CUT - 0.2) / 0.016) as u32, 0.016);
+        // From DRIBBLE_REPEAT, the press is dribble 1 again, not the feint.
+        let t = dribble(&mut app).unwrap().t;
+        frames(&mut app, lock, ((DRIBBLE_REPEAT + 0.03 - t) / 0.016) as u32, 0.016);
         frames(&mut app, press, 1, 0.016);
         assert!(dribble(&mut app).is_some_and(|d| !d.feint && d.t < 0.05), "dribble 1 again");
     }

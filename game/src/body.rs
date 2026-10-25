@@ -1655,10 +1655,14 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         _ => {}
     }
     anim.kick = p.kick;
-    // The follow-through holds while the kick still slides you on (its drag), then fades.
+    // The follow-through holds while the kick still slides you on (its drag), then fades. Running
+    // on out of it, it ends with the swing and fades quicker, so the legs pick the run back up
+    // instead of skating in the pose.
+    let run_out = speed > 1.5 && !p.kick_sliding();
     if let Some((t, kind)) = anim.follow.as_mut() {
         *t += dt;
-        if *t > follow_time(*kind) && !p.kick_sliding() {
+        let end = if run_out { 0.4 * follow_time(*kind) } else { follow_time(*kind) };
+        if *t > end && !p.kick_sliding() {
             anim.follow = None;
         }
     }
@@ -1741,9 +1745,10 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         let w = push_touch * push_touch * (3.0 - 2.0 * push_touch) * 1.2;
         pose = pose.plus(&Pose(clips.control.0.map(|a| a * w)));
     }
-    // In over 0.08 s, out over 0.25 s from the last pose shown, so the kick never snaps off.
+    // In over 0.08 s, out over 0.25 s (0.15 s running on) from the last pose shown, so the kick
+    // never snaps off.
     let target = if kick_pose.is_some() { 1.0 } else { 0.0 };
-    anim.action += (target - anim.action).clamp(-dt / 0.25, dt / 0.08);
+    anim.action += (target - anim.action).clamp(-dt / if run_out { 0.15 } else { 0.25 }, dt / 0.08);
     if kick_pose.is_some() {
         anim.kick_last = kick_pose;
     } else if anim.action <= 0.0 {
