@@ -203,7 +203,7 @@ Shots in detail:
 **Ours:**
 - **Footsteps:** a stride clock on your speed.
   - Steps per second (guessed): 1.6 at walking pace, 2.7 at 5 m/s, 3.3 at 8 m/s, up to 3.6.
-  - Walk under 3 m/s, Rush when sprinting, Run otherwise.
+  - Walk under 3 m/s, Rush when sprinting or above 6.5 m/s (a dash), Run otherwise.
   - Soft grass taps, harder and brighter the faster you go.
   - Each step is 3% higher or lower at random, so they don't sound identical.
 - **Dash** (without the ball): a body whoosh with two shoe scuffs (guessed from the scuff names).
