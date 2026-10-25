@@ -15,7 +15,7 @@ use std::sync::LazyLock;
 use bevy::prelude::*;
 
 use crate::fx::TrailPoint;
-use crate::player::{Heading, Kick, KickState, Player, charge, contact_time, dribble_contact, yaw_of};
+use crate::player::{FeintTurn, Heading, Kick, KickState, Player, charge, contact_time, dribble_contact, roulette_turn, turn_out_angle, yaw_of};
 use crate::tuning::*;
 
 // Rematch's player (notes/animation.md §1), metres. The root entity is the capsule's centre.
@@ -246,8 +246,13 @@ struct Clips {
     dribble_back: (OneShot, f32),
     feint: (OneShot, f32),
     roulette: (OneShot, f32),
-    /// Lock move with the ball: the right sole on it.
+    /// The forward feint out of a fast cut: a quarter turn out and back in a deep crouch.
+    turn_out: (OneShot, f32),
+    /// Lock move's stance, and with the ball the right sole on it.
+    lock: Pose,
     sole: Pose,
+    /// Lock move's braking crouch as you turn to go back, added on top.
+    brake: Pose,
     dash_front: OneShot,
     dash_side: OneShot,
     dash_back: OneShot,
@@ -510,59 +515,102 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         (UPPER_R, [20.0, 0.0, 24.0]),
         (FORE_R, [35.0, 0.0, 0.0]),
     ]));
-    let low = |p: Pose| Pose(std::array::from_fn(|j| if j >= UPPER_L { stance.0[j] } else { p.0[j] }));
+    // Lock move itself (Kev's practice recording): lower and much wider than the moves' stance,
+    // the ankles about 0.9 m apart and the knees bent twice as far (standing about 0.25 m lower),
+    // the torso a little forward, the arms out about 40° with the elbows bent and the hands at the
+    // hips. Every lock pose keeps the planted legs about this long, so the body stays level.
+    let lock = stand.with(&[
+        (SPINE_J, [18.0, 0.0, 0.0]),
+        (CHEST_J, [6.0, 0.0, 0.0]),
+        (NECK_J, [-16.0, 0.0, 0.0]),
+        (HEAD_J, [-8.0, 0.0, 0.0]),
+        (THIGH_L, [32.0, 0.0, -26.0]),
+        (SHIN_L, [65.0, 0.0, 0.0]),
+        (FOOT_L, [-33.0, 0.0, 26.0]),
+        (THIGH_R, [32.0, 0.0, 26.0]),
+        (SHIN_R, [65.0, 0.0, 0.0]),
+        (FOOT_R, [-33.0, 0.0, -26.0]),
+        (UPPER_L, [17.0, 0.0, -40.0]),
+        (FORE_L, [60.0, 0.0, 0.0]),
+        (UPPER_R, [17.0, 0.0, 40.0]),
+        (FORE_R, [60.0, 0.0, 0.0]),
+    ]);
+    let low = |p: Pose| Pose(std::array::from_fn(|j| if j >= UPPER_L { lock.0[j] } else { p.0[j] }));
+    // Forward and back are a little more upright than the stance, on short steps a hip-width apart.
+    // Each cycle is two steps, at the recorded rate at full lock speed (back is 0.9 of it).
     let lock_forward = Clip::cycle(
-        low(stance.with(&[(THIGH_L, [32.0, 0.0, -6.0]), (SHIN_L, [30.0, 0.0, 0.0]), (FOOT_L, [2.0, 0.0, 6.0]), (THIGH_R, [-6.0, 0.0, 6.0]), (SHIN_R, [70.0, 0.0, 0.0]), (FOOT_R, [-56.0, 0.0, -6.0])])),
-        low(stance.with(&[(THIGH_L, [12.0, 0.0, -6.0]), (SHIN_L, [40.0, 0.0, 0.0]), (FOOT_L, [-28.0, 0.0, 6.0]), (THIGH_R, [30.0, 0.0, 6.0]), (SHIN_R, [90.0, 0.0, 0.0]), (FOOT_R, [-50.0, 0.0, -6.0])])),
-        4.5,
-        0.62,
+        low(lock.with(&[(THIGH_L, [38.0, 0.0, -12.0]), (SHIN_L, [44.0, 0.0, 0.0]), (FOOT_L, [-4.0, 0.0, 12.0]), (THIGH_R, [-2.0, 0.0, 12.0]), (SHIN_R, [84.0, 0.0, 0.0]), (FOOT_R, [-62.0, 0.0, -12.0])])),
+        low(lock.with(&[(THIGH_L, [18.0, 0.0, -12.0]), (SHIN_L, [54.0, 0.0, 0.0]), (FOOT_L, [-36.0, 0.0, 12.0]), (THIGH_R, [36.0, 0.0, 12.0]), (SHIN_R, [104.0, 0.0, 0.0]), (FOOT_R, [-56.0, 0.0, -12.0])])),
+        LOCK_SPEED,
+        2.0 / LOCK_FORWARD_STEPS,
         0.0,
     );
     let lock_back = Clip::cycle(
-        low(stance.with(&[(THIGH_L, [-6.0, 0.0, -8.0]), (SHIN_L, [40.0, 0.0, 0.0]), (FOOT_L, [-36.0, 0.0, 6.0]), (THIGH_R, [26.0, 0.0, 8.0]), (SHIN_R, [44.0, 0.0, 0.0]), (FOOT_R, [-18.0, 0.0, -6.0])])),
-        low(stance.with(&[(THIGH_L, [14.0, 0.0, -8.0]), (SHIN_L, [36.0, 0.0, 0.0]), (FOOT_L, [-22.0, 0.0, 6.0]), (THIGH_R, [4.0, 0.0, 8.0]), (SHIN_R, [80.0, 0.0, 0.0]), (FOOT_R, [-50.0, 0.0, -6.0])])),
-        4.0,
-        0.58,
+        low(lock.with(&[(THIGH_L, [0.0, 0.0, -14.0]), (SHIN_L, [54.0, 0.0, 0.0]), (FOOT_L, [-44.0, 0.0, 14.0]), (THIGH_R, [32.0, 0.0, 14.0]), (SHIN_R, [58.0, 0.0, 0.0]), (FOOT_R, [-26.0, 0.0, -14.0])])),
+        low(lock.with(&[(THIGH_L, [20.0, 0.0, -14.0]), (SHIN_L, [50.0, 0.0, 0.0]), (FOOT_L, [-30.0, 0.0, 14.0]), (THIGH_R, [10.0, 0.0, 14.0]), (SHIN_R, [94.0, 0.0, 0.0]), (FOOT_R, [-58.0, 0.0, -14.0])])),
+        LOCK_SPEED * LOCK_SPEED_BY_ANGLE[2].1,
+        2.0 / LOCK_BACK_STEPS,
         0.0,
     );
     // Strafing right (the game's side cycle runs 44f; Kev found four scissor steps in it too
-    // busy): one stride per cycle. The right foot lifts and reaches out with the weight on the left,
-    // lands wide, the left lifts and comes in, and you land again shoulder-width, never feet together.
-    let reach = stance.with(&[
-        (PELVIS, [0.0, 0.0, 3.0]),
-        (THIGH_L, [16.0, 0.0, -6.0]),
-        (SHIN_L, [40.0, 0.0, 0.0]),
-        (FOOT_L, [-24.0, 0.0, 6.0]),
-        (THIGH_R, [24.0, 0.0, 22.0]),
-        (SHIN_R, [45.0, 0.0, 0.0]),
-        (FOOT_R, [-22.0, 0.0, -22.0]),
+    // busy): one stride per cycle, a step-together shuffle, 2.4 a second at full speed as in Kev's
+    // recording (the feet glide a little, as there). The right foot lifts and reaches out with
+    // the weight on the left, lands wide (about 1 m), the left lifts and comes in, and you land again
+    // about 0.4 m apart: never feet together, never crossing. The narrower the feet, the deeper the
+    // knees, so the hips stay level.
+    let reach = lock.with(&[
+        (PELVIS, [0.0, 0.0, 4.0]),
+        (THIGH_L, [38.0, 0.0, -16.0]),
+        (SHIN_L, [77.0, 0.0, 0.0]),
+        (FOOT_L, [-39.0, 0.0, 16.0]),
+        (THIGH_R, [52.0, 0.0, 34.0]),
+        (SHIN_R, [92.0, 0.0, 0.0]),
+        (FOOT_R, [-34.0, 0.0, -34.0]),
     ]);
-    let wide = stance.with(&[
-        (THIGH_L, [14.0, 0.0, -14.0]),
+    let wide = lock.with(&[
+        (THIGH_L, [30.0, 0.0, -30.0]),
+        (SHIN_L, [60.0, 0.0, 0.0]),
+        (FOOT_L, [-30.0, 0.0, 30.0]),
+        (THIGH_R, [30.0, 0.0, 30.0]),
+        (SHIN_R, [60.0, 0.0, 0.0]),
+        (FOOT_R, [-30.0, 0.0, -30.0]),
+    ]);
+    let gather = lock.with(&[
+        (PELVIS, [0.0, 0.0, -4.0]),
+        (THIGH_L, [52.0, 0.0, -3.0]),
+        (SHIN_L, [106.0, 0.0, 0.0]),
+        (FOOT_L, [-44.0, 0.0, 3.0]),
+        (THIGH_R, [36.0, 0.0, 22.0]),
+        (SHIN_R, [71.0, 0.0, 0.0]),
+        (FOOT_R, [-35.0, 0.0, -22.0]),
+    ]);
+    let narrow = lock.with(&[
+        (THIGH_L, [40.0, 0.0, -9.0]),
+        (SHIN_L, [81.0, 0.0, 0.0]),
+        (FOOT_L, [-41.0, 0.0, 9.0]),
+        (THIGH_R, [40.0, 0.0, 9.0]),
+        (SHIN_R, [81.0, 0.0, 0.0]),
+        (FOOT_R, [-41.0, 0.0, -9.0]),
+    ]);
+    let lock_right = Clip { keys: [reach, wide, gather, narrow], speed: LOCK_SPEED, duration: 1.0 / LOCK_SIDE_SHUFFLES, flight: 0.015 };
+    // Turning to go back (Kev's recording): you sink much deeper, the hips swing round to the left
+    // and the shoulders lean over the knees, then come up into the backpedal. Added on top.
+    let brake = Pose::default().with(&[
+        (PELVIS, [0.0, 22.0, 0.0]),
+        (SPINE_J, [12.0, -6.0, 0.0]),
+        (CHEST_J, [4.0, -8.0, 0.0]),
+        (NECK_J, [-10.0, 0.0, 0.0]),
+        (THIGH_L, [16.0, 0.0, 0.0]),
         (SHIN_L, [34.0, 0.0, 0.0]),
-        (FOOT_L, [-20.0, 0.0, 14.0]),
-        (THIGH_R, [14.0, 0.0, 16.0]),
+        (FOOT_L, [-18.0, 0.0, 0.0]),
+        (THIGH_R, [16.0, 0.0, 0.0]),
         (SHIN_R, [34.0, 0.0, 0.0]),
-        (FOOT_R, [-20.0, 0.0, -16.0]),
+        (FOOT_R, [-18.0, 0.0, 0.0]),
+        (UPPER_L, [10.0, 0.0, -8.0]),
+        (FORE_L, [10.0, 0.0, 0.0]),
+        (UPPER_R, [10.0, 0.0, 8.0]),
+        (FORE_R, [10.0, 0.0, 0.0]),
     ]);
-    let gather = stance.with(&[
-        (PELVIS, [0.0, 0.0, -3.0]),
-        (THIGH_L, [22.0, 0.0, 2.0]),
-        (SHIN_L, [48.0, 0.0, 0.0]),
-        (FOOT_L, [-26.0, 0.0, -2.0]),
-        (THIGH_R, [16.0, 0.0, 8.0]),
-        (SHIN_R, [38.0, 0.0, 0.0]),
-        (FOOT_R, [-22.0, 0.0, -8.0]),
-    ]);
-    let narrow = stance.with(&[
-        (THIGH_L, [15.0, 0.0, -6.0]),
-        (SHIN_L, [36.0, 0.0, 0.0]),
-        (FOOT_L, [-21.0, 0.0, 6.0]),
-        (THIGH_R, [15.0, 0.0, 6.0]),
-        (SHIN_R, [36.0, 0.0, 0.0]),
-        (FOOT_R, [-21.0, 0.0, -6.0]),
-    ]);
-    let lock_right = Clip { keys: [reach, wide, gather, narrow], speed: 4.0, duration: 44.0 / 60.0, flight: 0.015 };
 
     // A shot (the right foot): the leg cocks far back with the hips turned away and the left arm
     // thrown out; the hips whip round through the ball with the body over it; the leg swings on up
@@ -1064,49 +1112,89 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         ]),
         0.22,
     );
-    // The roulette (the forward feint): the right sole stops the ball at 10f and you turn half
-    // round over it with your back to the way you go, the ball rolling past, the left sole takes it
-    // on, and you turn back and come out running. The turn itself is added on top (animate_body).
-    let roulette = (
-        OneShot(vec![
-            (0.0, run_stance),
-            (0.15, stance.with(&[
-                (SPINE_J, [8.0, 0.0, 0.0]),
-                (THIGH_L, [10.0, 0.0, -8.0]),
-                (SHIN_L, [30.0, 0.0, 0.0]),
-                (FOOT_L, [-20.0, 0.0, 8.0]),
-                (THIGH_R, [45.0, 0.0, 6.0]),
-                (SHIN_R, [62.0, 0.0, 0.0]),
-                (FOOT_R, [-12.0, 0.0, -6.0]),
-                (UPPER_L, [10.0, 0.0, -60.0]),
-                (UPPER_R, [10.0, 0.0, 60.0]),
-            ])),
-            (0.5, stance.with(&[
-                (SPINE_J, [10.0, 0.0, 0.0]),
-                (THIGH_L, [40.0, 0.0, -6.0]),
-                (SHIN_L, [62.0, 0.0, 0.0]),
-                (FOOT_L, [-12.0, 0.0, 6.0]),
-                (THIGH_R, [4.0, 0.0, 8.0]),
-                (SHIN_R, [30.0, 0.0, 0.0]),
-                (FOOT_R, [-18.0, 0.0, -8.0]),
-                (UPPER_L, [0.0, 0.0, -70.0]),
-                (UPPER_R, [0.0, 0.0, 70.0]),
-            ])),
-            (0.8, run_contact),
-            (1.0, run_stance),
-        ]),
-        10.0 / 65.0,
-    );
-    // Lock move with the ball: the right sole up on the ball, the weight on a bent left leg.
-    let sole = stance.with(&[
+    // The roulette (the forward feint out of a straight or side dribble; Kev's practice recording):
+    // low and compact, the knees bent and the torso fairly upright, the arms out with the elbows
+    // bent. The right sole stops the ball; you turn a full turn to the left over it on short pivots,
+    // facing back with the legs and arms wide and the left foot on the ball halfway, and the right
+    // sole has it again as you come round. The turn itself is added on top (animate_body, from
+    // roulette_turn); the keys sit at its times (the touch at 10f, the hand-back at 56f).
+    let sole_on = lock.with(&[
+        (SPINE_J, [14.0, 0.0, 0.0]),
+        (THIGH_L, [36.0, 0.0, -16.0]),
+        (SHIN_L, [72.0, 0.0, 0.0]),
+        (FOOT_L, [-36.0, 0.0, 16.0]),
+        (THIGH_R, [58.0, 0.0, 10.0]),
+        (SHIN_R, [96.0, 0.0, 0.0]),
+        (FOOT_R, [-38.0, 0.0, -10.0]),
+        (UPPER_L, [15.0, 0.0, -50.0]),
+        (FORE_L, [70.0, 0.0, 0.0]),
+        (UPPER_R, [15.0, 0.0, 50.0]),
+        (FORE_R, [70.0, 0.0, 0.0]),
+    ]);
+    let pivot = |lift_left: bool| {
+        let (up, down) = ([(48.0, 0.0, -8.0), (96.0, 0.0, 0.0), (-48.0, 0.0, 8.0)], [(34.0, 0.0, 12.0), (68.0, 0.0, 0.0), (-34.0, 0.0, -12.0)]);
+        let p = lock.with(&[
+            (SPINE_J, [12.0, 0.0, 0.0]),
+            (THIGH_L, [up[0].0, 0.0, up[0].2]),
+            (SHIN_L, [up[1].0, 0.0, 0.0]),
+            (FOOT_L, [up[2].0, 0.0, up[2].2]),
+            (THIGH_R, [down[0].0, 0.0, down[0].2]),
+            (SHIN_R, [down[1].0, 0.0, 0.0]),
+            (FOOT_R, [down[2].0, 0.0, down[2].2]),
+            (UPPER_L, [15.0, 0.0, -55.0]),
+            (FORE_L, [75.0, 0.0, 0.0]),
+            (UPPER_R, [15.0, 0.0, 55.0]),
+            (FORE_R, [75.0, 0.0, 0.0]),
+        ]);
+        if lift_left { p } else { p.mirror() }
+    };
+    let facing_back = lock.with(&[
+        (SPINE_J, [14.0, 0.0, 0.0]),
+        (THIGH_L, [44.0, 0.0, -18.0]),
+        (SHIN_L, [86.0, 0.0, 0.0]),
+        (FOOT_L, [-42.0, 0.0, 18.0]),
+        (THIGH_R, [32.0, 0.0, 22.0]),
+        (SHIN_R, [64.0, 0.0, 0.0]),
+        (FOOT_R, [-32.0, 0.0, -22.0]),
+        (UPPER_L, [10.0, 0.0, -60.0]),
+        (FORE_L, [60.0, 0.0, 0.0]),
+        (UPPER_R, [10.0, 0.0, 60.0]),
+        (FORE_R, [60.0, 0.0, 0.0]),
+    ]);
+    let roulette = (OneShot(vec![(0.0, lock), (0.15, sole_on), (0.3, pivot(true)), (0.48, facing_back), (0.66, pivot(false)), (0.85, sole_on), (1.0, lock)]), 0.15);
+    // Out of a fast cut, the forward feint turns you out the cut's way (authored to the right) into
+    // a very deep, almost sitting crouch with the hands by the knees, the ball rolling across under
+    // you; you come up facing on with the right sole on it and go on. The turn is added on top.
+    let sit = lock.with(&[
+        (SPINE_J, [32.0, 0.0, 0.0]),
+        (CHEST_J, [6.0, 0.0, 0.0]),
+        (NECK_J, [-26.0, 0.0, 0.0]),
+        (THIGH_L, [72.0, 0.0, -16.0]),
+        (SHIN_L, [112.0, 0.0, 0.0]),
+        (FOOT_L, [-40.0, 0.0, 16.0]),
+        (THIGH_R, [68.0, 0.0, 18.0]),
+        (SHIN_R, [108.0, 0.0, 0.0]),
+        (FOOT_R, [-40.0, 0.0, -18.0]),
+        (UPPER_L, [45.0, 0.0, -18.0]),
+        (FORE_L, [55.0, 0.0, 0.0]),
+        (UPPER_R, [45.0, 0.0, 18.0]),
+        (FORE_R, [55.0, 0.0, 0.0]),
+    ]);
+    let go_on = low(lock.with(&[(THIGH_L, [34.0, 0.0, -10.0]), (SHIN_L, [50.0, 0.0, 0.0]), (FOOT_L, [-16.0, 0.0, 10.0]), (THIGH_R, [6.0, 0.0, 10.0]), (SHIN_R, [70.0, 0.0, 0.0]), (FOOT_R, [-64.0, 0.0, -10.0])]));
+    let turn_out = (OneShot(vec![(0.0, lock), (0.1, sit), (0.18, sit), (0.3, sole_on), (0.55, go_on), (1.0, lock)]), 0.15);
+    // Lock move with the ball: the weight on a bent left leg planted wide, the right knee up and the
+    // right sole flat on top of the ball, out by the right hip (STANCE_BALL), the arms out wide.
+    let sole = lock.with(&[
         (PELVIS, [0.0, 0.0, -4.0]),
-        (SPINE_J, [16.0, 0.0, -4.0]),
-        (THIGH_L, [16.0, 0.0, -8.0]),
-        (SHIN_L, [36.0, 0.0, 0.0]),
-        (FOOT_L, [-20.0, 0.0, 8.0]),
-        (THIGH_R, [50.0, 0.0, 4.0]),
-        (SHIN_R, [72.0, 0.0, 0.0]),
-        (FOOT_R, [-14.0, 0.0, -4.0]),
+        (SPINE_J, [18.0, 0.0, -4.0]),
+        (THIGH_L, [36.0, 0.0, -22.0]),
+        (SHIN_L, [72.0, 0.0, 0.0]),
+        (FOOT_L, [-36.0, 0.0, 22.0]),
+        (THIGH_R, [62.0, 0.0, 17.0]),
+        (SHIN_R, [102.0, 0.0, 0.0]),
+        (FOOT_R, [-40.0, 0.0, -17.0]),
+        (UPPER_L, [15.0, 0.0, -45.0]),
+        (UPPER_R, [15.0, 0.0, 45.0]),
     ]);
     // Dashes, timed on their clips (front and back 50f, side 41f; the second dash 60/42/43f): a
     // short gather, the big push-off around 6-15f where the speed peaks (after the 0.1 s blend-in),
@@ -1263,7 +1351,10 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         dribble_back,
         feint,
         roulette,
+        turn_out,
+        lock,
         sole,
+        brake,
         dash_front,
         dash_side,
         dash_back,
@@ -1274,7 +1365,7 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
             (Cycle::Sprint, sprint),
             (Cycle::Exhausted, exhausted),
             (Cycle::ExtraEffort, extra),
-            (Cycle::LockIdle, Clip::held(stance)),
+            (Cycle::LockIdle, Clip::held(lock)),
             (Cycle::LockForward, lock_forward),
             (Cycle::LockRight, lock_right),
             (Cycle::LockLeft, lock_right.mirror()),
@@ -1377,6 +1468,8 @@ pub struct Animator {
     /// The roulette's spin (degrees), and the sole-on-the-ball weight.
     spin: f32,
     sole: f32,
+    /// Lock move's braking crouch, eased (0..1).
+    brake: f32,
     move_w: f32,
     move_mirror: bool,
     move_t: f32,
@@ -1590,17 +1683,28 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         lift = old.lift(phase) * (1.0 - w) + lift * w;
     }
 
-    // What the rate clamp leaves, the steps absorb (the game's stride warping).
+    // What the rate clamp leaves, the steps absorb (the game's stride warping), toward the stance
+    // you stand in (lock move's wide one, so short lock steps don't bring the feet together).
     if clip.speed > 0.0 {
         let stride = (speed / clip.speed / rate).clamp(0.4, 1.3);
         let side = matches!(next, Cycle::LockRight | Cycle::LockLeft);
+        let rest_pose = if matches!(next, Cycle::LockForward | Cycle::LockRight | Cycle::LockLeft | Cycle::LockBack) { &clips.lock } else { &clips.stand };
         for j in [THIGH_L, THIGH_R, UPPER_L, UPPER_R] {
-            let rest = clips.stand.0[j];
+            let rest = rest_pose.0[j];
             pose.0[j].x = rest.x + (pose.0[j].x - rest.x) * stride;
             if side && j <= THIGH_R {
                 pose.0[j].z = rest.z + (pose.0[j].z - rest.z) * stride;
             }
         }
+    }
+
+    // Lock move: asking to go back, you brake in a deep crouch until you're backing away.
+    let wants_back = (root.rotation.inverse() * p.last_input).z > 0.5;
+    let braking = p.locked && wants_back && local.z < LOCK_BRAKE_UNTIL * LOCK_SPEED;
+    anim.brake = if braking { (anim.brake + dt / LOCK_BRAKE_IN).min(1.0) } else { (anim.brake - dt / LOCK_BRAKE_OUT).max(0.0) };
+    if anim.brake > 0.0 {
+        let w = anim.brake * anim.brake * (3.0 - 2.0 * anim.brake);
+        pose = pose.plus(&Pose(clips.brake.0.map(|a| a * w)));
     }
 
     if let Some(t) = anim.trans {
@@ -1846,15 +1950,21 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     if let Some(d) = p.dribble.filter(|d| d.moving()) {
         started = d.t < anim.move_t || anim.move_w <= 0.0;
         if started {
-            anim.move_mirror = local_dir(d.dir).x < 0.0;
+            // The roulette always turns to the left; the turn-out goes the cut's way.
+            anim.move_mirror = match d.turn {
+                FeintTurn::Roulette => false,
+                FeintTurn::TurnOut(side) => side < 0.0,
+                FeintTurn::None => local_dir(d.dir).x < 0.0,
+            };
         }
         anim.move_t = d.t;
-        let (shot, contact_at) = match (d.feint, d.heading) {
-            (true, Heading::Forward) => &clips.roulette,
-            (true, _) => &clips.feint,
-            (_, Heading::Forward) => &clips.dribble_forward,
-            (_, Heading::Side) => &clips.dribble_side,
-            (_, Heading::Back) => &clips.dribble_back,
+        let (shot, contact_at) = match (d.feint, d.heading, d.turn) {
+            (_, _, FeintTurn::Roulette) => &clips.roulette,
+            (_, _, FeintTurn::TurnOut(_)) => &clips.turn_out,
+            (true, ..) => &clips.feint,
+            (_, Heading::Forward, _) => &clips.dribble_forward,
+            (_, Heading::Side, _) => &clips.dribble_side,
+            (_, Heading::Back, _) => &clips.dribble_back,
         };
         let contact = dribble_contact(&d);
         let u = if d.t < contact {
@@ -1863,14 +1973,12 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             contact_at + (1.0 - contact_at) * ((d.t - contact) / (d.free() - contact).max(0.05)).min(1.0)
         };
         moving = Some((shot.sample(u), 0.05));
-        // The roulette turns you half round over the ball as it rolls past, then back to face on
-        // (players: a 180 on the ball, not a full turn).
-        if d.feint && d.heading == Heading::Forward {
-            let ease = |a: f32, b: f32| {
-                let s = ((u - a) / (b - a)).clamp(0.0, 1.0);
-                s * s * (3.0 - 2.0 * s)
-            };
-            anim.spin = 180.0 * (ease(*contact_at, 0.45) - ease(0.5, 0.85)) * if anim.move_mirror { 1.0 } else { -1.0 };
+        // The roulette's full turn to the left (Kev: 360 like in the recording), or the turn-out's
+        // quarter turn out the cut's way and back (left is +).
+        match d.turn {
+            FeintTurn::Roulette => anim.spin = roulette_turn(d.t).rem_euclid(360.0),
+            FeintTurn::TurnOut(side) => anim.spin = -side * turn_out_angle(d.t),
+            FeintTurn::None => {}
         }
     } else if let Some(d) = p.dash {
         started = d.t < anim.move_t || anim.move_w <= 0.0;
@@ -1946,11 +2054,12 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         pose = pose.plus(&Pose(clips.control.0.map(|a| a * w)));
     }
 
-    // The roulette's turn is on the whole body; cut short, it turns back over 0.1 s.
-    if !p.dribble.is_some_and(|d| d.feint && d.heading == Heading::Forward) {
+    // The roulette's and turn-out's turn is on the whole body, added after the joint speed limit (a
+    // full turn ends where it began); cut short, it turns back the short way over 0.1 s.
+    if !p.dribble.is_some_and(|d| d.moving() && d.turn != FeintTurn::None) {
+        anim.spin = (anim.spin + 180.0).rem_euclid(360.0) - 180.0;
         anim.spin -= anim.spin * (dt / 0.1).min(1.0);
     }
-    pose.0[PELVIS].y += anim.spin;
 
     // No joint turns faster than MAX_JOINT_SPEED: a layer starting or ending mid-pose can't snap a
     // limb in one frame (the start of a run flicked the right forearm 70 deg), while every authored
@@ -1964,6 +2073,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     }
     anim.shown = pose;
     anim.shown_ready = true;
+    pose.0[PELVIS].y += anim.spin;
 
     // The feet stay on the ground: the pelvis follows the pose's drop closely (a slow follow left
     // deep moves like the fast cut floating, then sinking).
@@ -2032,6 +2142,19 @@ mod tests {
         assert_eq!(play_rate(1.0, run, 1.0), 0.7);
         assert_eq!(play_rate(20.0, run, 1.0), 1.5);
         assert!((play_rate(RUN_SPEED, run, 1.15) - 1.15).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lock_move_steps_at_the_recorded_rhythm() {
+        // Cycles a second at full lock speed: a shuffle each, or two steps each going ahead or back.
+        let per_second = |c: Cycle, speed: f32| {
+            let clip = CLIPS.get(c);
+            play_rate(speed, clip, 1.0) / clip.duration
+        };
+        assert!((per_second(Cycle::LockRight, LOCK_SPEED) - LOCK_SIDE_SHUFFLES).abs() < 0.01);
+        assert!((per_second(Cycle::LockLeft, LOCK_SPEED) - LOCK_SIDE_SHUFFLES).abs() < 0.01);
+        assert!((2.0 * per_second(Cycle::LockForward, LOCK_SPEED) - LOCK_FORWARD_STEPS).abs() < 0.01);
+        assert!((2.0 * per_second(Cycle::LockBack, LOCK_SPEED * LOCK_SPEED_BY_ANGLE[2].1) - LOCK_BACK_STEPS).abs() < 0.01);
     }
 
     #[test]

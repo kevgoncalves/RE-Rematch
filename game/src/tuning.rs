@@ -188,6 +188,16 @@ pub const STANCE_MIN_TIME: f32 = 0.15;
 /// Angle between facing and movement (degrees) to speed multiplier.
 pub const LOCK_SPEED_BY_ANGLE: [(f32, f32); 3] = [(0.0, 1.0), (90.0, 1.0), (180.0, 0.9)];
 pub const LOCK_BALL_SPEED_BY_ANGLE: [(f32, f32); 4] = [(0.0, 1.0), (90.0, 0.95), (135.0, 0.88), (180.0, 0.88)];
+/// Lock move's footwork at full speed, from Kev's practice recording (V1 360-375 s): side shuffles
+/// (one step out and one in), and steps going forward and back, per second.
+pub const LOCK_SIDE_SHUFFLES: f32 = 2.4;
+pub const LOCK_FORWARD_STEPS: f32 = 4.4;
+pub const LOCK_BACK_STEPS: f32 = 6.0;
+/// Asking to go back in lock move, you drop into a short braking crouch (Kev's recording: about
+/// 0.3 s): in over this long, and out over this long once you back away at this share of lock speed.
+pub const LOCK_BRAKE_IN: f32 = 0.08;
+pub const LOCK_BRAKE_OUT: f32 = 0.2;
+pub const LOCK_BRAKE_UNTIL: f32 = 0.6;
 // Dash (mechanics.md §8): speed (m/s) over the seconds since the press. The game's curves are in
 // seconds: their keys fall on the dash's events (blend-in 6f, after-dash 14f, second dash free 42f).
 /// When you're free (the dash animation's blend-out), by sector: forward, side, back.
@@ -224,6 +234,19 @@ pub const DRIBBLE_BACK: [(f32, f32); 5] = [(0.0, 3.0), (0.1, 5.8), (0.2, 5.8), (
 pub const FEINT_FORWARD: [(f32, f32); 5] = [(0.0, 4.0), (0.1, 6.0), (0.3, 6.0), (0.6, 4.0), (1.0, 4.0)];
 pub const FEINT_SIDE: [(f32, f32); 5] = [(0.0, 4.0), (0.2, 6.8), (0.3, 6.8), (0.5, 3.0), (1.0, 3.4)];
 pub const FEINT_BACK: [(f32, f32); 5] = [(0.0, 3.0), (0.1, 5.8), (0.2, 5.8), (0.5, 2.5), (1.0, 3.0)];
+/// The forward feint out of a straight or side dribble is the roulette (Kev's practice recording,
+/// V1 634.07, 635.50, 640.47 s): the sole stops the ball, the turn to the left starts at 0.23 s,
+/// faces back at 0.45 s and holds there to 0.52 s, and is round again at 0.83 s (seconds from the
+/// press; 270 degrees comes at about 0.64 s). You go on only a little meanwhile, then pick up.
+pub const ROULETTE_TURN: (f32, f32, f32, f32) = (0.23, 0.45, 0.52, 0.83);
+pub const ROULETTE_SPEED: [(f32, f32); 4] = [(0.0, 2.5), (0.3, 1.0), (0.9, 1.0), (1.0, 2.0)];
+/// Out of a fast cut the forward feint turns you out the cut's way (degrees beyond your facing)
+/// into a deep crouch and back, facing on again by the second figure (s; V1 177.43, V2 200.10 s).
+/// You nearly stop in the crouch, then go on.
+pub const TURN_OUT: (f32, f32) = (75.0, 0.27);
+pub const TURN_OUT_SPEED: [(f32, f32); 4] = [(0.0, 3.0), (0.15, 1.0), (0.4, 3.5), (1.0, 4.0)];
+/// How fast the roulette and turn-out draw the ball to where they hold it (s).
+pub const FEINT_BALL_EASE: f32 = 0.05;
 pub const EXHAUSTED_DRIBBLE_FORWARD: [(f32, f32); 6] = [(0.0, 4.0), (0.1, 6.5), (0.15, 6.5), (0.35, 4.0), (0.8, 2.5), (1.0, 2.5)];
 pub const EXHAUSTED_DRIBBLE_SIDE: [(f32, f32); 6] = [(0.0, 4.0), (0.1, 6.5), (0.15, 6.5), (0.35, 3.5), (0.8, 1.5), (1.0, 1.5)];
 pub const EXHAUSTED_DRIBBLE_BACK: [(f32, f32); 6] = [(0.0, 4.0), (0.1, 6.5), (0.15, 6.5), (0.25, 3.5), (0.4, 2.5), (1.0, 2.5)];
@@ -517,8 +540,9 @@ pub const CONTROL_MAX_HEIGHT: f32 = 2.0;
 pub const DRIBBLE_OFFSET: f32 = 0.4;
 /// Lock move with the ball: where the ball sits under the right sole (m ahead, m right), how far
 /// it rolls ahead the way you move (seconds of your velocity), and how fast it eases there (the
-/// stance's snap lands at 17f, so most of the way in about 0.3 s). TUNE: matched to our stance pose.
-pub const STANCE_BALL: (f32, f32) = (0.27, 0.15);
+/// stance's snap lands at 17f, so most of the way in about 0.3 s). Kev's practice recording has it
+/// about 0.3 m right of the body and only a little ahead, under the sole of the lock stance.
+pub const STANCE_BALL: (f32, f32) = (0.17, 0.30);
 pub const STANCE_BALL_LEAD: f32 = 0.03;
 pub const STANCE_BALL_TIME: f32 = 0.1;
 /// Where a push ball's touch draws the ball to, ahead of you the way you push (m). TUNE.

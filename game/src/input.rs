@@ -477,8 +477,8 @@ pub fn read_input(
             axes.curve_mouse = axes.curve_mouse.clamp_length_max(1.0);
         }
     }
-    // For screenshots: RE_RUN=1 holds forward; RE_RUN=w1,d0.5,.1 holds each key (w a s d, or . for
-    // none) for so many seconds in turn, then the last one.
+    // For screenshots: RE_RUN=1 holds forward; RE_RUN=w1,d0.5,.1 holds each key (w a s d, e for W+D,
+    // q for W+A, or . for none) for so many seconds in turn, then the last one.
     if let Ok(script) = std::env::var("RE_RUN") {
         movement = scripted_movement(&script, t);
     }
@@ -498,6 +498,9 @@ fn scripted_movement(script: &str, t: f32) -> Vec2 {
             "s" => Vec2::NEG_Y,
             "a" => Vec2::NEG_X,
             "d" => Vec2::X,
+            // The diagonals ahead: W+D and W+A.
+            "e" => Vec2::ONE.normalize(),
+            "q" => Vec2::new(-1.0, 1.0).normalize(),
             _ => Vec2::ZERO,
         };
         end += secs.parse::<f32>().unwrap_or(0.0);

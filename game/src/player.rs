@@ -153,6 +153,16 @@ fn dribble_heading(input: Vec2) -> Heading {
     Heading::of(input.x.atan2(input.y).to_degrees(), 45.5, 135.5)
 }
 
+/// What a forward feint turns into, by the dribble it chains from (Kev's practice recording): after
+/// a straight or side dribble, the roulette (a full turn to the left over the ball); after a fast
+/// cut, a quarter turn out the cut's way and back (+1 right after W+D, -1 left after W+A).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum FeintTurn {
+    None,
+    Roulette,
+    TurnOut(f32),
+}
+
 /// A dribble in progress. `feint` is the second one of a chain.
 #[derive(Clone, Copy)]
 pub struct DribbleState {
@@ -163,6 +173,33 @@ pub struct DribbleState {
     pub dir: Vec3,
     /// The yaw you turn to: the cut's direction going forward, the camera's otherwise.
     pub facing: f32,
+    /// A forward dribble's sideways input (0 straight, about ±0.7 a fast cut).
+    pub cut: f32,
+    pub turn: FeintTurn,
+}
+
+/// The roulette's turn to the left (degrees) at `t` into it: none while the sole stops the ball,
+/// half round fast, a short hold facing back, then on round, easing into the full turn.
+pub fn roulette_turn(t: f32) -> f32 {
+    let (start, half, hold, end) = ROULETTE_TURN;
+    if t < start {
+        0.0
+    } else if t < half {
+        let s = (t - start) / (half - start);
+        180.0 * s * s * (3.0 - 2.0 * s)
+    } else if t < hold {
+        180.0
+    } else if t < end {
+        180.0 + 180.0 * (1.0 - (1.0 - (t - hold) / (end - hold)).powf(1.4))
+    } else {
+        360.0
+    }
+}
+
+/// The fast cut's turn-out (degrees beyond your facing, the cut's way) at `t` into it.
+pub fn turn_out_angle(t: f32) -> f32 {
+    let (peak, back) = TURN_OUT;
+    if t < back { peak * (std::f32::consts::PI * t / back).sin() } else { 0.0 }
 }
 
 impl DribbleState {
@@ -172,7 +209,11 @@ impl DribbleState {
             (true, _, Forward) => &EXHAUSTED_DRIBBLE_FORWARD,
             (true, _, Side) => &EXHAUSTED_DRIBBLE_SIDE,
             (true, _, Back) => &EXHAUSTED_DRIBBLE_BACK,
-            (_, true, Forward) => &FEINT_FORWARD,
+            (_, true, Forward) => match self.turn {
+                FeintTurn::Roulette => &ROULETTE_SPEED,
+                FeintTurn::TurnOut(_) => &TURN_OUT_SPEED,
+                FeintTurn::None => &FEINT_FORWARD,
+            },
             (_, true, Side) => &FEINT_SIDE,
             (_, true, Back) => &FEINT_BACK,
             (_, _, Forward) => &DRIBBLE_FORWARD,
@@ -624,11 +665,18 @@ pub fn player_move(
             // W+A and W+D are fast cuts, S+A and S+D side dribbles going back (players confirm).
             let dir = if tap_input == Vec2::ZERO { Vec2::Y } else { tap_input.normalize() };
             let heading = dribble_heading(dir);
+            let cut = if heading == Heading::Forward { dir.x } else { 0.0 };
+            // The forward feint: the roulette, or out of a fast cut its turn-out.
+            let turn = match p.dribble.filter(|_| feint && heading == Heading::Forward) {
+                Some(first) if first.heading == Heading::Forward && first.cut.abs() > 0.3 => FeintTurn::TurnOut(first.cut.signum()),
+                Some(_) => FeintTurn::Roulette,
+                None => FeintTurn::None,
+            };
             // A fast cut goes where the camera looks (flick, then dribble) and turns you that way;
             // side dribbles and drag backs keep you facing forward.
             let dir = camera_relative(dir, rig.yaw);
             let facing = if heading == Heading::Forward { yaw_of(dir) } else { rig.yaw.to_radians() };
-            p.dribble = Some(DribbleState { t: 0.0, feint, exhausted: p.exhausted, heading, dir, facing });
+            p.dribble = Some(DribbleState { t: 0.0, feint, exhausted: p.exhausted, heading, dir, facing, cut, turn });
             // A new move takes over from a kick's drag (or any other scripted run).
             p.run = None;
             p.dribble_lock = true;
@@ -1087,7 +1135,7 @@ pub fn ball_control(
         && btf.translation.y < CONTROL_MAX_HEIGHT
         && flat.length() < DASH_DRIBBLE_REACH
     {
-        p.dribble = Some(DribbleState { t: d.t, feint: false, exhausted: p.exhausted, heading: d.heading, dir: d.dir, facing: d.facing });
+        p.dribble = Some(DribbleState { t: d.t, feint: false, exhausted: p.exhausted, heading: d.heading, dir: d.dir, facing: d.facing, cut: 0.0, turn: FeintTurn::None });
         p.dribble_lock = p.locked;
         p.dash = None;
         p.has_ball = true;
@@ -1147,6 +1195,31 @@ pub fn ball_control(
 /// spot fast and slows into the next one's, aimed a little ahead of where you'll be then. That spot
 /// is sprung toward the newest prediction, hard just after a touch and softly later, so late stick
 /// changes bend the ball's path; and the ball never strays far to your side.
+/// Where the roulette or turn-out holds the ball, from your root along the move's way: (m ahead,
+/// m to the right).
+fn feint_ball_spot(d: &DribbleState) -> (f32, f32) {
+    let (ahead, right) = STANCE_BALL;
+    match d.turn {
+        // Back and in under you as you turn your back, out again as you come round.
+        FeintTurn::Roulette => {
+            let s = (std::f32::consts::PI * roulette_turn(d.t) / 360.0).sin();
+            (ahead - 0.22 * s, right - 0.12 * s)
+        }
+        // Across under you to the other foot and back, then taken on ahead.
+        FeintTurn::TurnOut(side) => {
+            let back = TURN_OUT.1;
+            if d.t < back {
+                let s = (std::f32::consts::PI * d.t / back).sin();
+                (ahead - 0.12 * s, side * (right - 0.4 * s))
+            } else {
+                let s = ((d.t - back) / 0.3).clamp(0.0, 1.0);
+                (ahead + 0.28 * s, side * (right - 0.18 * s))
+            }
+        }
+        FeintTurn::None => (ahead, right),
+    }
+}
+
 fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3 {
     // A shot, pass or lob draws the ball to the kicking foot by its contact: the right foot, or
     // the left for a shot across to the right (the mirrored clip), even from the stance.
@@ -1160,6 +1233,16 @@ fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3
         let to = Vec3::new(spot.x - ball.x, 0.0, spot.z - ball.z);
         let ball = ball + (to * (dt / left).min(1.0)).clamp_length_max(KICK_BALL_PULL * dt);
         return Vec3::new(ball.x, BALL_RADIUS, ball.z);
+    }
+    // The roulette and the fast cut's turn-out keep the ball at your feet (Kev's recording): the
+    // sole stops it, it rolls back and across under you as you turn, and it ends under the right
+    // sole again; out of the turn-out you take it on ahead of you.
+    if let Some(d) = p.dribble.filter(|d| d.turn != FeintTurn::None) {
+        let fwd = d.dir.with_y(0.0).normalize_or(forward(p.facing));
+        let (ahead, right) = feint_ball_spot(&d);
+        let spot = root + fwd * ahead + fwd.cross(Vec3::Y) * right;
+        p.carry = None;
+        return ball.lerp(Vec3::new(spot.x, BALL_RADIUS, spot.z), 1.0 - (-dt / FEINT_BALL_EASE).exp());
     }
     // Lock move with the ball: the right sole goes onto the ball (players confirm) and rolls it
     // with you, a little ahead the way you move; it eases there as you lock.
@@ -1707,6 +1790,50 @@ mod tests {
     }
 
     #[test]
+    fn the_forward_feint_is_a_roulette_or_a_turn_out_by_the_first_dribble() {
+        // W or D then W: the roulette. W+D then W: the turn-out to the right (W+A: left). D then A
+        // stays a side feint.
+        let d = std::f32::consts::FRAC_1_SQRT_2;
+        let cases = [
+            (Vec2::Y, Vec2::Y, FeintTurn::Roulette),
+            (Vec2::X, Vec2::Y, FeintTurn::Roulette),
+            (Vec2::new(d, d), Vec2::Y, FeintTurn::TurnOut(1.0)),
+            (Vec2::new(-d, d), Vec2::Y, FeintTurn::TurnOut(-1.0)),
+            (Vec2::X, Vec2::NEG_X, FeintTurn::None),
+        ];
+        for (first, second, want) in cases {
+            let mut app = App::new();
+            app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+            app.world_mut().spawn((Transform::default(), Player { has_ball: true, ..default() }));
+            app.world_mut().spawn(CameraRig::default());
+            let (lock, press) = ([Action::Lock].as_slice(), [Action::Lock, Action::PushBall].as_slice());
+            app.world_mut().resource_mut::<Axes>().movement = first;
+            frames(&mut app, lock, 1, 0.016);
+            frames(&mut app, press, 1, 0.016);
+            assert!(dribble(&mut app).is_some_and(|d| !d.feint && d.turn == FeintTurn::None), "{first:?}: dribble 1");
+            app.world_mut().resource_mut::<Axes>().movement = second;
+            frames(&mut app, lock, 5, 0.04);
+            frames(&mut app, press, 1, 0.016);
+            assert!(dribble(&mut app).is_some_and(|d| d.feint && d.turn == want), "{first:?} then {second:?}");
+        }
+    }
+
+    #[test]
+    fn the_roulette_turns_round_on_the_recorded_beats() {
+        let (start, half, hold, end) = ROULETTE_TURN;
+        assert_eq!(roulette_turn(start - 0.01), 0.0, "the sole stops the ball first");
+        assert_eq!(roulette_turn(half), 180.0);
+        assert_eq!(roulette_turn((half + hold) / 2.0), 180.0, "a short hold facing back");
+        assert!((roulette_turn(0.63) - 270.0).abs() < 15.0, "270 at {}", roulette_turn(0.63));
+        assert_eq!(roulette_turn(end), 360.0);
+        // Easing into the full turn: the last quarter is slower than the first half's average.
+        assert!(roulette_turn(end) - roulette_turn(end - 0.05) < 180.0 / (half - start) * 0.05);
+        let (peak, back) = TURN_OUT;
+        assert!((turn_out_angle(back / 2.0) - peak).abs() < 1e-3);
+        assert_eq!(turn_out_angle(back), 0.0);
+    }
+
+    #[test]
     fn dribble_chain() {
         let mut app = App::new();
         app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
@@ -1868,7 +1995,7 @@ mod tests {
         // A side dribble to the right: the ball comes to the foot by its contact frame, then goes
         // right with you.
         p.vel = Vec3::X * 6.0;
-        p.dribble = Some(DribbleState { t: 0.0, feint: false, exhausted: false, heading: Heading::Side, dir: Vec3::X, facing: 0.0 });
+        p.dribble = Some(DribbleState { t: 0.0, feint: false, exhausted: false, heading: Heading::Side, dir: Vec3::X, facing: 0.0, cut: 0.0, turn: FeintTurn::None });
         for i in 240..300 {
             let dt = 1.0 / 60.0;
             root += p.vel * dt;
@@ -1962,7 +2089,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
         app.world_mut().resource_mut::<Axes>().movement = Vec2::NEG_X; // stick left, the dribble went right
-        let d = DribbleState { t: DRIBBLE_FREE[1] - 0.01, feint: false, exhausted: false, heading: Heading::Side, dir: Vec3::X, facing: 0.0 };
+        let d = DribbleState { t: DRIBBLE_FREE[1] - 0.01, feint: false, exhausted: false, heading: Heading::Side, dir: Vec3::X, facing: 0.0, cut: 0.0, turn: FeintTurn::None };
         app.world_mut().spawn((Transform::default(), Player { has_ball: true, dribble: Some(d), vel: Vec3::X * 3.0, ..default() }));
         app.world_mut().spawn(CameraRig::default());
         // No brake and pivot: a quick pivot swings you round to the stick within 0.3 s, the body
