@@ -585,12 +585,12 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         ]),
         stand.with(&[
             (PELVIS, [0.0, 12.0, 0.0]),
-            (SPINE_J, [14.0, 0.0, -6.0]),
+            (SPINE_J, [22.0, 0.0, -6.0]),
             (CHEST_J, [4.0, -14.0, 0.0]),
-            (NECK_J, [-4.0, 0.0, 0.0]),
-            (THIGH_L, [18.0, 0.0, -6.0]),
-            (SHIN_L, [36.0, 0.0, 0.0]),
-            (FOOT_L, [-20.0, 0.0, 6.0]),
+            (NECK_J, [-10.0, 0.0, 0.0]),
+            (THIGH_L, [26.0, 0.0, -6.0]),
+            (SHIN_L, [50.0, 0.0, 0.0]),
+            (FOOT_L, [-26.0, 0.0, 6.0]),
             (THIGH_R, [28.0, 0.0, 2.0]),
             (SHIN_R, [16.0, 0.0, 0.0]),
             (FOOT_R, [55.0, 0.0, 0.0]),
@@ -601,11 +601,12 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         ]),
         stand.with(&[
             (PELVIS, [0.0, 28.0, 4.0]),
-            (SPINE_J, [-4.0, 0.0, -4.0]),
+            (SPINE_J, [8.0, 0.0, -4.0]),
             (CHEST_J, [0.0, -16.0, 0.0]),
-            (THIGH_L, [4.0, 0.0, -4.0]),
-            (SHIN_L, [12.0, 0.0, 0.0]),
-            (FOOT_L, [30.0, 0.0, 4.0]),
+            (NECK_J, [-6.0, 0.0, 0.0]),
+            (THIGH_L, [12.0, 0.0, -4.0]),
+            (SHIN_L, [30.0, 0.0, 0.0]),
+            (FOOT_L, [14.0, 0.0, 4.0]),
             (THIGH_R, [85.0, 0.0, -6.0]),
             (SHIN_R, [20.0, 0.0, 0.0]),
             (FOOT_R, [60.0, 0.0, 0.0]),
@@ -789,12 +790,12 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         ]),
         stand.with(&[
             (PELVIS, [0.0, 8.0, 0.0]),
-            (SPINE_J, [14.0, 0.0, -4.0]),
+            (SPINE_J, [20.0, 0.0, -4.0]),
             (CHEST_J, [2.0, -8.0, 0.0]),
-            (NECK_J, [-6.0, 0.0, 0.0]),
-            (THIGH_L, [16.0, 0.0, -6.0]),
-            (SHIN_L, [34.0, 0.0, 0.0]),
-            (FOOT_L, [-18.0, 0.0, 6.0]),
+            (NECK_J, [-10.0, 0.0, 0.0]),
+            (THIGH_L, [24.0, 0.0, -6.0]),
+            (SHIN_L, [46.0, 0.0, 0.0]),
+            (FOOT_L, [-22.0, 0.0, 6.0]),
             (THIGH_R, [22.0, -50.0, 4.0]),
             (SHIN_R, [20.0, 0.0, 0.0]),
             (FOOT_R, [-6.0, 0.0, -14.0]),
@@ -805,10 +806,10 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         ]),
         stand.with(&[
             (PELVIS, [0.0, 16.0, 0.0]),
-            (SPINE_J, [10.0, 0.0, -2.0]),
+            (SPINE_J, [14.0, 0.0, -2.0]),
             (CHEST_J, [2.0, -12.0, 0.0]),
-            (THIGH_L, [12.0, 0.0, -4.0]),
-            (SHIN_L, [26.0, 0.0, 0.0]),
+            (THIGH_L, [16.0, 0.0, -4.0]),
+            (SHIN_L, [34.0, 0.0, 0.0]),
             (FOOT_L, [-6.0, 0.0, 4.0]),
             (THIGH_R, [50.0, -40.0, -4.0]),
             (SHIN_R, [24.0, 0.0, 0.0]),
@@ -1291,6 +1292,9 @@ fn play_rate(speed: f32, clip: &Clip, corner: f32) -> f32 {
     if clip.speed <= 0.0 { 1.0 } else { (speed / clip.speed).clamp(0.7, 1.5) * corner }
 }
 
+/// How long a kick's leg takes to come down after its follow-through.
+const KICK_SETTLE: f32 = 0.25;
+
 fn follow_time(kind: Kick) -> f32 {
     match kind {
         Kick::Shot => 0.4,
@@ -1325,6 +1329,8 @@ pub struct Animator {
     kick: Option<KickState>,
     follow: Option<(f32, Kick)>,
     action: f32,
+    /// The kick pose last shown, kept to fade out from once the kick is over.
+    kick_last: Option<(Pose, Kick, f32)>,
     /// The kick's sector against the body (degrees, left +) and its charge (0..1): they pick its
     /// clip, its turn and the size of its backswing.
     kick_turn: f32,
@@ -1651,9 +1657,10 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         _ => {}
     }
     anim.kick = p.kick;
+    // The follow-through holds while the kick still slides you on (its drag), then fades.
     if let Some((t, kind)) = anim.follow.as_mut() {
         *t += dt;
-        if *t > follow_time(*kind) {
+        if *t > follow_time(*kind) && !p.kick_sliding() {
             anim.follow = None;
         }
     }
@@ -1685,13 +1692,16 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     }
     // Wind up to the strike, which always takes the last 8 frames before contact (the game never
     // stretches them: power only lengthens the backswing); a long charge holds the backswing and
-    // strikes at the release. The body turns toward the sector a third of the way by the strike,
-    // most of it by the hit.
+    // strikes at the release. The backswing eases into its top. The body turns toward the sector a
+    // third of the way by the strike, most of it by the hit.
     const STRIKE: f32 = 8.0 / 60.0;
     let kick_pose = if let Some(k) = p.kick.filter(|k| !push(k.kind)) {
         let ([windup, hit, _], _) = keys(k.kind, anim.kick_turn);
         let first = contact_time(&k);
-        let up = |t: f32, end: f32| (t / end.max(1.0 / 60.0)).min(1.0);
+        let up = |t: f32, end: f32| {
+            let u = (t / end.max(1.0 / 60.0)).min(1.0);
+            1.0 - (1.0 - u) * (1.0 - u)
+        };
         let (key, turn) = if !k.released {
             let w = up(k.elapsed, first - STRIKE);
             (clips.stand.lerp(&windup, w), 0.3 * w)
@@ -1707,12 +1717,19 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
                 (windup.lerp(&hit, s), 0.3 + 0.4 * s)
             }
         };
-        Some((key, k.kind, 1.0, turn))
+        Some((key, k.kind, turn))
     } else {
+        // After the touch the leg swings on through (easing out), then comes down in front, the
+        // body rising out of it, and you glide on the standing foot while the kick slides you.
         anim.follow.filter(|(_, kind)| !push(*kind)).map(|(t, kind)| {
             let ([_, hit, through], _) = keys(kind, anim.kick_turn);
-            let u = t / follow_time(kind);
-            (hit.lerp(&through, (u / 0.4).min(1.0)), kind, 1.0 - ((u - 0.4) / 0.6).clamp(0.0, 1.0), 0.7 + 0.15 * (u / 0.4).min(1.0))
+            let swing = 0.4 * follow_time(kind);
+            let a = (t / swing).min(1.0);
+            let a = 1.0 - (1.0 - a) * (1.0 - a);
+            let b = ((t - swing) / KICK_SETTLE).clamp(0.0, 1.0);
+            let b = b * b * (3.0 - 2.0 * b);
+            let settled = clips.stand.lerp(&through, 0.35);
+            (hit.lerp(&through, a).lerp(&settled, b), kind, 0.7 + 0.15 * a)
         })
     };
     // A push ball: the right foot reaches through the ball by its touch (8f) and back, the legs
@@ -1726,13 +1743,20 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         let w = push_touch * push_touch * (3.0 - 2.0 * push_touch) * 1.2;
         pose = pose.plus(&Pose(clips.control.0.map(|a| a * w)));
     }
-    let target = kick_pose.map_or(0.0, |(_, _, w, _)| w);
+    // In over 0.08 s, out over 0.25 s from the last pose shown, so the kick never snaps off.
+    let target = if kick_pose.is_some() { 1.0 } else { 0.0 };
     anim.action += (target - anim.action).clamp(-dt / 0.25, dt / 0.08);
-    if let Some((key, kind, _, turn)) = kick_pose {
+    if kick_pose.is_some() {
+        anim.kick_last = kick_pose;
+    } else if anim.action <= 0.0 {
+        anim.kick_last = None;
+    }
+    if let Some((key, kind, turn)) = anim.kick_last {
         // Power shows in the swing's size: three quarters for a tap, all of it fully charged.
         let size = kick_size(kind) * (0.75 + 0.25 * anim.kick_power);
-        pose = pose.lerp(&clips.stand.lerp(&key, size), anim.action);
-        pose.0[PELVIS].y += anim.kick_turn * turn * keys(kind, anim.kick_turn).1 * anim.action;
+        let w = anim.action * anim.action * (3.0 - 2.0 * anim.action);
+        pose = pose.lerp(&clips.stand.lerp(&key, size), w);
+        pose.0[PELVIS].y += anim.kick_turn * turn * keys(kind, anim.kick_turn).1 * w;
     }
     // Dribbles and dashes on top (the game's move montages): in over 0.05 s (dashes 0.1 s), out over
     // BLEND_OUT from when you get the stick back (the montage's blend-out, not its end), faster

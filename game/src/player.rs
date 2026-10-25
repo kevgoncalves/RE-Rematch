@@ -448,6 +448,11 @@ impl Kick {
 }
 
 impl Player {
+    /// A shot, pass or lob is still sliding you on after its touch: its follow-through holds.
+    pub fn kick_sliding(&self) -> bool {
+        self.run.is_some_and(|r| r.soft && r.tables.is_none())
+    }
+
     /// Charging a shot: the mouse curves the ball instead of turning the camera.
     pub fn charging_shot(&self) -> bool {
         self.kick.is_some_and(|k| k.kind == Kick::Shot && !k.released)
@@ -1461,7 +1466,7 @@ pub fn kicking(
     p.freeze = ball.freeze;
     if k.kind == Kick::Shot {
         let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
-        p.run = Some(Run { t: 0.0, length: SHOT_FOLLOW_THROUGH, free_at: SHOT_FOLLOW_THROUGH, dir: k.entry.normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: speed, exit: RUN_TURN_LIMIT, soft: true, face: None });
+        p.run = Some(Run { t: 0.0, length: SHOT_AFTER_TOUCH, free_at: SHOT_FOLLOW_THROUGH, dir: k.entry.normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: speed, exit: RUN_TURN_LIMIT, soft: true, face: None });
     }
     // After the touch a pass or lob keeps dragging you until its move interrupt; steering the
     // same way leaves it at once.

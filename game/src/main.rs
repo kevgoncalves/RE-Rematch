@@ -55,6 +55,8 @@ fn main() {
                 .disable::<WinitPlugin>(),
             ScheduleRunnerPlugin::run_loop(std::time::Duration::from_secs_f64(1.0 / 60.0)),
         ));
+        // Every frame advances exactly 1/60 s, so scripted runs repeat frame for frame.
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(std::time::Duration::from_secs_f64(1.0 / 60.0)));
     } else {
         app.add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(Window { title: "RE Rematch (prototype)".into(), ..default() }), ..default() }).set(log));
     }

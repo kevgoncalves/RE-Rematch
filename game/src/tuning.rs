@@ -283,21 +283,24 @@ pub const KICK_BALL_PULL: f32 = 6.0;
 pub const KICK_STRIKE_MIN: f32 = 4.0 / 60.0;
 pub const WINDUP_SPEED_SCALE: f32 = 0.5; // TUNE: how much you slow down winding up a pass or lob
 /// A shot keeps your run-up: through the build-up you slide on in the same direction at a share
-/// of your speed at the press that shrinks to this (HighPowerBeforeShootScaleSpeedData)...
-pub const SHOT_SLIDE: f32 = 0.75;
-/// ...sprinting at 4 m/s or more...
-pub const SHOT_SLIDE_SPRINT: f32 = 0.6;
-/// ...or shooting out of a dribble (the game's 0.5; Kev wants a bigger slide).
-pub const SHOT_SLIDE_FROM_DRIBBLE: f32 = 0.7;
+/// of your speed at the press that shrinks to this (HighPowerBeforeShootScaleSpeedData: 0.75, 0.6
+/// sprinting at 4 m/s or more, 0.5 out of a dribble; Kev wants the body to slide more). TUNE.
+pub const SHOT_SLIDE: f32 = 0.9;
+pub const SHOT_SLIDE_SPRINT: f32 = 0.8;
+pub const SHOT_SLIDE_FROM_DRIBBLE: f32 = 0.85;
 /// Passes and lobs keep all of your speed at the press, in that direction, through the build-up
 /// and after the touch (BeforeTapScaleSpeedData, TapAfterShootSpeedData): walking drags you a
 /// little, running more, out of a dribble as running (Kev); standing still (under this) none.
 pub const PASS_DRAG_MIN_SPEED: f32 = 0.3;
 /// The after-touch drag runs to the pass animation's move interrupt (frames 18 to 63).
 pub const PASS_AFTER_TOUCH: f32 = 45.0 / 60.0;
-/// Kev finds the drag's lock too long: from this long after the touch any stick leaves it.
-pub const PASS_DRAG_FREE: f32 = 12.0 / 60.0;
-/// After the touch you keep that speed until the move ends (can act moving at 0.75 s, standing 0.67 s).
+/// From this long after the touch any stick leaves the drag (Kev: 45f locked was too long, 12f
+/// too little slide). TUNE.
+pub const PASS_DRAG_FREE: f32 = 20.0 / 60.0;
+/// After the touch you slide on at that speed until the shot's move ends: can act moving at 45f,
+/// so 25f after a low-power shot's contact (Kev wants a power shot to slide as long). From
+/// SHOT_FOLLOW_THROUGH (45f after a power shot's 32f contact) steering your way leaves it.
+pub const SHOT_AFTER_TOUCH: f32 = 25.0 / 60.0;
 pub const SHOT_FOLLOW_THROUGH: f32 = 13.0 / 60.0;
 /// Extra shot speed from your own speed (ShootForceByCharaSpeed, m/s), scaled by how strong the
 /// shot is: none up to 27.85 m/s, all of it from 38 m/s (ModifierRatioFromShootForce).
