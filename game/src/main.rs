@@ -88,8 +88,7 @@ fn main() {
             (
                 menu::menu_keys,
                 input::read_input,
-                // Capture before clicks, so the click that opens a capture isn't bound.
-                (menu::capture_binding, menu::menu_clicks, menu::drag_sliders, menu::refresh_labels).chain(),
+                menu::update_systems(),
                 (player::grab_cursor, menu::show_menu).chain(),
                 camera::camera_look,
                 player::player_move,
@@ -116,8 +115,9 @@ fn main() {
 /// For checking visuals: `RE_SCREENSHOT=out.png` saves a frame after 2 s (or `RE_SHOT_AT` s), then quits.
 /// `RE_VIEW=x,y,z[,tx,ty,tz]` looks from that point at the centre spot (or the target) instead;
 /// `RE_VIEW=@x,y,z` looks at the player from that offset.
-/// `RE_MENU=1` opens the Esc menu after 1 s; `RE_MENU=controls` or `RE_MENU=cheats` opens that
-/// settings tab.
+/// `RE_MENU=1` opens the Esc menu after 1 s; `RE_MENU=gameplay`, `audio`, `controls` or `cheats`
+/// opens that settings tab, with options after colons (`controls:scroll=500:pad`, see
+/// `Menu::open_scripted`).
 fn auto_screenshot(
     mut commands: Commands,
     time: Res<Time>,
