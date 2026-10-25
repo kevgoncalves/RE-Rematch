@@ -282,10 +282,10 @@ pub const KICK_STRIKE_MIN: f32 = 4.0 / 60.0;
 pub const WINDUP_SPEED_SCALE: f32 = 0.5; // TUNE: how much you slow down winding up a pass or lob
 /// A shot keeps your run-up: through the build-up you slide on in the same direction at a share
 /// of your speed at the press that shrinks to this (HighPowerBeforeShootScaleSpeedData: 0.75, 0.6
-/// sprinting at 4 m/s or more, 0.5 out of a dribble; Kev wants the body to slide more). TUNE.
-pub const SHOT_SLIDE: f32 = 0.9;
-pub const SHOT_SLIDE_SPRINT: f32 = 0.8;
-pub const SHOT_SLIDE_FROM_DRIBBLE: f32 = 0.85;
+/// sprinting at 4 m/s or more, 0.5 out of a dribble; Kev wants the body to slide on, not brake). TUNE.
+pub const SHOT_SLIDE: f32 = 0.95;
+pub const SHOT_SLIDE_SPRINT: f32 = 0.9;
+pub const SHOT_SLIDE_FROM_DRIBBLE: f32 = 0.9;
 /// Passes and lobs keep all of your speed at the press, in that direction, through the build-up
 /// and after the touch (BeforeTapScaleSpeedData, TapAfterShootSpeedData): walking drags you a
 /// little, running more, out of a dribble as running (Kev); standing still (under this) none.

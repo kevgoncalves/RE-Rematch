@@ -548,9 +548,11 @@ pub fn player_move(
 ) {
     let dt = time.delta_secs().min(0.05);
     let (tf, p) = &mut *player;
-    // A kick's freeze holds you (and your timers) still for a few frames at the touch.
+    // A kick's freeze holds your pose and timers for a few frames at the touch (hitstop), but you
+    // slide on at your speed (Kev: stopping dead there felt like braking on every kick).
     if p.freeze > 0.0 {
         p.freeze -= dt;
+        tf.translation += Vec3::new(p.vel.x, 0.0, p.vel.z) * dt;
         return;
     }
     let input = axes.movement;
@@ -962,6 +964,10 @@ pub fn ball_control(
 ) {
     let (ptf, p) = &mut *player;
     let (btf, b) = &mut *ball;
+    // Through a kick's freeze the ball waits at the foot as you slide on.
+    if b.freeze > 0.0 {
+        btf.translation += Vec3::new(p.vel.x, 0.0, p.vel.z) * time.delta_secs();
+    }
     // Receiving: the ball settles at your feet and becomes yours 12 frames in; kicks wait for the
     // control's action frame.
     if let Some(t) = p.receiving {
@@ -1631,6 +1637,17 @@ mod tests {
         controlled(&mut app);
         frames(&mut app, &[], 1, 1.0 / 60.0);
         assert!(kick(&mut app).is_some_and(|(kind, _)| kind == Kick::PushBall), "queued push ball");
+    }
+
+    #[test]
+    fn a_kicks_freeze_holds_the_pose_not_your_run() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+        let id = app.world_mut().spawn((Transform::default(), Player { freeze: 3.0 / 60.0, vel: Vec3::NEG_Z * 6.5, ..default() })).id();
+        app.world_mut().spawn(CameraRig::default());
+        frames(&mut app, &[], 3, 1.0 / 60.0);
+        let z = app.world().get::<Transform>(id).unwrap().translation.z;
+        assert!((z + 6.5 * 3.0 / 60.0).abs() < 1e-4, "slid {z}");
     }
 
     #[test]
