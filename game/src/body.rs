@@ -246,7 +246,8 @@ struct Clips {
     dribble_back: (OneShot, f32),
     feint: (OneShot, f32),
     roulette: (OneShot, f32),
-    /// Lock move with the ball: the right sole on it.
+    /// Lock move's stance, and with the ball the right sole on it.
+    lock: Pose,
     sole: Pose,
     dash_front: OneShot,
     dash_side: OneShot,
@@ -510,57 +511,80 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         (UPPER_R, [20.0, 0.0, 24.0]),
         (FORE_R, [35.0, 0.0, 0.0]),
     ]));
-    let low = |p: Pose| Pose(std::array::from_fn(|j| if j >= UPPER_L { stance.0[j] } else { p.0[j] }));
+    // Lock move itself (Kev's practice recording): lower and much wider than the moves' stance,
+    // the ankles about 0.9 m apart and the knees bent twice as far (standing about 0.25 m lower),
+    // the torso a little forward, the arms out about 40° with the elbows bent and the hands at the
+    // hips. Every lock pose keeps the planted legs about this long, so the body stays level.
+    let lock = stand.with(&[
+        (SPINE_J, [18.0, 0.0, 0.0]),
+        (CHEST_J, [6.0, 0.0, 0.0]),
+        (NECK_J, [-16.0, 0.0, 0.0]),
+        (HEAD_J, [-8.0, 0.0, 0.0]),
+        (THIGH_L, [32.0, 0.0, -26.0]),
+        (SHIN_L, [65.0, 0.0, 0.0]),
+        (FOOT_L, [-33.0, 0.0, 26.0]),
+        (THIGH_R, [32.0, 0.0, 26.0]),
+        (SHIN_R, [65.0, 0.0, 0.0]),
+        (FOOT_R, [-33.0, 0.0, -26.0]),
+        (UPPER_L, [17.0, 0.0, -40.0]),
+        (FORE_L, [60.0, 0.0, 0.0]),
+        (UPPER_R, [17.0, 0.0, 40.0]),
+        (FORE_R, [60.0, 0.0, 0.0]),
+    ]);
+    let low = |p: Pose| Pose(std::array::from_fn(|j| if j >= UPPER_L { lock.0[j] } else { p.0[j] }));
+    // Forward and back are a little more upright than the stance, on short steps a hip-width apart.
     let lock_forward = Clip::cycle(
-        low(stance.with(&[(THIGH_L, [32.0, 0.0, -6.0]), (SHIN_L, [30.0, 0.0, 0.0]), (FOOT_L, [2.0, 0.0, 6.0]), (THIGH_R, [-6.0, 0.0, 6.0]), (SHIN_R, [70.0, 0.0, 0.0]), (FOOT_R, [-56.0, 0.0, -6.0])])),
-        low(stance.with(&[(THIGH_L, [12.0, 0.0, -6.0]), (SHIN_L, [40.0, 0.0, 0.0]), (FOOT_L, [-28.0, 0.0, 6.0]), (THIGH_R, [30.0, 0.0, 6.0]), (SHIN_R, [90.0, 0.0, 0.0]), (FOOT_R, [-50.0, 0.0, -6.0])])),
+        low(lock.with(&[(THIGH_L, [38.0, 0.0, -12.0]), (SHIN_L, [44.0, 0.0, 0.0]), (FOOT_L, [-4.0, 0.0, 12.0]), (THIGH_R, [-2.0, 0.0, 12.0]), (SHIN_R, [84.0, 0.0, 0.0]), (FOOT_R, [-62.0, 0.0, -12.0])])),
+        low(lock.with(&[(THIGH_L, [18.0, 0.0, -12.0]), (SHIN_L, [54.0, 0.0, 0.0]), (FOOT_L, [-36.0, 0.0, 12.0]), (THIGH_R, [36.0, 0.0, 12.0]), (SHIN_R, [104.0, 0.0, 0.0]), (FOOT_R, [-56.0, 0.0, -12.0])])),
         4.5,
         0.62,
         0.0,
     );
     let lock_back = Clip::cycle(
-        low(stance.with(&[(THIGH_L, [-6.0, 0.0, -8.0]), (SHIN_L, [40.0, 0.0, 0.0]), (FOOT_L, [-36.0, 0.0, 6.0]), (THIGH_R, [26.0, 0.0, 8.0]), (SHIN_R, [44.0, 0.0, 0.0]), (FOOT_R, [-18.0, 0.0, -6.0])])),
-        low(stance.with(&[(THIGH_L, [14.0, 0.0, -8.0]), (SHIN_L, [36.0, 0.0, 0.0]), (FOOT_L, [-22.0, 0.0, 6.0]), (THIGH_R, [4.0, 0.0, 8.0]), (SHIN_R, [80.0, 0.0, 0.0]), (FOOT_R, [-50.0, 0.0, -6.0])])),
+        low(lock.with(&[(THIGH_L, [0.0, 0.0, -14.0]), (SHIN_L, [54.0, 0.0, 0.0]), (FOOT_L, [-44.0, 0.0, 14.0]), (THIGH_R, [32.0, 0.0, 14.0]), (SHIN_R, [58.0, 0.0, 0.0]), (FOOT_R, [-26.0, 0.0, -14.0])])),
+        low(lock.with(&[(THIGH_L, [20.0, 0.0, -14.0]), (SHIN_L, [50.0, 0.0, 0.0]), (FOOT_L, [-30.0, 0.0, 14.0]), (THIGH_R, [10.0, 0.0, 14.0]), (SHIN_R, [94.0, 0.0, 0.0]), (FOOT_R, [-58.0, 0.0, -14.0])])),
         4.0,
         0.58,
         0.0,
     );
     // Strafing right (the game's side cycle runs 44f; Kev found four scissor steps in it too
-    // busy): one stride per cycle. The right foot lifts and reaches out with the weight on the left,
-    // lands wide, the left lifts and comes in, and you land again shoulder-width, never feet together.
-    let reach = stance.with(&[
-        (PELVIS, [0.0, 0.0, 3.0]),
-        (THIGH_L, [16.0, 0.0, -6.0]),
-        (SHIN_L, [40.0, 0.0, 0.0]),
-        (FOOT_L, [-24.0, 0.0, 6.0]),
-        (THIGH_R, [24.0, 0.0, 22.0]),
-        (SHIN_R, [45.0, 0.0, 0.0]),
-        (FOOT_R, [-22.0, 0.0, -22.0]),
+    // busy): one stride per cycle, a step-together shuffle. The right foot lifts and reaches out with
+    // the weight on the left, lands wide (about 1 m), the left lifts and comes in, and you land again
+    // about 0.4 m apart: never feet together, never crossing. The narrower the feet, the deeper the
+    // knees, so the hips stay level.
+    let reach = lock.with(&[
+        (PELVIS, [0.0, 0.0, 4.0]),
+        (THIGH_L, [38.0, 0.0, -16.0]),
+        (SHIN_L, [77.0, 0.0, 0.0]),
+        (FOOT_L, [-39.0, 0.0, 16.0]),
+        (THIGH_R, [52.0, 0.0, 34.0]),
+        (SHIN_R, [92.0, 0.0, 0.0]),
+        (FOOT_R, [-34.0, 0.0, -34.0]),
     ]);
-    let wide = stance.with(&[
-        (THIGH_L, [14.0, 0.0, -14.0]),
-        (SHIN_L, [34.0, 0.0, 0.0]),
-        (FOOT_L, [-20.0, 0.0, 14.0]),
-        (THIGH_R, [14.0, 0.0, 16.0]),
-        (SHIN_R, [34.0, 0.0, 0.0]),
-        (FOOT_R, [-20.0, 0.0, -16.0]),
+    let wide = lock.with(&[
+        (THIGH_L, [30.0, 0.0, -30.0]),
+        (SHIN_L, [60.0, 0.0, 0.0]),
+        (FOOT_L, [-30.0, 0.0, 30.0]),
+        (THIGH_R, [30.0, 0.0, 30.0]),
+        (SHIN_R, [60.0, 0.0, 0.0]),
+        (FOOT_R, [-30.0, 0.0, -30.0]),
     ]);
-    let gather = stance.with(&[
-        (PELVIS, [0.0, 0.0, -3.0]),
-        (THIGH_L, [22.0, 0.0, 2.0]),
-        (SHIN_L, [48.0, 0.0, 0.0]),
-        (FOOT_L, [-26.0, 0.0, -2.0]),
-        (THIGH_R, [16.0, 0.0, 8.0]),
-        (SHIN_R, [38.0, 0.0, 0.0]),
-        (FOOT_R, [-22.0, 0.0, -8.0]),
+    let gather = lock.with(&[
+        (PELVIS, [0.0, 0.0, -4.0]),
+        (THIGH_L, [52.0, 0.0, -3.0]),
+        (SHIN_L, [106.0, 0.0, 0.0]),
+        (FOOT_L, [-44.0, 0.0, 3.0]),
+        (THIGH_R, [36.0, 0.0, 22.0]),
+        (SHIN_R, [71.0, 0.0, 0.0]),
+        (FOOT_R, [-35.0, 0.0, -22.0]),
     ]);
-    let narrow = stance.with(&[
-        (THIGH_L, [15.0, 0.0, -6.0]),
-        (SHIN_L, [36.0, 0.0, 0.0]),
-        (FOOT_L, [-21.0, 0.0, 6.0]),
-        (THIGH_R, [15.0, 0.0, 6.0]),
-        (SHIN_R, [36.0, 0.0, 0.0]),
-        (FOOT_R, [-21.0, 0.0, -6.0]),
+    let narrow = lock.with(&[
+        (THIGH_L, [40.0, 0.0, -9.0]),
+        (SHIN_L, [81.0, 0.0, 0.0]),
+        (FOOT_L, [-41.0, 0.0, 9.0]),
+        (THIGH_R, [40.0, 0.0, 9.0]),
+        (SHIN_R, [81.0, 0.0, 0.0]),
+        (FOOT_R, [-41.0, 0.0, -9.0]),
     ]);
     let lock_right = Clip { keys: [reach, wide, gather, narrow], speed: 4.0, duration: 44.0 / 60.0, flight: 0.015 };
 
@@ -1263,6 +1287,7 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         dribble_back,
         feint,
         roulette,
+        lock,
         sole,
         dash_front,
         dash_side,
@@ -1274,7 +1299,7 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
             (Cycle::Sprint, sprint),
             (Cycle::Exhausted, exhausted),
             (Cycle::ExtraEffort, extra),
-            (Cycle::LockIdle, Clip::held(stance)),
+            (Cycle::LockIdle, Clip::held(lock)),
             (Cycle::LockForward, lock_forward),
             (Cycle::LockRight, lock_right),
             (Cycle::LockLeft, lock_right.mirror()),
@@ -1590,12 +1615,14 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         lift = old.lift(phase) * (1.0 - w) + lift * w;
     }
 
-    // What the rate clamp leaves, the steps absorb (the game's stride warping).
+    // What the rate clamp leaves, the steps absorb (the game's stride warping), toward the stance
+    // you stand in (lock move's wide one, so short lock steps don't bring the feet together).
     if clip.speed > 0.0 {
         let stride = (speed / clip.speed / rate).clamp(0.4, 1.3);
         let side = matches!(next, Cycle::LockRight | Cycle::LockLeft);
+        let rest_pose = if matches!(next, Cycle::LockForward | Cycle::LockRight | Cycle::LockLeft | Cycle::LockBack) { &clips.lock } else { &clips.stand };
         for j in [THIGH_L, THIGH_R, UPPER_L, UPPER_R] {
-            let rest = clips.stand.0[j];
+            let rest = rest_pose.0[j];
             pose.0[j].x = rest.x + (pose.0[j].x - rest.x) * stride;
             if side && j <= THIGH_R {
                 pose.0[j].z = rest.z + (pose.0[j].z - rest.z) * stride;
