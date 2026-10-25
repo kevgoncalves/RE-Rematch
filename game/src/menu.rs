@@ -1701,15 +1701,21 @@ pub fn show_menu(
     if !menu.is_changed() {
         return;
     }
-    let display = |on: bool| if on { Display::Flex } else { Display::None };
-    root.0.display = display(menu.open());
+    // Set only what changes: a changed node is laid out again.
+    let show = |node: &mut Mut<Node>, on: bool| {
+        let display = if on { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
+    };
+    show(&mut root.0, menu.open());
     // The pause page dims the game; the settings' panels cover it themselves.
-    root.1.0 = if menu.page == Some(Page::Pause) { PAUSE_SHADE } else { Color::NONE };
+    root.1.set_if_neq(BackgroundColor(if menu.page == Some(Page::Pause) { PAUSE_SHADE } else { Color::NONE }));
     for (PageNode(page), mut node) in &mut pages {
-        node.display = display(menu.page == Some(*page));
+        show(&mut node, menu.page == Some(*page));
     }
     for (TabBody(tab), mut node) in &mut tabs {
-        node.display = display(*tab == menu.tab);
+        show(&mut node, *tab == menu.tab);
     }
     if menu.open() != *was_open {
         *was_open = menu.open();
@@ -1827,6 +1833,10 @@ fn drag_sliders(menu: Res<Menu>, mouse: Res<ButtonInput<MouseButton>>, mut bindi
 
 /// Collects the new chord: inputs pressed after the click, committed once all are released.
 fn capture_binding(mut menu: ResMut<Menu>, mut bindings: ResMut<Bindings>, keys: Res<ButtonInput<KeyCode>>, mouse: Res<ButtonInput<MouseButton>>, pads: Query<&Gamepad>) {
+    // Look before taking the menu mutably, so it only counts as changed while capturing.
+    if menu.capturing.is_none() {
+        return;
+    }
     let Some((action, device, chord)) = &mut menu.capturing else { return };
     if keys.just_pressed(KeyCode::Escape) {
         menu.capturing = None;
@@ -1910,10 +1920,11 @@ fn scroll_lists(
             pos.offset_y = y;
         }
         let (top, height) = if content > view { (y / content, view / content) } else { (0.0, 1.0) };
+        let (top, height) = (Val::Percent(top * 100.0), Val::Percent(height * 100.0));
         for (ScrollThumb(t), mut thumb) in &mut thumbs {
-            if t == tab {
-                thumb.top = Val::Percent(top * 100.0);
-                thumb.height = Val::Percent(height * 100.0);
+            if t == tab && (thumb.top != top || thumb.height != height) {
+                thumb.top = top;
+                thumb.height = height;
             }
         }
     }
