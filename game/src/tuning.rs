@@ -92,9 +92,9 @@ pub const EE_TOUCH_NO_CONTROL: f32 = 0.3;
 pub const EE_END_NO_CONTROL: f32 = 0.2;
 pub const EE_START_PHASE: f32 = 0.6;
 /// After such a tap its burst carries you on: for this long (s) your speed above your top fades at
-/// only this rate (m/s^2) instead of OVERSPEED_DECEL, and a shot taken faster than you can run with
-/// the ball keeps all of that speed (Kev: the EE drag shot of earlier Rematch, which everyone
-/// liked). TUNE.
+/// only this rate (m/s^2) instead of OVERSPEED_DECEL. TUNE. A shot taken faster than you can run
+/// with the ball used to keep all of that speed (Kev: the EE drag shot of earlier Rematch, which
+/// everyone liked); it now slows over its wind-up like any shot, as the game's data does.
 pub const EE_TAP_CARRY: f32 = 0.6;
 pub const EE_TAP_DECEL: f32 = 5.0;
 /// Time to stop from full speed by state (the stop transitions): run, with ball, sprint, sprint with ball.
@@ -325,26 +325,41 @@ pub const KICK_BALL_PULL: f32 = 6.0;
 /// shows within a frame of 30 fps video of the release).
 pub const KICK_STRIKE_MIN: f32 = 2.0 / 60.0;
 pub const WINDUP_SPEED_SCALE: f32 = 0.5; // TUNE: how much you slow down winding up a pass or lob
-/// A shot keeps your run-up: through the build-up you slide on in the same direction at a share
-/// of your speed at the press that shrinks to this (HighPowerBeforeShootScaleSpeedData: 0.75, 0.6
-/// sprinting at 4 m/s or more, 0.5 out of a dribble; Kev wants the body to slide on, not brake). TUNE.
-pub const SHOT_SLIDE: f32 = 0.95;
-pub const SHOT_SLIDE_SPRINT: f32 = 0.9;
-pub const SHOT_SLIDE_FROM_DRIBBLE: f32 = 0.9;
-/// Passes and lobs keep all of your speed at the press, in that direction, through the build-up
-/// and after the touch (BeforeTapScaleSpeedData, TapAfterShootSpeedData): walking drags you a
-/// little, running more, out of a dribble as running (Kev); standing still (under this) none.
-pub const PASS_DRAG_MIN_SPEED: f32 = 0.3;
-/// The after-touch drag runs to the pass animation's move interrupt (frames 18 to 63).
-pub const PASS_AFTER_TOUCH: f32 = 45.0 / 60.0;
-/// With the stick left alone, after the touch you slide on at that speed until the shot's move
-/// ends: can act moving at 45f, so 25f after a low-power shot's contact (Kev wants a power shot to
-/// slide as long).
-pub const SHOT_AFTER_TOUCH: f32 = 25.0 / 60.0;
-/// After a shot, pass or lob's touch the drag carries you on its way until here before the stick
-/// can turn you (the stick held its own way leaves it at once): a pass can act moving 15f after its
-/// contact, a power shot 13f (the game's frame data; Kev: turning in the follow-through was wrong).
-pub const KICK_TURN_FREE: f32 = 15.0 / 60.0;
+/// Kicks and fakes carry your momentum: the game keeps the speed you have as the move starts and
+/// only shapes it with a curve, capped here (the root-motion speed scaler's largest entry speed,
+/// 1000 cm/s; kick-slides-and-fakes.md §0).
+pub const KICK_ENTRY_CAP: f32 = 10.0;
+/// A shot keeps your run-up: through its wind-up you slide on that way at your speed at the press
+/// times these curves, over the wind-up to the touch (HighPowerBeforeShootScaleSpeedData and its
+/// external curves, kick-slides-and-fakes.md §2.2): x0.7 by the touch, holding at first; x0.6
+/// sprinting at SHOT_SLIDE_SPRINT_MIN or more and x0.5 out of a dribble, both dropping early. Was a
+/// straight line to 0.95 (0.9 sprinting or out of a dribble): Kev wanted the body to slide on, not
+/// brake; the rise after the touch (SHOT_AFTER_TOUCH_SPEED) is what the game uses for that.
+pub const SHOT_WINDUP: [(f32, f32); 3] = [(0.0, 1.0), (0.5, 0.94), (1.0, 0.7)];
+pub const SHOT_WINDUP_SPRINT: [(f32, f32); 3] = [(0.0, 1.0), (0.5, 0.73), (1.0, 0.6)];
+pub const SHOT_WINDUP_DRIBBLE: [(f32, f32); 3] = [(0.0, 1.0), (0.5, 0.62), (1.0, 0.5)];
+pub const SHOT_SLIDE_SPRINT_MIN: f32 = 4.0;
+/// After the touch a shot lunges on: from the touch's speed up to twice it by the move interrupt,
+/// smoothly (HighPowerAfterShootScaleSpeedData). TUNE: the x2 is an open question; from a control at
+/// 8 m/s it reaches 11 m/s (8 x 0.7 x 2). Held against the stick until then.
+pub const SHOT_AFTER_TOUCH_SPEED: [(f32, f32); 5] = [(0.0, 1.0), (0.25, 1.16), (0.5, 1.5), (0.75, 1.84), (1.0, 2.0)];
+/// A moving shot can act at 45f from the press (ShootDataTable); the rise runs to then, at least a
+/// power shot's 13f after its touch.
+pub const SHOT_MOVE_INTERRUPT: f32 = 45.0 / 60.0;
+pub const SHOT_AFTER_TOUCH_MIN: f32 = 13.0 / 60.0;
+/// Left alone after the move interrupt, you run on at that speed this much longer (the game plays
+/// the shot's own root motion, about 5 m/s, to its end; was 25f after the touch in all). TUNE.
+pub const SHOT_AFTER_TOUCH_HOLD: f32 = 0.25;
+/// Passes and lobs keep all of your speed at the press (capped at KICK_ENTRY_CAP), that way, through
+/// the wind-up and after the touch to their animation's end (BeforeTapScaleSpeedData,
+/// TapAfterShootSpeedData and its hold-to-the-end flag): out of a dribble the dribble's own speed,
+/// out of a control what the control kept. At this speed or under the game plays the standing pass,
+/// which plants you (its wind-up speed is pinned to 1 cm/s). Was 0.3 m/s, walking dragging you a
+/// little and a dribble counting as a run with the ball, 4.5 m/s (Kev).
+pub const PASS_SLIDE_MIN_ENTRY: f32 = 2.0;
+/// The after-touch slide runs to the pass animation's end (Tap_V2_BtoN: 64f, its touch at 24f). Was
+/// 45f, to its move interrupt.
+pub const PASS_AFTER_TOUCH: f32 = 40.0 / 60.0;
 /// A pass or lob slides you on at your speed this long after its touch, whatever the stick (Kev:
 /// with momentum they should slide more). Standing still there is no slide. TUNE.
 pub const PASS_SLIDE: f32 = 20.0 / 60.0;
@@ -539,6 +554,14 @@ pub const DASH_DRIBBLE_REACH: f32 = 0.9;
 /// 16f, chest 20f, head 22f.
 pub const CONTROL_SNAP: f32 = 12.0 / 60.0;
 pub const CONTROL_ACT_BY_HEIGHT: [(f32, f32); 4] = [(0.6, 14.0 / 60.0), (1.1, 16.0 / 60.0), (1.5, 20.0 / 60.0), (f32::INFINITY, 22.0 / 60.0)];
+/// A control keeps the speed you came in with until you can act, even above your top with the
+/// ball: x1, x0.9 at 23% of it, x1 again from half way, over the moving control's ~1 s
+/// (BallControlSpeedScaleModifier); coming in at CONTROL_SPEED_CAP or faster, that cap on the same
+/// shape. So a kick queued in the control starts with your run onto the ball, a sprint without it
+/// included. You still steer, and letting go of the stick still stops you (Kev: no carry).
+pub const CONTROL_SPEED_KEEP: [(f32, f32); 4] = [(0.0, 1.0), (0.23, 0.9), (0.5, 1.0), (1.0, 1.0)];
+pub const CONTROL_SPEED_TIME: f32 = 1.0;
+pub const CONTROL_SPEED_CAP: f32 = 8.0;
 /// Kev's ippy (as before Season 1, which he says was 100% consistent, sprint or not): after your
 /// own push ball, with the stick turned back past IPPY_ANGLE, as soon as you may take the ball
 /// again (within IPPY_WINDOW of the touch), if it is within IPPY_REACH you pivot round over it and
