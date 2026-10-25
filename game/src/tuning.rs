@@ -91,6 +91,12 @@ pub const EE_TOUCH_NO_CONTROL: f32 = 0.3;
 /// Kev: only then; let go later and the magnet is back at once, touch delays and all. TUNE.
 pub const EE_END_NO_CONTROL: f32 = 0.2;
 pub const EE_START_PHASE: f32 = 0.6;
+/// After such a tap its burst carries you on: for this long (s) your speed above your top fades at
+/// only this rate (m/s^2) instead of OVERSPEED_DECEL, and a shot taken faster than you can run with
+/// the ball keeps all of that speed (Kev: the EE drag shot of earlier Rematch, which everyone
+/// liked). TUNE.
+pub const EE_TAP_CARRY: f32 = 0.6;
+pub const EE_TAP_DECEL: f32 = 5.0;
 /// Time to stop from full speed by state (the stop transitions): run, with ball, sprint, sprint with ball.
 pub const STOP_TIME: [f32; 4] = [0.38, 0.7, 0.68, 1.0];
 

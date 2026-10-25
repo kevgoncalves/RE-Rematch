@@ -59,8 +59,9 @@ pub struct Player {
     pub push_sprinted: bool,
     /// Your magnet is off this long after an extra-effort touch on the ball or its end.
     pub magnet_off: f32,
-    /// How long extra effort has been on (0 when off).
+    /// How long extra effort has been on (0 when off), and an extra-effort tap's carry left.
     pub ee_on: f32,
+    pub ee_carry: f32,
     /// An extra-effort cut's time left, and whether it cuts right.
     pub ee_cut: f32,
     pub ee_cut_right: bool,
@@ -383,6 +384,7 @@ impl Default for Player {
             ee_cut: 0.0,
             magnet_off: 0.0,
             ee_on: 0.0,
+            ee_carry: 0.0,
             ee_cut_right: false,
             last_input: Vec3::ZERO,
             freeze: 0.0,
@@ -734,8 +736,13 @@ pub fn player_move(
     p.own_push += dt;
     p.ee_cut -= dt;
     p.magnet_off -= dt;
+    p.ee_carry -= dt;
     if p.ee_on > 0.0 && !p.extra_active {
-        p.magnet_off = if p.ee_on < EE_START_PHASE { p.magnet_off.max(EE_END_NO_CONTROL) } else { 0.0 };
+        let tap = p.ee_on < EE_START_PHASE;
+        p.magnet_off = if tap { p.magnet_off.max(EE_END_NO_CONTROL) } else { 0.0 };
+        if tap {
+            p.ee_carry = EE_TAP_CARRY;
+        }
     }
     p.ee_on = if p.extra_active { p.ee_on + dt } else { 0.0 };
     // After the hand-back a dribble keeps only its permissions, to the animation's end.
@@ -780,7 +787,10 @@ pub fn player_move(
         }
     } else if let Some(k) = p.kick.filter(|k| k.kind == Kick::Shot) {
         // A shot keeps your run-up: no steering, sliding on at a shrinking share of your speed.
-        let end = if k.from_dribble {
+        let end = if Vec3::new(k.entry.x, 0.0, k.entry.z).length() > BALL_SPRINT_SPEED {
+            // Faster than you can run with the ball (an extra-effort tap's carry): all of it.
+            1.0
+        } else if k.from_dribble {
             SHOT_SLIDE_FROM_DRIBBLE
         } else if p.sprinting && k.entry.length() >= 4.0 {
             SHOT_SLIDE_SPRINT
@@ -908,7 +918,8 @@ pub fn player_move(
         let max_turn = if speed < 0.5 { f32::INFINITY } else { turn.to_radians() * dt };
         let heading = heading_now + angle_diff(yaw_of(wish), heading_now).clamp(-max_turn, max_turn);
         let new_speed = (speed + accel * input.length() * dt).min(top * input.length());
-        p.vel = forward(heading) * new_speed.max(speed.min(top) - STOP_DECEL * dt).max(speed - OVERSPEED_DECEL * dt);
+        let over_decel = if p.ee_carry > 0.0 { EE_TAP_DECEL } else { OVERSPEED_DECEL };
+        p.vel = forward(heading) * new_speed.max(speed.min(top) - STOP_DECEL * dt).max(speed - over_decel * dt);
         let lag = angle_diff(heading, p.facing);
         // Past 90 deg behind your heading the body catches up a little faster.
         let catch_up = if lag.abs() > std::f32::consts::FRAC_PI_2 { BODY_CATCH_UP } else { 0.0 };
