@@ -36,6 +36,8 @@ pub struct Player {
     pub dribble_lock: bool,
     /// A push ball pressed before the dribble's window opened, waiting for it.
     pub push_buffered: bool,
+    /// The same for the flick.
+    pub flick_buffered: bool,
     /// Scripted chase after a push ball.
     pub run: Option<Run>,
     /// Seconds into receiving the ball (the ball becomes yours at CONTROL_SNAP; you act from receive_act).
@@ -417,6 +419,7 @@ impl Default for Player {
             dribble: None,
             dribble_lock: false,
             push_buffered: false,
+            flick_buffered: false,
             run: None,
             receiving: None,
             queued: None,
@@ -455,12 +458,14 @@ pub enum Kick {
     DribblePushBall,
     /// The rainbow flick (the lobbed push ball): the ball scooped up steeply off your foot.
     LobbedPushBall,
+    /// The rainbow flick from inside a dribble.
+    DribbleLobbedPushBall,
 }
 
 impl Kick {
     /// Flicks: the ball scooped up and over (the lobbed push balls).
     pub fn is_flick(self) -> bool {
-        matches!(self, Kick::LobbedPushBall)
+        matches!(self, Kick::LobbedPushBall | Kick::DribbleLobbedPushBall)
     }
 
     /// The push-ball family: no hitstop, no kick marker, a push touch's effect.
@@ -487,6 +492,7 @@ impl Kick {
             Kick::ShortPass | Kick::ShortLob => SHORT_WINDUP,
             Kick::PushBall | Kick::DribblePushBall => PUSH_BALL_WINDUP,
             Kick::LobbedPushBall => FLICK_WINDUP_AHEAD,
+            Kick::DribbleLobbedPushBall => DRIBBLE_FLICK_WINDUP,
         }
     }
 
@@ -497,7 +503,7 @@ impl Kick {
             Kick::Shot if speed >= SHOT_HIGH_POWER_SPEED => 5.0,
             Kick::Shot | Kick::Pass | Kick::Lob => 3.0,
             Kick::ShortPass | Kick::ShortLob => 2.0,
-            Kick::PushBall | Kick::DribblePushBall | Kick::LobbedPushBall => 0.0,
+            Kick::PushBall | Kick::DribblePushBall | Kick::LobbedPushBall | Kick::DribbleLobbedPushBall => 0.0,
         }
     }
 
@@ -1405,10 +1411,13 @@ pub fn kicking(
     // buffers 0.1 s; players find it more responsive than that).
     if p.dribble.is_none() {
         p.push_buffered = false;
-    } else if !dribble_open && !p.locked && actions.just_pressed(Action::PushBall) {
-        p.push_buffered = true;
+        p.flick_buffered = false;
+    } else if !dribble_open {
+        p.push_buffered |= !p.locked && actions.just_pressed(Action::PushBall);
+        p.flick_buffered |= actions.just_pressed(Action::LobbedPushBall);
     }
     let buffered_push = p.push_buffered && dribble_open;
+    let buffered_flick = p.flick_buffered && dribble_open;
     // A dash that picked up the ball doesn't block kicks (players confirm). A control does until
     // its action frame, but from its effect on the ball a kick's press counts (players confirm):
     // it waits for the action frame, and a held one charges meanwhile, like a pre-charge.
@@ -1430,15 +1439,18 @@ pub fn kicking(
         // In lock move the push ball button dribbles instead (player_move); inside a dribble,
         // released from lock move, it's the dribble push ball.
         let push = if p.dribble.is_some() || p.since_dribble < DRIBBLE_PUSH_GRACE { Kick::DribblePushBall } else { Kick::PushBall };
-        // The rainbow flick, from free move with the ball or the stance (its layers allow both), not
-        // inside a dribble.
-        let flick = (p.dribble.is_none()).then_some((Action::LobbedPushBall, Kick::LobbedPushBall));
-        let instant = [(Action::LowPowerPass, Kick::ShortPass), (Action::LowPowerLob, Kick::ShortLob)].into_iter().chain(flick).chain([(Action::PushBall, push)]);
+        // The rainbow flick, from free move with the ball or the stance (its layers allow both); inside
+        // a dribble, from its 12th frame (pressed earlier, it waits for it), the dribble's flick.
+        let flick = if p.dribble.is_some() { Kick::DribbleLobbedPushBall } else { Kick::LobbedPushBall };
+        let instant = [(Action::LowPowerPass, Kick::ShortPass), (Action::LowPowerLob, Kick::ShortLob), (Action::LobbedPushBall, flick), (Action::PushBall, push)];
         let pressed = instant
+            .into_iter()
             .chain(charged)
             .filter(|(a, _)| *a != Action::PushBall || !p.locked)
-            .filter(|(a, _)| dribble_open || *a != Action::PushBall)
-            .find(|(a, _)| actions.pending(*a) || (*a == Action::PushBall && buffered_push) || p.queued.is_some_and(|(q, _)| q == *a));
+            .filter(|(a, _)| dribble_open || !matches!(a, Action::PushBall | Action::LobbedPushBall))
+            .find(|(a, _)| {
+                actions.pending(*a) || (*a == Action::PushBall && buffered_push) || (*a == Action::LobbedPushBall && buffered_flick) || p.queued.is_some_and(|(q, _)| q == *a)
+            });
         // Extra effort can't keep the ball: starting it touches the ball on ahead.
         let pressed = pressed.or((p.extra_active && dribble_open).then_some((Action::ExtraEffort, Kick::PushBall)));
         if let Some((action, kind)) = pressed {
@@ -1457,6 +1469,7 @@ pub fn kicking(
                 p.dash = None;
             }
             p.push_buffered = false;
+            p.flick_buffered = false;
             let released = kind.charge_action().is_none();
             let steer = if axes.movement.length() < PUSH_BALL_DEAD_ZONE {
                 Vec3::ZERO
@@ -1465,7 +1478,7 @@ pub fn kicking(
             };
             p.run = None;
             let way = if steer == Vec3::ZERO { forward(p.facing) } else { steer };
-            let heading = if kind.is_flick() { Heading::of(forward(p.facing).angle_between(way).to_degrees(), 45.0, 135.0) } else { Heading::Forward };
+            let heading = if kind == Kick::LobbedPushBall { Heading::of(forward(p.facing).angle_between(way).to_degrees(), 45.0, 135.0) } else { Heading::Forward };
             let k = KickState { kind, elapsed: 0.0, held: pre, pre, released, aim: Vec2::new(rig.yaw, rig.pitch), eye: camera.translation, entry: p.vel, from_dribble, steer, sprint: p.sprinting, heading };
             if kind.is_flick() {
                 p.run = Some(flick_windup(p, &k, way));
@@ -1482,6 +1495,7 @@ pub fn kicking(
         let takeovers: &[(Action, Kick)] = match k.kind {
             // A push ball's buffer also lets the flick in (RB just after A).
             Kick::PushBall => &[(Action::LowPowerLob, Kick::ShortLob), (Action::LowPowerPass, Kick::ShortPass), (Action::LobbedPushBall, Kick::LobbedPushBall)],
+            Kick::DribblePushBall => &[(Action::LobbedPushBall, Kick::DribbleLobbedPushBall)],
             Kick::Pass => &[(Action::LowPowerLob, Kick::ShortLob), (Action::LowPowerPass, Kick::ShortPass), (Action::Lob, Kick::Lob)],
             Kick::Lob | Kick::ShortPass => &[(Action::LowPowerLob, Kick::ShortLob)],
             _ => &[],
@@ -1493,7 +1507,7 @@ pub fn kicking(
             if kind.is_flick() {
                 let k = *k;
                 let way = if k.steer == Vec3::ZERO { forward(p.facing) } else { k.steer };
-                let heading = Heading::of(forward(p.facing).angle_between(way).to_degrees(), 45.0, 135.0);
+                let heading = if kind == Kick::LobbedPushBall { Heading::of(forward(p.facing).angle_between(way).to_degrees(), 45.0, 135.0) } else { Heading::Forward };
                 let k = KickState { heading, ..k };
                 p.run = Some(flick_windup(p, &k, way));
                 p.kick = Some(k);
@@ -1511,7 +1525,8 @@ pub fn kicking(
     // Extra effort's auto tap turns you to where you push by its touch (as the game's 135/180 deg
     // weakening implies), so starting it any way, even out of a dribble, takes the ball with you.
     // A dribble push ball turns you to the push before its touch, over its first 9 frames.
-    if (k.kind == Kick::DribblePushBall || (k.kind == Kick::PushBall && p.extra_active)) && k.steer != Vec3::ZERO {
+    // The dribble's flick turns you the same way.
+    if (matches!(k.kind, Kick::DribblePushBall | Kick::DribbleLobbedPushBall) || (k.kind == Kick::PushBall && p.extra_active)) && k.steer != Vec3::ZERO {
         let left = (contact_time(k) - (k.elapsed - dt)).max(dt);
         p.facing += angle_diff(yaw_of(k.steer), p.facing) * (dt / left).min(1.0);
     }
@@ -1595,11 +1610,17 @@ pub fn kicking(
             let (sprint_factor, sprint_angle) = if k.sprint { FLICK_SPRINT } else { (1.0, 0.0) };
             (speed * way_factor * sprint_factor, angle + way_angle + sprint_angle, FLICK_FRICTION, FLICK_NO_CONTROL)
         }
+        // Out of a dribble: the same every way, a smaller sprint boost and none tired.
+        Kick::DribbleLobbedPushBall => {
+            let (speed, angle) = if p.exhausted { EXHAUSTED_DRIBBLE_FLICK } else { (DRIBBLE_FLICK_SPEED, FLICK_ANGLE) };
+            let (sprint_factor, sprint_angle) = if k.sprint && !p.exhausted { DRIBBLE_FLICK_SPRINT } else { (1.0, 0.0) };
+            (speed * sprint_factor, angle + sprint_angle, FLICK_FRICTION, FLICK_NO_CONTROL)
+        }
     };
     let yaw = match k.kind {
         // The extra effort auto tap goes the way your body faces, not your input.
         Kick::PushBall if p.extra_active => p.facing,
-        Kick::PushBall | Kick::DribblePushBall | Kick::LobbedPushBall => yaw_of(push_dir),
+        Kick::PushBall | Kick::DribblePushBall | Kick::LobbedPushBall | Kick::DribbleLobbedPushBall => yaw_of(push_dir),
         // Toward the crosshair's point on the walls (`aim` above), turned a little against the
         // curve so the ball bends back toward it.
         Kick::Shot => crosshair_yaw(eye, aim.x, ball_tf.translation) + (side * AIM_NUDGE).to_radians(),
@@ -1623,7 +1644,7 @@ pub fn kicking(
                 Kick::Pass => PASS_FORCED_SPIN,
                 Kick::Lob => LOB_FORCED_SPIN,
                 Kick::ShortLob => SHORT_LOB_FORCED_SPIN,
-                Kick::LobbedPushBall => FLICK_SPIN,
+                Kick::LobbedPushBall | Kick::DribbleLobbedPushBall => FLICK_SPIN,
                 _ => 0.0,
             }
     };
@@ -1678,6 +1699,7 @@ pub fn kicking(
         p.stamina = (p.stamina - FLICK_COST).max(0.0);
         p.regen_wait = PUSH_BALL_REGEN_DELAY;
         let (length, speeds) = match k.heading {
+            _ if k.kind == Kick::DribbleLobbedPushBall => DRIBBLE_FLICK_AFTER,
             Heading::Forward => FLICK_AFTER_AHEAD,
             Heading::Side => FLICK_AFTER_SIDE,
             Heading::Back => FLICK_AFTER_BACK,
@@ -1695,8 +1717,11 @@ pub fn kicking(
 fn flick_windup(p: &Player, k: &KickState, way: Vec3) -> Run {
     let flat = Vec3::new(p.vel.x, 0.0, p.vel.z);
     let speed = flat.length();
+    let state = if p.exhausted { 2 } else if speed > 1.0 { 0 } else { 1 };
     let (dir, speeds, scale): (Vec3, &'static [(f32, f32)], f32) = match k.heading {
-        Heading::Forward => (way, FLICK_WINDUP_RUN[if p.exhausted { 2 } else if speed > 1.0 { 0 } else { 1 }], 1.0),
+        _ if k.kind == Kick::DribbleLobbedPushBall => (way, DRIBBLE_FLICK_RUN[state], 1.0),
+        Heading::Forward => (way, FLICK_WINDUP_RUN[state], 1.0),
+
         _ if speed < FLICK_STEP_BELOW => (if speed > 0.5 { flat.normalize() } else { way }, &FLICK_TURNED_STEP, 1.0),
         _ => (flat.normalize(), &FLICK_TURNED_BRAKE, speed),
     };
@@ -1887,6 +1912,36 @@ mod tests {
         let mut app = kick_app(false, Vec3::new(0.0, BALL_RADIUS, -9.0), Vec3::ZERO);
         frames(&mut app, &[Action::LobbedPushBall], 1, 1.0 / 60.0);
         assert!(player(&mut app).kick.is_none());
+    }
+
+    #[test]
+    fn a_dribbles_flick_waits_for_its_window_and_keeps_its_pace() {
+        let mut app = kick_app(true, Vec3::new(0.0, BALL_RADIUS, -0.4), Vec3::ZERO);
+        let dribble = DribbleState { t: 0.1, feint: false, exhausted: false, heading: Heading::Forward, dir: Vec3::NEG_Z, facing: 0.0, cut: 0.0, turn: FeintTurn::None };
+        let set_dribble = |app: &mut App, d: DribbleState| app.world_mut().query::<&mut Player>().single_mut(app.world_mut()).unwrap().dribble = Some(d);
+        set_dribble(&mut app, dribble);
+        // Trigger: tapped before the dribble's 12th frame, it waits for it, then goes off.
+        frames(&mut app, &[Action::LobbedPushBall], 1, 1.0 / 60.0);
+        frames(&mut app, &[], 1, 1.0 / 60.0);
+        assert!(player(&mut app).kick.is_none() && player(&mut app).flick_buffered);
+        set_dribble(&mut app, DribbleState { t: 0.25, ..dribble });
+        // Timing: the touch 16 frames on, every way.
+        let n = frames_to_touch(&mut app, &[]);
+        assert!((16..=17).contains(&n), "touch at {n}f");
+        // The ball: 12.5 m/s at 65 deg, the dip spin; the dribble is over.
+        let b = ball(&mut app);
+        let elevation = b.vel.y.atan2(Vec2::new(b.vel.x, b.vel.z).length()).to_degrees();
+        assert!((b.vel.length() - 12.5).abs() < 0.01 && (elevation - 65.0).abs() < 0.1 && b.spin.y == FLICK_SPIN, "{} at {elevation}", b.vel);
+        assert!(player(&mut app).dribble.is_none());
+
+        // Sprinting at the press: x1.1 and 5 deg flatter.
+        let mut app = kick_app(true, Vec3::new(0.0, BALL_RADIUS, -0.4), Vec3::ZERO);
+        set_dribble(&mut app, DribbleState { t: 0.3, ..dribble });
+        app.world_mut().query::<&mut Player>().single_mut(app.world_mut()).unwrap().sprinting = true;
+        frames_to_touch(&mut app, &[Action::LobbedPushBall]);
+        let b = ball(&mut app);
+        let elevation = b.vel.y.atan2(Vec2::new(b.vel.x, b.vel.z).length()).to_degrees();
+        assert!((b.vel.length() - 13.75).abs() < 0.01 && (elevation - 60.0).abs() < 0.1, "{} at {elevation}", b.vel);
     }
 
     #[test]

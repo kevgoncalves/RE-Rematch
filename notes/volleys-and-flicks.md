@@ -908,6 +908,17 @@ is one; anything else is a guess marked TUNE in `tuning.rs`.
   - the poses (plant, scoop, knee drive) are ours, from the description in §7.4; back flicks use
     the heel flick.
 
+### 11.2 Rainbow flick out of a dribble (`Kick::DribbleLobbedPushBall`)
+- **When:** inside a dribble (any dribble, feint or tired one), from its 12th frame. Pressed earlier,
+  it waits for the window, as the dribble push ball does. A dribble push ball started up to 0.1 s
+  before RB becomes it.
+- **Ball:** 12.5 m/s at 65° every way; sprinting x1.1 and 5° flatter; tired 12.75 m/s at 62° with no
+  sprint boost. The rest as §11.1.
+- **Timing and movement:** the touch 16f after the press; you keep the dribble's pace through it
+  (5 → 6.5 m/s moving, 5 → 6 standing, 3.5 → 4.5 tired) and turn to the flick by the touch, then run on
+  at your speed for 20f.
+- **Which one in free move:** the spec rule stands (inside a dribble, this one; else §11.1).
+
 ## Sources
 **Extracted game files** (`RE Rematch (main)/tools/rmx/out` and `out_bp`):
 - **Abilities:** `GA_VolleyBaseShoot`, `GA_VolleyShoot`, `GA_VolleyTap` (+ `_LowPower`),

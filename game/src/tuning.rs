@@ -640,6 +640,19 @@ pub const FLICK_AFTER_SIDE: (f32, &[(f32, f32)]) = (36.0 / 60.0, &[(0.0, 1.0), (
 pub const FLICK_AFTER_BACK: (f32, &[(f32, f32)]) = (36.0 / 60.0, &[(0.0, 1.0), (0.3, 0.0), (1.0, 0.0)]);
 pub const FLICK_REDIRECT: f32 = 13.0 / 60.0;
 pub const FLICK_FREE: f32 = 35.0 / 60.0;
+// The flick out of a dribble (§5, GA_DribbleLobbedPushBall): from the dribble's 12th frame to its end.
+/// 12.5 m/s at 65 deg every way (no way modifiers); sprinting x1.1 and 5 deg flatter; out of stamina
+/// 12.75 m/s at 62 deg (dribble.md).
+pub const DRIBBLE_FLICK_SPEED: f32 = 12.5;
+pub const DRIBBLE_FLICK_SPRINT: (f32, f32) = (1.1, -5.0);
+pub const EXHAUSTED_DRIBBLE_FLICK: (f32, f32) = (12.75, 62.0);
+/// The touch 16f after the press, every way (DT_LobbedPushBall's dribble rows).
+pub const DRIBBLE_FLICK_WINDUP: f32 = 16.0 / 60.0;
+/// You keep the dribble's pace through the wind-up, the flick's way (BP_DribbleLobbedPushBallBuildUpData):
+/// 5 -> 6.5 m/s by 15% moving (over 1 m/s), 5 -> 6 by 10% standing, 3.5 -> 4.5 out of stamina; after
+/// the touch 20f at your speed (DribbleLobbedPushBallDashData).
+pub const DRIBBLE_FLICK_RUN: [&[(f32, f32)]; 3] = [&[(0.0, 5.0), (0.15, 6.5), (1.0, 6.5)], &[(0.0, 5.0), (0.1, 6.0), (1.0, 6.0)], &[(0.0, 3.5), (0.1, 4.5), (1.0, 4.5)]];
+pub const DRIBBLE_FLICK_AFTER: (f32, &[(f32, f32)]) = (20.0 / 60.0, &[(0.0, 1.0), (1.0, 1.0)]);
 
 // Freeplay ball call
 pub const FEED_DISTANCE: f32 = 15.0; // TUNE

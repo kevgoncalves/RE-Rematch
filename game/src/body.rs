@@ -1609,7 +1609,7 @@ fn follow_time(kind: Kick) -> f32 {
         Kick::Shot => 0.5,
         Kick::PushBall | Kick::DribblePushBall => 0.2,
         // The knee stays up a moment after the scoop.
-        Kick::LobbedPushBall => 0.3,
+        Kick::LobbedPushBall | Kick::DribbleLobbedPushBall => 0.3,
         // Passes and lobs are back in their run 0.15-0.28 s after the touch.
         _ => 0.25,
     }
@@ -1622,7 +1622,7 @@ fn kick_size(kind: Kick) -> f32 {
         Kick::Pass | Kick::Lob => 1.0,
         Kick::ShortPass | Kick::ShortLob => 0.75,
         Kick::PushBall | Kick::DribblePushBall => 0.4,
-        Kick::LobbedPushBall => 0.9,
+        Kick::LobbedPushBall | Kick::DribbleLobbedPushBall => 0.9,
     }
 }
 
@@ -2003,8 +2003,9 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             Kick::Shot if turn.abs() > 30.0 => (side(&clips.shot_side), 0.3),
             Kick::Shot => (clips.kicks[0], 1.0),
             _ if turn.abs() > 135.0 => (clips.heel, 0.0),
-            Kick::LobbedPushBall if turn.abs() > 45.0 => (side(&clips.flick_side), 0.3),
-            Kick::LobbedPushBall => (clips.flick, 1.0),
+            _ if kind.is_flick() && turn.abs() > 45.0 => (side(&clips.flick_side), 0.3),
+            _ if kind.is_flick() => (clips.flick, 1.0),
+
             Kick::Pass | Kick::ShortPass => (clips.kicks[1], 1.0),
             Kick::Lob | Kick::ShortLob => (clips.kicks[2], 1.0),
             _ => (clips.kicks[0], 1.0),
