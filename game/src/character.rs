@@ -100,9 +100,12 @@ pub enum Clip {
     Turn180,
     Turn180Left,
     RunStop,
+    /// The pass and chip on the upper body only: their wind-up while they charge on the run.
+    PassUpper,
+    ChipUpper,
 }
 
-pub const CLIPS: usize = 28;
+pub const CLIPS: usize = 30;
 /// Each clip has two nodes, so a one-shot can crossfade into itself (a pass after a pass).
 const NODES: usize = 2 * CLIPS;
 
@@ -136,6 +139,8 @@ impl Clip {
         Clip::Turn180,
         Clip::Turn180Left,
         Clip::RunStop,
+        Clip::PassUpper,
+        Clip::ChipUpper,
     ];
 
     /// The animation's name in the glb (tools/mixamo_to_glb.py).
@@ -156,8 +161,8 @@ impl Clip {
             Clip::DiagRight => "jog_diag_right",
             Clip::BackDiagLeft => "jog_back_diag_left",
             Clip::BackDiagRight => "jog_back_diag_right",
-            Clip::Pass => "pass",
-            Clip::Chip => "chip",
+            Clip::Pass | Clip::PassUpper => "pass",
+            Clip::Chip | Clip::ChipUpper => "chip",
             Clip::Strike => "strike_jog",
             Clip::StrikeLeft => "strike_jog_left",
             Clip::PenaltyKick => "penalty_kick",
@@ -174,14 +179,23 @@ impl Clip {
 
     /// Plays on the upper body only, over the legs' locomotion.
     fn upper(self) -> bool {
-        self == Clip::ReceiveChest
+        matches!(self, Clip::ReceiveChest | Clip::PassUpper | Clip::ChipUpper)
+    }
+
+    /// The clip's upper-body version, where it has one.
+    fn upper_of(self) -> Clip {
+        match self {
+            Clip::Pass => Clip::PassUpper,
+            Clip::Chip => Clip::ChipUpper,
+            c => c,
+        }
     }
 
     /// Where the clip starts when it plays as a one-shot (skipping a standing lead-in).
     fn start(self) -> f32 {
         match self {
-            Clip::Pass => 0.15,
-            Clip::Chip => 0.1,
+            Clip::Pass | Clip::PassUpper => 0.15,
+            Clip::Chip | Clip::ChipUpper => 0.1,
             Clip::Dribble => 0.2,
             _ => 0.0,
         }
@@ -325,6 +339,8 @@ struct KickTrack {
     clip: Clip,
     t: f32,
     elapsed: f32,
+    /// Winding up on the upper body only (a pass or lob charging on the run).
+    upper: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -632,18 +648,27 @@ impl Mixer {
             self.current = None;
             let aim = if k.kind != Kick::Shot && k.steer != Vec3::ZERO { yaw_of(k.steer) } else { k.aim.x.to_radians() };
             self.kick_turn = wrap(aim - p.facing).to_degrees().clamp(-150.0, 150.0);
+            // A pass or lob winds up from the press (the game's build-up). Charging on the run, only
+            // the upper body does, arms opening and shoulders turning while the legs run on; once
+            // it's let go the whole body plants and strikes. A tapped one is the whole clip.
+            let upper = k.kind.is_pass() && kick_contact(&k).is_none() && speed > 1.0;
             if self.kick.is_none_or(|t| k.elapsed < t.elapsed || t.kind != k.kind) {
                 let clip = kick_clip(k.kind, self.kick_turn);
                 let key = self.key();
                 self.kick_key = key;
-                self.kick = Some(KickTrack { key, kind: k.kind, clip, t: clip.start(), elapsed: 0.0 });
+                self.kick = Some(KickTrack { key, kind: k.kind, clip, t: clip.start(), elapsed: 0.0, upper });
+            } else if self.kick.is_some_and(|t| t.upper != upper) {
+                // Its own key, so the two versions crossfade.
+                let key = self.key();
+                self.kick_key = key;
+                let track = self.kick.as_mut().unwrap();
+                (track.key, track.upper) = (key, upper);
             }
             let track = self.kick.as_mut().unwrap();
             track.t = kick_time(track.t, &k, dt, m.get(track.clip));
             track.elapsed = k.elapsed;
-            // Passes and lobs don't wind up while they charge (body.rs): they come in once let go.
-            let weight = if k.kind.is_pass() && kick_contact(&k).is_none() { 0.0 } else { 1.0 };
-            return Some(Want { clip: track.clip, key: track.key, t: track.t, weight, fade_in: 0.08, fade_out: 0.1 });
+            let clip = if track.upper { track.clip.upper_of() } else { track.clip };
+            return Some(Want { clip, key: track.key, t: track.t, weight: 1.0, fade_in: 0.08, fade_out: 0.1 });
         }
         // The kick's state ends at its contact (unless faked): the follow-through plays on.
         if let Some(track) = self.kick.take()
@@ -1240,8 +1265,8 @@ mod tests {
                 Clip::DiagRight => clip(0.8, 2.59, 0.38),
                 Clip::BackDiagLeft => clip(0.83, 2.29, 0.84),
                 Clip::BackDiagRight => clip(0.73, 2.06, 0.64),
-                Clip::Pass => kick(1.6, 0.33, 0.46),
-                Clip::Chip => kick(1.67, 0.23, 0.47),
+                Clip::Pass | Clip::PassUpper => kick(1.6, 0.33, 0.46),
+                Clip::Chip | Clip::ChipUpper => kick(1.67, 0.23, 0.47),
                 Clip::Strike | Clip::StrikeLeft => kick(1.3, 0.27, 0.41),
                 Clip::PenaltyKick => kick(1.5, 0.6, 0.74),
                 Clip::Dribble => kick(1.73, 0.3, 0.45),
