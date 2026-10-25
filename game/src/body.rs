@@ -249,6 +249,8 @@ struct Clips {
     /// Lock move's stance, and with the ball the right sole on it.
     lock: Pose,
     sole: Pose,
+    /// Lock move's braking crouch as you turn to go back, added on top.
+    brake: Pose,
     dash_front: OneShot,
     dash_side: OneShot,
     dash_back: OneShot,
@@ -589,6 +591,24 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         (FOOT_R, [-41.0, 0.0, -9.0]),
     ]);
     let lock_right = Clip { keys: [reach, wide, gather, narrow], speed: LOCK_SPEED, duration: 1.0 / LOCK_SIDE_SHUFFLES, flight: 0.015 };
+    // Turning to go back (Kev's recording): you sink much deeper, the hips swing round to the left
+    // and the shoulders lean over the knees, then come up into the backpedal. Added on top.
+    let brake = Pose::default().with(&[
+        (PELVIS, [0.0, 22.0, 0.0]),
+        (SPINE_J, [12.0, -6.0, 0.0]),
+        (CHEST_J, [4.0, -8.0, 0.0]),
+        (NECK_J, [-10.0, 0.0, 0.0]),
+        (THIGH_L, [16.0, 0.0, 0.0]),
+        (SHIN_L, [34.0, 0.0, 0.0]),
+        (FOOT_L, [-18.0, 0.0, 0.0]),
+        (THIGH_R, [16.0, 0.0, 0.0]),
+        (SHIN_R, [34.0, 0.0, 0.0]),
+        (FOOT_R, [-18.0, 0.0, 0.0]),
+        (UPPER_L, [10.0, 0.0, -8.0]),
+        (FORE_L, [10.0, 0.0, 0.0]),
+        (UPPER_R, [10.0, 0.0, 8.0]),
+        (FORE_R, [10.0, 0.0, 0.0]),
+    ]);
 
     // A shot (the right foot): the leg cocks far back with the hips turned away and the left arm
     // thrown out; the hips whip round through the ball with the body over it; the leg swings on up
@@ -1294,6 +1314,7 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         roulette,
         lock,
         sole,
+        brake,
         dash_front,
         dash_side,
         dash_back,
@@ -1407,6 +1428,8 @@ pub struct Animator {
     /// The roulette's spin (degrees), and the sole-on-the-ball weight.
     spin: f32,
     sole: f32,
+    /// Lock move's braking crouch, eased (0..1).
+    brake: f32,
     move_w: f32,
     move_mirror: bool,
     move_t: f32,
@@ -1633,6 +1656,15 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
                 pose.0[j].z = rest.z + (pose.0[j].z - rest.z) * stride;
             }
         }
+    }
+
+    // Lock move: asking to go back, you brake in a deep crouch until you're backing away.
+    let wants_back = (root.rotation.inverse() * p.last_input).z > 0.5;
+    let braking = p.locked && wants_back && local.z < LOCK_BRAKE_UNTIL * LOCK_SPEED;
+    anim.brake = if braking { (anim.brake + dt / LOCK_BRAKE_IN).min(1.0) } else { (anim.brake - dt / LOCK_BRAKE_OUT).max(0.0) };
+    if anim.brake > 0.0 {
+        let w = anim.brake * anim.brake * (3.0 - 2.0 * anim.brake);
+        pose = pose.plus(&Pose(clips.brake.0.map(|a| a * w)));
     }
 
     if let Some(t) = anim.trans {

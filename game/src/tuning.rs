@@ -193,6 +193,11 @@ pub const LOCK_BALL_SPEED_BY_ANGLE: [(f32, f32); 4] = [(0.0, 1.0), (90.0, 0.95),
 pub const LOCK_SIDE_SHUFFLES: f32 = 2.4;
 pub const LOCK_FORWARD_STEPS: f32 = 4.4;
 pub const LOCK_BACK_STEPS: f32 = 6.0;
+/// Asking to go back in lock move, you drop into a short braking crouch (Kev's recording: about
+/// 0.3 s): in over this long, and out over this long once you back away at this share of lock speed.
+pub const LOCK_BRAKE_IN: f32 = 0.08;
+pub const LOCK_BRAKE_OUT: f32 = 0.2;
+pub const LOCK_BRAKE_UNTIL: f32 = 0.6;
 // Dash (mechanics.md §8): speed (m/s) over the seconds since the press. The game's curves are in
 // seconds: their keys fall on the dash's events (blend-in 6f, after-dash 14f, second dash free 42f).
 /// When you're free (the dash animation's blend-out), by sector: forward, side, back.
