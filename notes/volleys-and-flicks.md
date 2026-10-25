@@ -995,6 +995,34 @@ is one; anything else is a guess marked TUNE in `tuning.rs`.
 - **Not built:** the shot's pitch-by-force curve and its against-the-run penalty (the prototype's
   normal shot has neither); the analog trigger's slower fill (our input is digital).
 
+### 11.7 All the guesses, and what is left
+**Guesses (each marked TUNE in `tuning.rs` or here):**
+- the flicks show no kick marker, like the push-ball family;
+- the flick sounds like a lob, not at full;
+- every pose of the six moves is ours (plant and scoop, the touches, the jumping header, the scissor);
+- where each body part meets the ball (`VOLLEY_CONTACT`), the 0.15 s set before a touch, the jump's
+  window (16f before to 22f after) and height (to reach 1.35 m chest or 1.75 m head, 0.15-0.8 m);
+- the jumping push and flick take the ball with the chest up to 2.4 m, the head higher;
+- the volley target's choice (closest to your pace, preferring 0.4-0.6 s);
+- the volleys' charge time axis read as seconds (full at 0.25 s);
+- the 30% you slow to through a volley pass's or shot's recovery, and the scissor's quicker get-up;
+- a volley misses if the ball is more than 1 m from where it was to be met;
+- standing, a volley shot above 2.5 m is the jumping head (the data's fallback is the moving foot
+  volley).
+
+**What is left:**
+- the exhausted volley push ball's own data (it uses the normal one's);
+- the jumping push and flick's height force modifier (BP_FarVolleyControl, not read);
+- the kicker's low priority on his own volley flick, refusals and their red flash, the off-screen HUD
+  diamond;
+- the low-power volley pass and the volley lob (other abilities, not asked for);
+- the analog trigger's fill for volley shots;
+- a tune pass with Kev against his recordings: flick height and distance, volley timing, jump heights.
+
+**Strips (scratchpad, headless):** `vf_flick`, `vf_flick_side`, `vf_dribble_flick`, `vf_volley_push`,
+`vf_volley_flick`, `vf_volley_pass`, `vf_volley_pass_high`, `vf_volley_header`, `vf_volley_shot`,
+`vf_volley_scissor`.
+
 ## Sources
 **Extracted game files** (`RE Rematch (main)/tools/rmx/out` and `out_bp`):
 - **Abilities:** `GA_VolleyBaseShoot`, `GA_VolleyShoot`, `GA_VolleyTap` (+ `_LowPower`),
