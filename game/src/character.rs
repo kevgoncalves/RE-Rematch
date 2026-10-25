@@ -21,13 +21,21 @@
 //! The gameplay timings are the source of truth: nothing here feeds back into the game. On top, as
 //! in the procedural body: the lean into turns, the lower body turning toward the velocity, the
 //! kick turning toward its target, the trunk leaning on as stamina drops.
+//!
+//! The look is Rematch's (Kev): the glb's flat colours per region, cel shaded in soft bands with a
+//! rim light (assets/shaders/toon.wgsl) and a thin outline (an inverted hull,
+//! assets/shaders/outline.wgsl); the shirt, shorts and socks take the team's `Kit`. A realistic glb
+//! (`--style real`) keeps its textures and Bevy's own shading.
 
 use bevy::animation::AnimationTarget;
 use bevy::app::Animation;
 use bevy::asset::io::file::FileAssetReader;
-use bevy::gltf::Gltf;
+use bevy::gltf::{Gltf, GltfMaterialName};
+use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPipeline, MaterialPipelineKey, NotShadowCaster};
 use bevy::prelude::*;
+use bevy::render::mesh::MeshVertexBufferLayoutRef;
 use bevy::render::mesh::skinning::SkinnedMesh;
+use bevy::render::render_resource::{AsBindGroup, Face, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError};
 use bevy::render::view::NoFrustumCulling;
 use serde::Deserialize;
 
@@ -774,9 +782,13 @@ pub struct CharacterPlugin;
 
 impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MixState>()
+        app.add_plugins((
+            MaterialPlugin::<ToonMaterial>::default(),
+            MaterialPlugin::<OutlineMaterial> { prepass_enabled: false, shadows_enabled: false, ..default() },
+        ))
+        .init_resource::<MixState>()
             .add_systems(Startup, cheats_from_env)
-            .add_systems(Update, (load, bind, show).chain())
+            .add_systems(Update, (load, bind, dress, paint, show).chain())
             .add_systems(PostUpdate, (drive.before(Animation), adjust.after(Animation).before(TransformSystem::TransformPropagate)));
     }
 }
@@ -812,6 +824,116 @@ struct Character {
 
 #[derive(Component)]
 struct CharacterRoot;
+
+/// A team's kit: the character's shirt, shorts and socks take these colours. Set another on the
+/// character's root for the other team (`RE_KIT=red` starts in the red one).
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct Kit {
+    pub shirt: Color,
+    pub shorts: Color,
+    pub socks: Color,
+}
+
+impl Kit {
+    /// The prototype's kit (Kev): royal blue shirt, navy shorts, white socks.
+    pub const BLUE: Kit = Kit { shirt: Color::srgb(0.10, 0.30, 0.85), shorts: Color::srgb(0.05, 0.10, 0.32), socks: Color::srgb(0.92, 0.92, 0.90) };
+    /// The scoreboard's other side.
+    pub const RED: Kit = Kit { shirt: Color::srgb(0.85, 0.15, 0.15), shorts: Color::srgb(0.95, 0.95, 0.95), socks: Color::srgb(0.85, 0.15, 0.15) };
+}
+
+/// The toon character's regions, by their material's name in the glb.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+enum Part {
+    Skin,
+    Hair,
+    Shirt,
+    Shorts,
+    Socks,
+    Boots,
+    Other,
+}
+
+impl Part {
+    fn of(material: &str) -> Part {
+        match material {
+            "skin" => Part::Skin,
+            "hair" => Part::Hair,
+            "shirt" => Part::Shirt,
+            "shorts" => Part::Shorts,
+            "socks" => Part::Socks,
+            "boots" => Part::Boots,
+            _ => Part::Other,
+        }
+    }
+
+    /// The kit's colour for the part; the others keep the glb's.
+    fn colour(self, kit: &Kit) -> Option<Color> {
+        match self {
+            Part::Shirt => Some(kit.shirt),
+            Part::Shorts => Some(kit.shorts),
+            Part::Socks => Some(kit.socks),
+            _ => None,
+        }
+    }
+}
+
+/// The cel shading on top of the glb's flat colours (assets/shaders/toon.wgsl).
+pub type ToonMaterial = ExtendedMaterial<StandardMaterial, Toon>;
+
+#[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
+pub struct Toon {
+    /// The shade band's share of the sun, the middle band's, the N.L where the lit band starts,
+    /// and how soft the steps are.
+    #[uniform(100)]
+    bands: Vec4,
+    /// The rim's colour (times the sun) and how far in from the silhouette it reaches.
+    #[uniform(101)]
+    rim: Vec4,
+}
+
+impl Default for Toon {
+    fn default() -> Self {
+        Self { bands: Vec4::new(0.3, 0.68, 0.4, 0.05), rim: Vec4::new(0.35, 0.35, 0.38, 0.32) }
+    }
+}
+
+impl MaterialExtension for Toon {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/toon.wgsl".into()
+    }
+}
+
+/// The character's outline: an inverted hull (assets/shaders/outline.wgsl).
+#[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
+pub struct OutlineMaterial {
+    #[uniform(0)]
+    colour: LinearRgba,
+    /// Metres out per metre from the camera, and the distances that's clamped to.
+    #[uniform(1)]
+    width: Vec4,
+}
+
+impl Default for OutlineMaterial {
+    fn default() -> Self {
+        Self { colour: Color::srgb(0.04, 0.04, 0.06).into(), width: Vec4::new(0.0024, 1.5, 12.0, 0.0) }
+    }
+}
+
+impl Material for OutlineMaterial {
+    fn vertex_shader() -> ShaderRef {
+        "shaders/outline.wgsl".into()
+    }
+
+    fn fragment_shader() -> ShaderRef {
+        "shaders/outline.wgsl".into()
+    }
+
+    fn specialize(_: &MaterialPipeline<Self>, descriptor: &mut RenderPipelineDescriptor, _: &MeshVertexBufferLayoutRef, _: MaterialPipelineKey<Self>) -> Result<(), SpecializedMeshPipelineError> {
+        // The back faces only: the hull shows just past the silhouette.
+        descriptor.primitive.cull_mode = Some(Face::Front);
+        Ok(())
+    }
+}
 
 /// On the character's animation player: its nodes and the bones the touches turn.
 #[derive(Component)]
@@ -851,8 +973,9 @@ fn load(
         Ok(_) => return warn!("No {GLB}: run tools/mixamo_to_glb.py in Blender to make it"),
         Err(e) => return warn!("No character: {SIDECAR}: {e} (run tools/mixamo_to_glb.py in Blender)"),
     };
+    let kit = if std::env::var("RE_KIT").is_ok_and(|k| k == "red") { Kit::RED } else { Kit::BLUE };
     let root = commands
-        .spawn((CharacterRoot, SceneRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(GLB))), Transform::from_xyz(0.0, FEET, 0.0), Visibility::Hidden))
+        .spawn((CharacterRoot, kit, SceneRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(GLB))), Transform::from_xyz(0.0, FEET, 0.0), Visibility::Hidden))
         .id();
     commands.entity(*player).add_child(root);
     commands.insert_resource(Character { gltf: assets.load(GLB), metas, root });
@@ -860,19 +983,15 @@ fn load(
 
 /// Once the scene is in: the graph (one node per clip and slot under the root, the legs a mask
 /// group the upper-body clips leave out), every node playing at weight 0 with its time set by
-/// hand, the skinned meshes never culled (their bounds are the bind pose's) and the hair cut out
-/// rather than blended.
-#[allow(clippy::too_many_arguments)]
+/// hand.
 fn bind(
     mut commands: Commands,
     character: Option<Res<Character>>,
     gltfs: Res<Assets<Gltf>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     mut players: Query<(Entity, &mut AnimationPlayer), Without<Rig>>,
     children: Query<&Children>,
     names: Query<(&Name, Option<&AnimationTarget>)>,
-    meshes: Query<(Option<&SkinnedMesh>, Option<&MeshMaterial3d<StandardMaterial>>)>,
 ) {
     let Some(character) = character else { return };
     let Some(gltf) = gltfs.get(&character.gltf) else { return };
@@ -909,17 +1028,74 @@ fn bind(
             player.play(*node).set_weight(0.0).pause();
         }
         commands.entity(entity).insert((AnimationGraphHandle(graphs.add(graph)), Rig { nodes, hips, spine, chest }));
-        for e in children.iter_descendants(character.root) {
-            let Ok((skinned, material)) = meshes.get(e) else { continue };
-            if skinned.is_some() {
-                commands.entity(e).insert(NoFrustumCulling);
+    }
+}
+
+/// A mesh as the glb's scene spawns it.
+type GltfMesh = (&'static Mesh3d, &'static MeshMaterial3d<StandardMaterial>, Option<&'static GltfMaterialName>, Option<&'static SkinnedMesh>);
+
+/// Once the scene is in, its meshes: the flat-coloured toon character (tools/mixamo_to_glb.py's
+/// default) gets the cel shading, its kit's colours and an outline; the realistic one keeps its
+/// textures, with the hair cut out rather than blended. The skinned meshes are never culled (their
+/// bounds are the bind pose's).
+#[allow(clippy::too_many_arguments)]
+fn dress(
+    mut commands: Commands,
+    character: Option<Res<Character>>,
+    kits: Query<&Kit>,
+    mut standard: ResMut<Assets<StandardMaterial>>,
+    mut toons: ResMut<Assets<ToonMaterial>>,
+    mut outlines: ResMut<Assets<OutlineMaterial>>,
+    children: Query<&Children>,
+    meshes: Query<GltfMesh, Without<Part>>,
+) {
+    let Some(character) = character else { return };
+    let kit = kits.get(character.root).copied().unwrap_or(Kit::BLUE);
+    let mut parts: Vec<(Part, Handle<ToonMaterial>)> = vec![];
+    let mut outline = None;
+    for e in children.iter_descendants(character.root) {
+        let Ok((mesh, material, name, skinned)) = meshes.get(e) else { continue };
+        let Some(base) = standard.get_mut(&material.0) else { continue };
+        if skinned.is_some() {
+            commands.entity(e).insert(NoFrustumCulling);
+        }
+        let part = Part::of(name.map_or("", |n| n.0.as_str()));
+        if base.base_color_texture.is_some() || part == Part::Other {
+            if matches!(base.alpha_mode, AlphaMode::Blend) {
+                base.alpha_mode = AlphaMode::Mask(0.4);
+                base.double_sided = true;
+                base.cull_mode = None;
             }
-            if let Some(m) = material.and_then(|m| materials.get_mut(&m.0))
-                && matches!(m.alpha_mode, AlphaMode::Blend)
+            commands.entity(e).insert(Part::Other);
+            continue;
+        }
+        let toon = match parts.iter().find(|(p, _)| *p == part) {
+            Some((_, h)) => h.clone(),
+            None => {
+                let mut base = base.clone();
+                base.base_color = part.colour(&kit).unwrap_or(base.base_color);
+                let h = toons.add(ToonMaterial { base, extension: Toon::default() });
+                parts.push((part, h.clone()));
+                h
+            }
+        };
+        commands.entity(e).remove::<MeshMaterial3d<StandardMaterial>>().insert((part, MeshMaterial3d(toon)));
+        if let Some(skinned) = skinned {
+            let outline = outline.get_or_insert_with(|| outlines.add(OutlineMaterial::default())).clone();
+            commands.entity(e).with_child((mesh.clone(), skinned.clone(), MeshMaterial3d(outline), NotShadowCaster, NoFrustumCulling));
+        }
+    }
+}
+
+/// A kit changed (another team's): its parts take the new colours.
+fn paint(kits: Query<(Entity, &Kit), Changed<Kit>>, children: Query<&Children>, parts: Query<(&Part, &MeshMaterial3d<ToonMaterial>)>, mut toons: ResMut<Assets<ToonMaterial>>) {
+    for (root, kit) in &kits {
+        for e in children.iter_descendants(root) {
+            if let Ok((part, material)) = parts.get(e)
+                && let Some(colour) = part.colour(kit)
+                && let Some(m) = toons.get_mut(&material.0)
             {
-                m.alpha_mode = AlphaMode::Mask(0.4);
-                m.double_sided = true;
-                m.cull_mode = None;
+                m.base.base_color = colour;
             }
         }
     }
@@ -1183,6 +1359,16 @@ mod tests {
         }
         assert!(steps.iter().all(|s| *s <= dt + 1e-5), "never faster than the clip's own speed");
         assert!((t - meta.contact.unwrap()).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_kit_colours_the_shirt_shorts_and_socks_only() {
+        assert_eq!(Part::of("shirt").colour(&Kit::RED), Some(Kit::RED.shirt));
+        assert_eq!(Part::of("shorts").colour(&Kit::BLUE), Some(Kit::BLUE.shorts));
+        assert_eq!(Part::of("socks").colour(&Kit::RED), Some(Kit::RED.socks));
+        for part in ["skin", "hair", "boots", "Ch38_body"] {
+            assert_eq!(Part::of(part).colour(&Kit::RED), None, "{part}");
+        }
     }
 
     #[test]
