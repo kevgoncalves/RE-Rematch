@@ -341,6 +341,10 @@ pub const PASS_AFTER_TOUCH: f32 = 45.0 / 60.0;
 /// ends: can act moving at 45f, so 25f after a low-power shot's contact (Kev wants a power shot to
 /// slide as long).
 pub const SHOT_AFTER_TOUCH: f32 = 25.0 / 60.0;
+/// After a shot, pass or lob's touch the drag carries you on its way until here before the stick
+/// can turn you (the stick held its own way leaves it at once): a pass can act moving 15f after its
+/// contact, a power shot 13f (the game's frame data; Kev: turning in the follow-through was wrong).
+pub const KICK_TURN_FREE: f32 = 15.0 / 60.0;
 /// Extra shot speed from your own speed (ShootForceByCharaSpeed, m/s), scaled by how strong the
 /// shot is: none up to 27.85 m/s, all of it from 38 m/s (ModifierRatioFromShootForce).
 pub const SHOT_FORCE_BY_RUN_SPEED: [(f32, f32); 3] = [(0.0, 0.0), (6.0, 1.25), (9.5, 4.0)];

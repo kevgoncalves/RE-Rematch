@@ -826,7 +826,12 @@ pub fn player_move(
         p.vel = r.dir * curve(speeds, (r.t / r.length).min(1.0)) * r.scale;
         // Once free, steering within the turn limit leaves the chase at once; with no stick or a
         // sharper turn it runs on to the blend-out (responsiveness.md §5).
-        let exit = r.t >= r.free_at && wish != Vec3::ZERO && r.dir.angle_between(wish).to_degrees() <= r.exit;
+        let off = if wish == Vec3::ZERO { f32::INFINITY } else { r.dir.angle_between(wish).to_degrees() };
+        // A kick's drag lets the stick held its own way go at once (no turn shows); any other way
+        // waits for it to free you (Kev: turning to the stick mid follow-through lost the run and
+        // faced the wrong way).
+        let straight_on = r.soft && r.tables.is_none() && off <= RUN_TURN_LIMIT;
+        let exit = straight_on || (r.t >= r.free_at && off <= r.exit);
         p.run = (r.t < r.length && !exit).then_some(r);
         if p.run.is_none() {
             if r.soft {
@@ -1596,13 +1601,12 @@ pub fn kicking(
     p.freeze = ball.freeze;
     if k.kind == Kick::Shot {
         let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
-        p.run = Some(Run { t: 0.0, length: SHOT_AFTER_TOUCH, free_at: 0.0, dir: Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: speed, exit: 180.0, soft: true, face: None });
+        p.run = Some(Run { t: 0.0, length: SHOT_AFTER_TOUCH, free_at: KICK_TURN_FREE, dir: Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: speed, exit: 180.0, soft: true, face: None });
     }
-    // After the touch a pass or lob keeps dragging you until its move interrupt. Either drag only
-    // lasts while you leave the stick alone: any stick hands you back at once (Kev: held on, they
-    // felt stuck).
+    // After the touch a pass or lob keeps dragging you until its move interrupt. Either drag lets
+    // the stick held its own way go at once; any other way turns you only from KICK_TURN_FREE.
     if let Some(drag) = pass_drag(&k) {
-        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: 0.0, dir: Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or(drag.normalize()), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: drag.length(), exit: 180.0, soft: true, face: None });
+        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: KICK_TURN_FREE, dir: Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or(drag.normalize()), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: drag.length(), exit: 180.0, soft: true, face: None });
     }
     if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) {
         p.own_push = 0.0;
