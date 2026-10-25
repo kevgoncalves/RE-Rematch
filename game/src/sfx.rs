@@ -1,13 +1,10 @@
-//! Sound effects. Every sound is synthesised here at startup from noise, filters and decaying
-//! sines: no audio files. Which sound plays when follows the game's trigger rules (notes/sfx.md);
-//! the sounds themselves are ours.
+//! Sound effects from Kenney's Impact Sounds (CC0, assets/sfx). Which sound plays when follows
+//! the game's trigger rules (notes/sfx.md); each sound is one or more samples at a set volume and
+//! playback speed, a random take of five each time.
 
 use std::collections::HashMap;
-use std::f32::consts::{PI, TAU};
-use std::sync::Arc;
-use std::time::Duration;
 
-use bevy::audio::{AddAudioSource, Source, Volume};
+use bevy::audio::Volume;
 use bevy::prelude::*;
 
 use crate::ball::{self, Ball, GoalScored};
@@ -18,9 +15,8 @@ pub struct SfxPlugin;
 
 impl Plugin for SfxPlugin {
     fn build(&self, app: &mut App) {
-        app.add_audio_source::<Synth>()
-            .init_resource::<SfxSettings>()
-            .add_systems(Startup, build_bank)
+        app.init_resource::<SfxSettings>()
+            .add_systems(Startup, load_bank)
             .add_systems(Update, (follow_volumes, listen.after(ball::ball_physics), reap));
     }
 }
@@ -81,7 +77,7 @@ pub enum Pace {
     Rush,
 }
 
-/// How hard the ball lands.
+/// How hard the ball hits the grass or a wall.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Hit {
     Light,
@@ -97,62 +93,110 @@ pub enum Sound {
     PushBall,
     /// A touch running with the ball.
     Touch,
-    FakeShot,
     Control(Height),
     Dribble { tired: bool },
     Dash,
-    EffortOn,
-    EffortOff,
     Step(Pace),
     Bounce(Hit),
-    Wall,
+    Wall(Hit),
     Post,
     Net,
-    Goal,
-    /// The crowd's gasp at a shot off the frame.
-    Ooh,
+}
+
+/// A family of samples in assets/sfx: five takes of one Kenney sound.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum Sample {
+    PunchHeavy,
+    PunchMedium,
+    SoftHeavy,
+    SoftMedium,
+    PlateLight,
+    PlateMedium,
+    PlateHeavy,
+    MetalHeavy,
+    BellHeavy,
+    Grass,
+}
+
+impl Sample {
+    const ALL: [Sample; 10] = [
+        Sample::PunchHeavy,
+        Sample::PunchMedium,
+        Sample::SoftHeavy,
+        Sample::SoftMedium,
+        Sample::PlateLight,
+        Sample::PlateMedium,
+        Sample::PlateHeavy,
+        Sample::MetalHeavy,
+        Sample::BellHeavy,
+        Sample::Grass,
+    ];
+    const TAKES: usize = 5;
+
+    fn name(self) -> &'static str {
+        match self {
+            Sample::PunchHeavy => "impactPunch_heavy",
+            Sample::PunchMedium => "impactPunch_medium",
+            Sample::SoftHeavy => "impactSoft_heavy",
+            Sample::SoftMedium => "impactSoft_medium",
+            Sample::PlateLight => "impactPlate_light",
+            Sample::PlateMedium => "impactPlate_medium",
+            Sample::PlateHeavy => "impactPlate_heavy",
+            Sample::MetalHeavy => "impactMetal_heavy",
+            Sample::BellHeavy => "impactBell_heavy",
+            Sample::Grass => "footstep_grass",
+        }
+    }
+
+    fn path(self, take: usize) -> String {
+        format!("sfx/{}_{take:03}.ogg", self.name())
+    }
 }
 
 impl Sound {
-    fn all() -> Vec<Sound> {
-        let mut all = Vec::new();
-        for power in [Power::Low, Power::Mid, Power::High] {
-            all.extend([Spin::Flat, Spin::Top, Spin::Down].map(|spin| Sound::Shot(power, spin)));
-        }
-        all.extend([Sound::Pass { max: false }, Sound::Pass { max: true }, Sound::Lob { max: false }, Sound::Lob { max: true }]);
-        all.extend([Sound::PushBall, Sound::Touch, Sound::FakeShot]);
-        all.extend([Height::Foot, Height::Knee, Height::Chest].map(Sound::Control));
-        all.extend([Sound::Dribble { tired: false }, Sound::Dribble { tired: true }, Sound::Dash, Sound::EffortOn, Sound::EffortOff]);
-        all.extend([Pace::Walk, Pace::Run, Pace::Rush].map(Sound::Step));
-        all.extend([Hit::Light, Hit::Medium, Hit::Strong].map(Sound::Bounce));
-        all.extend([Sound::Wall, Sound::Post, Sound::Net, Sound::Goal, Sound::Ooh]);
-        all
-    }
-
-    /// How loud it plays at full strength (every sound is rendered to the same peak).
-    fn level(self) -> f32 {
+    /// The samples it plays together: (sample, volume, playback speed). Speed is pitch too: a shot's
+    /// topspin plays higher, its downspin lower.
+    fn layers(self) -> Vec<(Sample, f32, f32)> {
+        use Sample::*;
         match self {
-            Sound::Shot(Power::Low, _) => 0.55,
-            Sound::Shot(Power::Mid, _) => 0.75,
-            Sound::Shot(Power::High, _) => 0.95,
-            Sound::Pass { max } | Sound::Lob { max } => if max { 0.75 } else { 0.5 },
-            Sound::PushBall => 0.4,
-            Sound::Touch => 0.18,
-            Sound::FakeShot => 0.3,
-            Sound::Control(_) => 0.45,
-            Sound::Dribble { .. } => 0.35,
-            Sound::Dash => 0.4,
-            Sound::EffortOn => 0.4,
-            Sound::EffortOff => 0.25,
-            Sound::Step(_) => 0.15,
-            Sound::Bounce(Hit::Light) => 0.25,
-            Sound::Bounce(Hit::Medium) => 0.4,
-            Sound::Bounce(Hit::Strong) => 0.55,
-            Sound::Wall => 0.55,
-            Sound::Post => 0.7,
-            Sound::Net => 0.45,
-            Sound::Goal => 0.7,
-            Sound::Ooh => 0.5,
+            Sound::Shot(power, spin) => {
+                let pitch = match spin {
+                    Spin::Flat => 1.0,
+                    Spin::Top => 1.12,
+                    Spin::Down => 0.89,
+                };
+                match power {
+                    Power::Low => vec![(PunchMedium, 0.6, 1.1 * pitch)],
+                    Power::Mid => vec![(PunchMedium, 0.85, pitch), (SoftMedium, 0.35, 0.9)],
+                    Power::High => vec![(PunchHeavy, 1.0, 0.95 * pitch), (SoftHeavy, 0.6, 0.9)],
+                }
+            }
+            Sound::Pass { max: false } => vec![(SoftMedium, 0.6, 1.05)],
+            Sound::Pass { max: true } => vec![(SoftHeavy, 0.75, 1.1), (PunchMedium, 0.4, 1.3)],
+            Sound::Lob { max: false } => vec![(SoftMedium, 0.6, 0.85)],
+            Sound::Lob { max: true } => vec![(SoftHeavy, 0.75, 0.9), (PunchMedium, 0.4, 1.1)],
+            Sound::PushBall => vec![(SoftMedium, 0.5, 1.25)],
+            Sound::Touch => vec![(SoftMedium, 0.25, 1.45)],
+            Sound::Control(Height::Foot) => vec![(SoftMedium, 0.6, 0.95)],
+            Sound::Control(Height::Knee) => vec![(SoftMedium, 0.55, 1.2)],
+            Sound::Control(Height::Chest) => vec![(SoftHeavy, 0.6, 0.85)],
+            // A dribble's cut and a dash plant a foot hard.
+            Sound::Dribble { tired: false } => vec![(Grass, 0.7, 1.1)],
+            Sound::Dribble { tired: true } => vec![(Grass, 0.5, 0.9)],
+            Sound::Dash => vec![(Grass, 0.8, 0.95)],
+            Sound::Step(Pace::Walk) => vec![(Grass, 0.3, 0.95)],
+            Sound::Step(Pace::Run) => vec![(Grass, 0.4, 1.0)],
+            Sound::Step(Pace::Rush) => vec![(Grass, 0.5, 1.05)],
+            Sound::Bounce(Hit::Light) => vec![(SoftMedium, 0.35, 1.15)],
+            Sound::Bounce(Hit::Medium) => vec![(SoftMedium, 0.6, 1.0)],
+            Sound::Bounce(Hit::Strong) => vec![(SoftHeavy, 0.8, 1.0)],
+            // A wall panel and the ball's thud on it.
+            Sound::Wall(Hit::Light) => vec![(PlateLight, 0.5, 1.0), (SoftMedium, 0.4, 1.1)],
+            Sound::Wall(Hit::Medium) => vec![(PlateMedium, 0.7, 1.0), (SoftMedium, 0.5, 1.0)],
+            Sound::Wall(Hit::Strong) => vec![(PlateHeavy, 0.9, 1.0), (SoftHeavy, 0.5, 1.0)],
+            Sound::Post => vec![(MetalHeavy, 0.9, 1.0), (BellHeavy, 0.4, 1.0)],
+            // The net: a low, soft catch and a rustle (a grass step slowed down).
+            Sound::Net => vec![(SoftHeavy, 0.5, 0.75), (Grass, 0.6, 0.7)],
         }
     }
 
@@ -170,8 +214,6 @@ const SPIN_MIN: f32 = 40.0;
 const BOUNCE_MIN: f32 = 1.0;
 /// A surface that just sounded stays quiet this long, so a ball wedged in a corner doesn't buzz.
 const REST: f32 = 0.08;
-/// The crowd gasps at most this often (the game's shocked reaction cooldown).
-const OOH_COOLDOWN: f32 = 5.0;
 /// Steps per second by your speed (m/s).
 const STRIDE_RATE: [(f32, f32); 5] = [(1.0, 1.6), (2.5, 2.0), (5.0, 2.7), (8.0, 3.3), (9.5, 3.6)];
 const STEP_MIN_SPEED: f32 = 0.5;
@@ -249,6 +291,17 @@ pub fn bounce_hit(fall: f32) -> Hit {
     }
 }
 
+/// By how fast the ball went into the wall.
+pub fn wall_hit(into: f32) -> Hit {
+    if into >= 16.0 {
+        Hit::Strong
+    } else if into >= 8.0 {
+        Hit::Medium
+    } else {
+        Hit::Light
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Surface {
     Wall,
@@ -305,14 +358,11 @@ struct Seen {
     control: Option<(f32, f32)>,
     dribble: Option<f32>,
     dash: Option<(f32, bool)>,
-    effort: bool,
     carry: Option<(f32, f32)>,
     /// The stride clock: a step at each whole one.
     stride: f32,
-    /// Seconds since the grass, a wall, the goal frame and an extra-effort touch last sounded, and
-    /// since the crowd last gasped.
+    /// Seconds since the grass, a wall, the goal frame and an extra-effort touch last sounded.
     rest: [f32; 4],
-    ooh: f32,
     played: u32,
 }
 
@@ -339,17 +389,16 @@ fn listen(
     if seen.ready {
         // Our goal resets the ball before it reaches the net, so the net sounds with the goal.
         if scored {
-            cues.extend([(Sound::Net, 0.8), (Sound::Goal, 1.0)]);
+            cues.push((Sound::Net, 1.0));
         }
 
-        // A kick: the ball leaves your foot. A shot dropped while charging, the ball still yours,
-        // is a fake shot.
-        if let Some(k) = seen.kick.filter(|_| p.kick.is_none()) {
-            if seen.held && !b.held {
-                cues.push(kick_sound(k.kind, k.held, b.vel.length(), b.spin));
-            } else if b.held && k.kind == Kick::Shot && !k.released {
-                cues.push((Sound::FakeShot, 1.0));
-            }
+        // A kick: the ball leaves your foot.
+        if let Some(k) = seen.kick
+            && p.kick.is_none()
+            && seen.held
+            && !b.held
+        {
+            cues.push(kick_sound(k.kind, k.held, b.vel.length(), b.spin));
         }
 
         // A control sounds as the ball becomes yours (the game's ownership change), by the ball's
@@ -362,7 +411,7 @@ fn listen(
             cues.push((Sound::Control(control_height(y)), 0.35 + 0.65 * (speed / 25.0).min(1.0)));
         }
 
-        // Moves: a dribble (not the one a dash turns into on the ball), a dash, extra effort.
+        // Moves: a dribble (not the one a dash turns into on the ball), a dash.
         if let Some(d) = p.dribble
             && seen.dribble.is_none_or(|t| d.t < t)
             && seen.dash.is_none()
@@ -373,9 +422,6 @@ fn listen(
             && seen.dash.is_none_or(|(t, second)| d.t < t || d.second != second)
         {
             cues.push((Sound::Dash, 1.0));
-        }
-        if p.extra_active != seen.effort {
-            cues.push((if p.extra_active { Sound::EffortOn } else { Sound::EffortOff }, 1.0));
         }
 
         // Running with the ball: each touch, when the carry's next touch came due.
@@ -417,15 +463,11 @@ fn listen(
                 match surface(seen.pos, pos) {
                     Some(Surface::Wall) if into > 1.2 && seen.rest[1] > REST => {
                         seen.rest[1] = 0.0;
-                        cues.push((Sound::Wall, far * (0.2 + 0.8 * into / 25.0).min(1.0)));
+                        cues.push((Sound::Wall(wall_hit(into)), far * (0.2 + 0.8 * into / 25.0).min(1.0)));
                     }
                     Some(Surface::Post) if into > 1.0 && seen.rest[2] > REST => {
                         seen.rest[2] = 0.0;
                         cues.push((Sound::Post, far * (0.35 + 0.65 * into / 25.0).min(1.0)));
-                        if into > 8.0 && seen.ooh > OOH_COOLDOWN {
-                            seen.ooh = 0.0;
-                            cues.push((Sound::Ooh, 1.0));
-                        }
                     }
                     // Extra effort knocking the ball on.
                     None if p.extra_active && near_you && seen.rest[3] > 0.25 => {
@@ -436,8 +478,6 @@ fn listen(
                 }
             }
         }
-    } else {
-        seen.ooh = f32::INFINITY;
     }
 
     seen.ready = true;
@@ -452,466 +492,87 @@ fn listen(
     }
     seen.dribble = p.dribble.map(|d| d.t);
     seen.dash = p.dash.map(|d| (d.t, d.second));
-    seen.effort = p.extra_active;
     seen.carry = p.carry.map(|c| (c.start, c.next));
     for rest in &mut seen.rest {
         *rest += dt;
     }
-    seen.ooh += dt;
 
     if bank.mute || !settings.on {
         return;
     }
     for (sound, gain) in cues {
-        let Some(handle) = bank.sounds.get(&sound) else { continue };
-        seen.played = seen.played.wrapping_add(1);
-        let random = ((seen.played as f32 * 12.9898).sin() * 43758.545).fract().abs();
-        let pitch = if sound.varies() { 0.97 + 0.06 * random } else { 1.0 };
-        let volume = Volume::Linear(sound.level() * gain * settings.volume);
-        commands.spawn((AudioPlayer(handle.clone()), PlaybackSettings::DESPAWN.with_volume(volume).with_speed(pitch), Voice(0)));
+        for (sample, volume, speed) in sound.layers() {
+            seen.played = seen.played.wrapping_add(1);
+            let random = ((seen.played as f32 * 12.9898).sin() * 43758.545).fract().abs();
+            let Some(takes) = bank.samples.get(&sample) else { continue };
+            let take = takes[(random * takes.len() as f32) as usize % takes.len()].clone();
+            let jitter = if sound.varies() { 0.97 + 0.06 * (random * 7.0).fract() } else { 1.0 };
+            let volume = Volume::Linear(volume * gain * settings.volume);
+            commands.spawn((AudioPlayer(take), PlaybackSettings::DESPAWN.with_volume(volume).with_speed(speed * jitter), Voice(0)));
+        }
     }
 }
 
-/// Every sound, rendered once at startup; and whether to play them at all (not in a headless test
+/// Every sample's takes, loaded at startup; and whether to play them at all (not in a headless test
 /// run, nor without an audio output).
 #[derive(Resource)]
 struct Bank {
-    sounds: HashMap<Sound, Handle<Synth>>,
+    samples: HashMap<Sample, Vec<Handle<AudioSource>>>,
     mute: bool,
 }
 
-fn build_bank(mut commands: Commands, mut synths: ResMut<Assets<Synth>>) {
-    let sounds = Sound::all().into_iter().map(|s| (s, synths.add(Synth(render(s).into())))).collect();
-    commands.insert_resource(Bank { sounds, mute: std::env::var_os("RE_SCREENSHOT").is_some() });
+fn load_bank(mut commands: Commands, server: Res<AssetServer>) {
+    let samples = Sample::ALL.into_iter().map(|s| (s, (0..Sample::TAKES).map(|take| server.load(s.path(take))).collect())).collect();
+    commands.insert_resource(Bank { samples, mute: std::env::var_os("RE_SCREENSHOT").is_some() });
 }
 
-/// A sound being played, and the frames since it was asked for.
+/// A sound being played, and the frames it has waited, loaded, to start.
 #[derive(Component)]
 struct Voice(u32);
 
-/// With no audio output a sound never starts, and Bevy would keep it forever: drop it, and play no
-/// more.
-fn reap(mut commands: Commands, mut voices: Query<(Entity, &mut Voice, Has<AudioSink>)>, mut bank: ResMut<Bank>) {
-    for (entity, mut voice, started) in &mut voices {
-        voice.0 += 1;
-        if !started && voice.0 > 5 {
+/// With no audio output a loaded sound never starts, and Bevy would keep it forever: drop it, and
+/// play no more. A sample that failed to load is dropped too.
+fn reap(mut commands: Commands, server: Res<AssetServer>, mut voices: Query<(Entity, &mut Voice, &AudioPlayer, Has<AudioSink>)>, mut bank: ResMut<Bank>) {
+    for (entity, mut voice, player, started) in &mut voices {
+        if started {
+            continue;
+        }
+        let state = server.load_state(player.0.id());
+        if state.is_failed() {
             commands.entity(entity).despawn();
-            bank.mute = true;
-        }
-    }
-}
-
-// ---- Playback ----
-
-const RATE: u32 = 44_100;
-
-/// A synthesised sound: mono samples at RATE.
-#[derive(Asset, TypePath)]
-pub struct Synth(Arc<[f32]>);
-
-/// A Synth playing: its samples one by one.
-pub struct SynthPlayback {
-    samples: Arc<[f32]>,
-    at: usize,
-}
-
-impl Iterator for SynthPlayback {
-    type Item = f32;
-
-    fn next(&mut self) -> Option<f32> {
-        let sample = self.samples.get(self.at).copied();
-        self.at += 1;
-        sample
-    }
-}
-
-impl Source for SynthPlayback {
-    fn current_frame_len(&self) -> Option<usize> {
-        Some(self.samples.len().saturating_sub(self.at))
-    }
-
-    fn channels(&self) -> u16 {
-        1
-    }
-
-    fn sample_rate(&self) -> u32 {
-        RATE
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        Some(Duration::from_secs_f32(self.samples.len() as f32 / RATE as f32))
-    }
-}
-
-impl Decodable for Synth {
-    type DecoderItem = f32;
-    type Decoder = SynthPlayback;
-
-    fn decoder(&self) -> SynthPlayback {
-        SynthPlayback { samples: self.0.clone(), at: 0 }
-    }
-}
-
-// ---- Synthesis ----
-
-/// White noise, the same every run.
-struct Noise(u32);
-
-impl Noise {
-    fn next(&mut self) -> f32 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 17;
-        self.0 ^= self.0 << 5;
-        (self.0 >> 8) as f32 / 8_388_608.0 - 1.0
-    }
-}
-
-/// A state-variable filter (Andrew Simper's): low-, band- and high-pass of one sample.
-#[derive(Default)]
-struct Filter {
-    s1: f32,
-    s2: f32,
-}
-
-impl Filter {
-    fn step(&mut self, x: f32, cutoff: f32, q: f32) -> [f32; 3] {
-        let g = (PI * (cutoff / RATE as f32).min(0.45)).tan();
-        let k = 1.0 / q;
-        let band = (self.s1 + g * (x - self.s2)) / (1.0 + g * (g + k));
-        let low = self.s2 + g * band;
-        self.s1 = 2.0 * band - self.s1;
-        self.s2 = 2.0 * low - self.s2;
-        [low, k * band, x - k * band - low]
-    }
-}
-
-/// A filter's output: low-, band- or high-pass, or a steeper band (two in a row) for air and
-/// voices, which would otherwise hiss.
-#[derive(Clone, Copy)]
-enum Pass {
-    Low,
-    Band,
-    High,
-    Band4,
-}
-
-fn smooth(u: f32) -> f32 {
-    u * u * (3.0 - 2.0 * u)
-}
-
-/// An attack, then an exponential decay.
-fn env(t: f32, attack: f32, decay: f32) -> f32 {
-    if t < attack { t / attack } else { (-(t - attack) / decay).exp() }
-}
-
-/// Up to its peak at `peak` (a share of `len`) and back to nothing at `len`, smoothly.
-fn swell(t: f32, len: f32, peak: f32) -> f32 {
-    let x = (t / len).clamp(0.0, 1.0);
-    smooth(if x < peak { x / peak } else { (1.0 - x) / (1.0 - peak) })
-}
-
-/// From `from` to `to` over `secs`, exponentially, then held.
-fn glide(from: f32, to: f32, secs: f32) -> impl Fn(f32) -> f32 {
-    move |t| from * (to / from).powf((t / secs).min(1.0))
-}
-
-/// A sine at `pitch(t)` Hz with `octave` of its octave, shaped by `shape(t)`.
-fn tone(pitch: impl Fn(f32) -> f32, octave: f32, shape: impl Fn(f32) -> f32) -> impl FnMut(f32) -> f32 {
-    let mut phase = 0.0f32;
-    move |t| {
-        phase = (phase + TAU * pitch(t) / RATE as f32) % TAU;
-        (phase.sin() + octave * (2.0 * phase).sin()) * shape(t)
-    }
-}
-
-/// Noise through a `pass` filter at `cutoff(t)` Hz, shaped by `shape(t)`.
-fn noise(seed: u32, pass: Pass, cutoff: impl Fn(f32) -> f32, q: f32, shape: impl Fn(f32) -> f32) -> impl FnMut(f32) -> f32 {
-    let (mut noise, mut first, mut second) = (Noise(seed), Filter::default(), Filter::default());
-    move |t| {
-        let hz = cutoff(t);
-        let [low, band, high] = first.step(noise.next(), hz, q);
-        let out = match pass {
-            Pass::Low => low,
-            Pass::Band => band,
-            Pass::High => high,
-            Pass::Band4 => second.step(band, hz, q)[1],
-        };
-        out * shape(t)
-    }
-}
-
-/// A shoe's scuff on the grass.
-fn scuff(seed: u32, hz: f32, decay: f32) -> impl FnMut(f32) -> f32 {
-    noise(seed, Pass::Band, move |_| hz, 1.4, move |t| env(t, 0.001, decay))
-}
-
-/// Decaying sines (Hz, level, decay in s): struck metal, or a wall panel.
-fn ring(partials: &'static [(f32, f32, f32)]) -> impl FnMut(f32) -> f32 {
-    move |t| partials.iter().map(|&(hz, level, decay)| level * (std::f64::consts::TAU * hz as f64 * t as f64).sin() as f32 * env(t, 0.0005, decay)).sum()
-}
-
-/// A foot or the ground meeting the ball: a thump gliding from `from` to `to` Hz and decaying over
-/// `decay` s, the leather's slap (`slap` loud, `crack` 0..1 bright), and its hollow pock (level, Hz).
-#[derive(Clone, Copy)]
-struct Strike {
-    from: f32,
-    to: f32,
-    decay: f32,
-    slap: f32,
-    crack: f32,
-    pock: (f32, f32),
-}
-
-/// A whoosh's sweep (Hz from and to), its sharpness, and a flutter (Hz, depth) for a spinning ball.
-#[derive(Clone, Copy)]
-struct Air {
-    from: f32,
-    to: f32,
-    q: f32,
-    flutter: (f32, f32),
-}
-
-const PLAIN_AIR: Air = Air { from: 1300.0, to: 800.0, q: 1.2, flutter: (0.0, 0.0) };
-
-/// The flying ball's whoosh by its spin: flat for none, a steep falling flutter for the dip, a
-/// slow rising one for the float.
-fn spin_air(spin: Spin) -> Air {
-    match spin {
-        Spin::Flat => PLAIN_AIR,
-        Spin::Top => Air { from: 2800.0, to: 350.0, q: 2.2, flutter: (30.0, 0.6) },
-        Spin::Down => Air { from: 450.0, to: 2600.0, q: 1.8, flutter: (12.0, 0.35) },
-    }
-}
-
-/// A sound being mixed, layer by layer.
-struct Track(Vec<f32>);
-
-impl Track {
-    fn new(secs: f32) -> Self {
-        Self(vec![0.0; (secs * RATE as f32) as usize])
-    }
-
-    /// Mixes in `layer(t)` from `at` seconds on, at `gain`.
-    fn add(&mut self, at: f32, gain: f32, mut layer: impl FnMut(f32) -> f32) -> &mut Self {
-        let start = (at * RATE as f32) as usize;
-        for (i, sample) in self.0.iter_mut().enumerate().skip(start) {
-            *sample += gain * layer((i - start) as f32 / RATE as f32);
-        }
-        self
-    }
-
-    fn strike(&mut self, at: f32, gain: f32, s: Strike, seed: u32) -> &mut Self {
-        let slap = glide(1500.0 + 4000.0 * s.crack, 1200.0 + 2000.0 * s.crack, 0.02);
-        self.add(at, gain, tone(glide(s.from, s.to, 0.06), 0.0, move |t| env(t, 0.002, s.decay)))
-            .add(at, gain * s.slap, noise(seed, Pass::High, slap, 0.7, move |t| env(t, 0.0003, 0.006 + 0.012 * s.crack)))
-            .add(at, gain * s.pock.0, noise(seed + 1, Pass::Band, glide(s.pock.1, s.pock.1 * 0.65, 0.04), 2.5, |t| env(t, 0.001, 0.03)))
-    }
-
-    /// Air rushing past for `len` s, peaking at `gain` (a strike peaks near 1).
-    fn whoosh(&mut self, at: f32, len: f32, gain: f32, air: Air, seed: u32) -> &mut Self {
-        let (hz, depth) = air.flutter;
-        let mut layer = noise(seed, Pass::Band4, glide(air.from, air.to, len), air.q, move |t| swell(t, len, 0.25) * (1.0 - depth * (0.5 + 0.5 * (TAU * hz * t).sin())));
-        let samples: Vec<f32> = (0..(len * RATE as f32) as usize).map(|i| layer(i as f32 / RATE as f32)).collect();
-        let peak = samples.iter().fold(1e-6f32, |m, s| m.max(s.abs()));
-        let mut i = 0;
-        self.add(at, gain / peak, move |_| {
-            i += 1;
-            samples.get(i - 1).copied().unwrap_or(0.0)
-        })
-    }
-
-    /// Peaks at 0.95, with a 5 ms fade at the end so it can't click.
-    fn done(mut self) -> Vec<f32> {
-        let peak = self.0.iter().fold(0.0f32, |m, s| m.max(s.abs()));
-        let fade = (0.005 * RATE as f32) as usize;
-        let len = self.0.len();
-        for (i, sample) in self.0.iter_mut().enumerate() {
-            *sample *= 0.95 / peak.max(1e-6) * ((len - i) as f32 / fade as f32).min(1.0);
-        }
-        self.0
-    }
-}
-
-/// A crowd's swell: up in 0.4 s, held to 1.3 s, then dying away by 3.6 s.
-fn cheer(t: f32) -> f32 {
-    smooth((t / 0.4).min(1.0)) * if t < 1.3 { 1.0 } else { (-(t - 1.3) / 0.8).exp() } * (1.0 - smooth(((t - 3.3) / 0.3).clamp(0.0, 1.0)))
-}
-
-/// A crowd's "ooh": its vowel rises, then sinks.
-fn ooh_vowel(t: f32) -> f32 {
-    if t < 0.4 { glide(380.0, 560.0, 0.4)(t) } else { glide(560.0, 430.0, 1.1)(t - 0.4) }
-}
-
-fn ooh_shape(t: f32) -> f32 {
-    smooth((t / 0.25).min(1.0)) * if t < 0.35 { 1.0 } else { (-(t - 0.35) / 0.45).exp() }
-}
-
-fn render(sound: Sound) -> Vec<f32> {
-    let strike = |from, to, decay, slap, crack, pock| Strike { from, to, decay, slap, crack, pock };
-    let mut t;
-    match sound {
-        // A shot: the strike by power (the power shot's deeper, with a boom and a crack), then the
-        // ball's whoosh by spin, longer and louder the harder it's hit.
-        Sound::Shot(power, spin) => {
-            let (s, len, air) = match power {
-                Power::Low => (strike(160.0, 100.0, 0.045, 0.5, 0.25, (0.5, 900.0)), 0.3, 0.3),
-                Power::Mid => (strike(140.0, 75.0, 0.065, 0.7, 0.55, (0.55, 850.0)), 0.45, 0.5),
-                Power::High => (strike(120.0, 48.0, 0.1, 0.9, 0.95, (0.5, 800.0)), 0.65, 0.7),
-            };
-            t = Track::new(len + 0.1);
-            t.strike(0.0, 1.0, s, 11).whoosh(0.04, len, air, spin_air(spin), 13);
-            if power == Power::High {
-                t.add(0.0, 0.6, tone(glide(70.0, 40.0, 0.1), 0.0, |t| env(t, 0.003, 0.16)));
+        } else if state.is_loaded() {
+            voice.0 += 1;
+            if voice.0 > 5 {
+                commands.entity(entity).despawn();
+                bank.mute = true;
             }
         }
-        // Passes: a round "tock"; at full power a crisp, harder strike and a short whoosh.
-        Sound::Pass { max: false } => {
-            t = Track::new(0.25);
-            t.strike(0.0, 1.0, strike(180.0, 115.0, 0.04, 0.35, 0.2, (0.6, 800.0)), 21);
-        }
-        Sound::Pass { max: true } => {
-            t = Track::new(0.4);
-            t.strike(0.0, 1.0, strike(165.0, 90.0, 0.055, 0.9, 0.9, (0.5, 850.0)), 23).whoosh(0.03, 0.28, 0.35, PLAIN_AIR, 25);
-        }
-        // Lobs: a hollow "thock" scooped under the ball and rising air; at full power crisper and
-        // with more air.
-        Sound::Lob { max: false } => {
-            t = Track::new(0.45);
-            t.strike(0.0, 1.0, strike(210.0, 150.0, 0.035, 0.25, 0.1, (0.9, 520.0)), 31).whoosh(0.03, 0.35, 0.25, Air { from: 600.0, to: 1300.0, q: 1.0, flutter: (0.0, 0.0) }, 33);
-        }
-        Sound::Lob { max: true } => {
-            t = Track::new(0.6);
-            t.strike(0.0, 1.0, strike(190.0, 110.0, 0.05, 0.85, 0.8, (0.8, 560.0)), 35).whoosh(0.03, 0.5, 0.45, Air { from: 500.0, to: 2200.0, q: 1.2, flutter: (0.0, 0.0) }, 37);
-        }
-        // A toe poke with a brush of grass.
-        Sound::PushBall => {
-            t = Track::new(0.2);
-            t.strike(0.0, 1.0, strike(240.0, 170.0, 0.025, 0.3, 0.3, (0.4, 1000.0)), 41)
-                .add(0.0, 0.3, noise(43, Pass::Low, glide(1500.0, 700.0, 0.06), 0.7, |t| env(t, 0.002, 0.05)));
-        }
-        Sound::Touch => {
-            t = Track::new(0.12);
-            t.strike(0.0, 1.0, strike(270.0, 210.0, 0.018, 0.12, 0.05, (0.3, 1100.0)), 45);
-        }
-        // The leg swinging through, with no ball.
-        Sound::FakeShot => {
-            t = Track::new(0.3);
-            t.whoosh(0.0, 0.22, 1.0, Air { from: 500.0, to: 1400.0, q: 0.9, flutter: (0.0, 0.0) }, 47).add(0.04, 0.4, scuff(48, 3000.0, 0.04));
-        }
-        // Controls: the foot muffles the ball, the knee knocks it, the chest thumps under cloth.
-        Sound::Control(Height::Foot) => {
-            t = Track::new(0.25);
-            t.add(0.0, 1.0, tone(glide(125.0, 80.0, 0.05), 0.0, |t| env(t, 0.002, 0.05)))
-                .add(0.0, 0.6, noise(51, Pass::Low, glide(1100.0, 350.0, 0.08), 0.7, |t| env(t, 0.001, 0.05)));
-        }
-        Sound::Control(Height::Knee) => {
-            t = Track::new(0.2);
-            t.add(0.0, 1.0, tone(glide(220.0, 160.0, 0.04), 0.2, |t| env(t, 0.001, 0.04)))
-                .add(0.0, 0.5, noise(53, Pass::Band, |_| 1000.0, 1.5, |t| env(t, 0.0005, 0.025)));
-        }
-        Sound::Control(Height::Chest) => {
-            t = Track::new(0.3);
-            t.add(0.0, 1.0, tone(glide(100.0, 62.0, 0.06), 0.0, |t| env(t, 0.003, 0.09)))
-                .add(0.0, 0.5, noise(55, Pass::Band, glide(2400.0, 1600.0, 0.08), 0.7, |t| env(t, 0.002, 0.06)));
-        }
-        // A dribble: the body's swish and a shoe's scuff; tired, duller and slower.
-        Sound::Dribble { tired: false } => {
-            t = Track::new(0.25);
-            t.whoosh(0.0, 0.2, 0.8, Air { from: 600.0, to: 1600.0, q: 1.0, flutter: (0.0, 0.0) }, 61).add(0.05, 0.6, scuff(62, 3500.0, 0.035));
-        }
-        Sound::Dribble { tired: true } => {
-            t = Track::new(0.33);
-            t.whoosh(0.0, 0.28, 0.8, Air { from: 400.0, to: 1000.0, q: 0.9, flutter: (0.0, 0.0) }, 63).add(0.08, 0.4, scuff(64, 2200.0, 0.05));
-        }
-        // A dash: a bigger swish, two scuffs and the body's push.
-        Sound::Dash => {
-            t = Track::new(0.4);
-            t.whoosh(0.0, 0.32, 1.0, Air { from: 350.0, to: 1300.0, q: 0.9, flutter: (0.0, 0.0) }, 65)
-                .add(0.0, 0.7, scuff(66, 3200.0, 0.04))
-                .add(0.1, 0.6, scuff(67, 2900.0, 0.04))
-                .add(0.0, 0.4, tone(glide(95.0, 70.0, 0.05), 0.0, |t| env(t, 0.003, 0.06)));
-        }
-        // Extra effort: a power-up rising on a breath; off, a short fall.
-        Sound::EffortOn => {
-            t = Track::new(0.6);
-            t.add(0.0, 1.0, tone(glide(170.0, 540.0, 0.45), 0.3, |t| swell(t, 0.6, 0.65)))
-                .add(0.0, 0.5, noise(71, Pass::Band, glide(900.0, 3200.0, 0.5), 1.2, |t| swell(t, 0.6, 0.6)));
-        }
-        Sound::EffortOff => {
-            t = Track::new(0.3);
-            t.add(0.0, 1.0, tone(glide(420.0, 150.0, 0.25), 0.2, |t| env(t, 0.005, 0.1)))
-                .add(0.0, 0.3, noise(73, Pass::Band, glide(2000.0, 600.0, 0.25), 1.0, |t| env(t, 0.005, 0.08)));
-        }
-        // Grass steps: softer and darker walking, brighter with a crunch at a run and a sprint.
-        Sound::Step(pace) => {
-            let (cutoff, decay, thump, crunch) = match pace {
-                Pace::Walk => (700.0, 0.03, 0.5, 0.0),
-                Pace::Run => (1100.0, 0.04, 0.6, 0.25),
-                Pace::Rush => (1500.0, 0.045, 0.7, 0.45),
-            };
-            t = Track::new(0.15);
-            t.add(0.0, 1.0, noise(81, Pass::Low, glide(cutoff, cutoff * 0.6, 0.05), 0.7, move |t| env(t, 0.0015, decay)))
-                .add(0.0, thump, tone(glide(90.0, 60.0, 0.04), 0.0, |t| env(t, 0.002, 0.025)))
-                .add(0.0, crunch, noise(83, Pass::High, |_| 3500.0, 0.7, |t| env(t, 0.0005, 0.015)));
-        }
-        // The ball on the grass: a thump and a soft slap, deeper and harder as it falls faster.
-        Sound::Bounce(hit) => {
-            let (s, boom) = match hit {
-                Hit::Light => (strike(170.0, 125.0, 0.03, 0.2, 0.1, (0.4, 900.0)), 0.0),
-                Hit::Medium => (strike(150.0, 95.0, 0.05, 0.4, 0.3, (0.4, 800.0)), 0.0),
-                Hit::Strong => (strike(130.0, 65.0, 0.08, 0.6, 0.6, (0.35, 700.0)), 0.5),
-            };
-            t = Track::new(0.3);
-            t.strike(0.0, 1.0, s, 91)
-                .add(0.0, 0.5, noise(93, Pass::Low, |_| 1600.0, 0.7, |t| env(t, 0.0008, 0.025)))
-                .add(0.0, boom, tone(glide(70.0, 45.0, 0.08), 0.0, |t| env(t, 0.002, 0.12)));
-        }
-        // A wall panel knocked: the ball's thump and the panel's short boxy ring.
-        Sound::Wall => {
-            t = Track::new(0.45);
-            t.strike(0.0, 1.0, strike(150.0, 85.0, 0.06, 0.4, 0.3, (0.5, 1200.0)), 101)
-                .add(0.0, 0.8, ring(&[(235.0, 0.5, 0.16), (415.0, 0.35, 0.11), (730.0, 0.2, 0.07), (1210.0, 0.1, 0.04)]));
-        }
-        // The post: a click and a long metallic ring (a tube's inharmonic partials, one pair
-        // beating).
-        Sound::Post => {
-            t = Track::new(1.5);
-            t.add(0.0, 0.6, noise(111, Pass::High, |_| 5000.0, 0.7, |t| env(t, 0.0002, 0.004)))
-                .add(0.0, 0.4, tone(glide(200.0, 150.0, 0.02), 0.0, |t| env(t, 0.0005, 0.02)))
-                .add(0.0, 1.0, ring(&[(640.0, 1.0, 0.9), (655.0, 0.5, 0.75), (1766.0, 0.55, 0.5), (3456.0, 0.32, 0.28), (5715.0, 0.18, 0.16)]));
-        }
-        // The net: a soft rustling swish, the ball's dull thud in it.
-        Sound::Net => {
-            t = Track::new(0.5);
-            let rustle = |t: f32| env(t, 0.015, 0.16) * (0.7 + 0.3 * (TAU * 37.0 * t).sin() * (TAU * 23.0 * t).sin());
-            t.add(0.0, 1.0, noise(121, Pass::Band4, glide(3200.0, 1700.0, 0.35), 0.8, rustle))
-                .add(0.0, 0.25, tone(glide(95.0, 70.0, 0.05), 0.0, |t| env(t, 0.003, 0.05)));
-        }
-        // A goal: a crowd's swell, many voices in a few vowel bands, each wobbling, over a roar.
-        Sound::Goal => {
-            t = Track::new(3.6);
-            for (i, (hz, q, level)) in [(480.0, 3.0, 1.0), (950.0, 2.5, 0.8), (1650.0, 2.0, 0.55), (2700.0, 1.5, 0.3)].into_iter().enumerate() {
-                let i = i as f32;
-                let drift = move |t: f32| hz * (1.0 + 0.05 * (TAU * 0.7 * t + i).sin());
-                let wobble = move |t: f32| cheer(t) * (0.75 + 0.25 * (TAU * (1.3 + 0.7 * i) * t + i).sin() * (TAU * (2.9 + 1.1 * i) * t).sin());
-                t.add(0.0, level, noise(131 + i as u32, Pass::Band4, drift, q, wobble));
-            }
-            t.add(0.0, 0.4, noise(139, Pass::Low, |_| 350.0, 0.7, cheer));
-        }
-        // The crowd's gasp: an "ooh" rising and sinking.
-        Sound::Ooh => {
-            t = Track::new(1.5);
-            t.add(0.0, 1.0, noise(141, Pass::Band4, ooh_vowel, 4.0, ooh_shape))
-                .add(0.0, 0.5, noise(143, Pass::Band4, |t| ooh_vowel(t) * 2.3, 3.0, ooh_shape))
-                .add(0.0, 0.3, noise(145, Pass::Low, |_| 300.0, 0.7, ooh_shape));
-        }
     }
-    t.done()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every sound and variant.
+    fn every_sound() -> Vec<Sound> {
+        let mut all = Vec::new();
+        for power in [Power::Low, Power::Mid, Power::High] {
+            all.extend([Spin::Flat, Spin::Top, Spin::Down].map(|spin| Sound::Shot(power, spin)));
+        }
+        all.extend([Sound::Pass { max: false }, Sound::Pass { max: true }, Sound::Lob { max: false }, Sound::Lob { max: true }]);
+        all.extend([Sound::PushBall, Sound::Touch, Sound::Dribble { tired: false }, Sound::Dribble { tired: true }, Sound::Dash, Sound::Post, Sound::Net]);
+        all.extend([Height::Foot, Height::Knee, Height::Chest].map(Sound::Control));
+        all.extend([Pace::Walk, Pace::Run, Pace::Rush].map(Sound::Step));
+        for hit in [Hit::Light, Hit::Medium, Hit::Strong] {
+            all.extend([Sound::Bounce(hit), Sound::Wall(hit)]);
+        }
+        all
+    }
+
+    fn pitch(sound: Sound) -> f32 {
+        sound.layers()[0].2
+    }
 
     #[test]
     fn shots_pick_their_sound_by_power_and_spin() {
@@ -930,6 +591,13 @@ mod tests {
         assert_eq!(shot_spin(spin(1.0, -0.5)), Spin::Flat, "more curl than dip");
         assert_eq!(kick_sound(Kick::Shot, MAX_HOLD, 38.0, spin(0.0, -1.0)).0, Sound::Shot(Power::High, Spin::Top));
         assert_eq!(kick_sound(Kick::Shot, 0.1, 24.0, spin(0.0, 1.0)).0, Sound::Shot(Power::Low, Spin::Down));
+        // The power shot is the heavy punch; topspin plays higher and downspin lower at every power.
+        assert_eq!(Sound::Shot(Power::High, Spin::Flat).layers()[0].0, Sample::PunchHeavy);
+        assert_eq!(Sound::Shot(Power::Mid, Spin::Flat).layers()[0].0, Sample::PunchMedium);
+        for power in [Power::Low, Power::Mid, Power::High] {
+            let [flat, top, down] = [Spin::Flat, Spin::Top, Spin::Down].map(|s| pitch(Sound::Shot(power, s)));
+            assert!(top > flat && flat > down, "{power:?}: top {top}, flat {flat}, down {down}");
+        }
     }
 
     #[test]
@@ -937,7 +605,10 @@ mod tests {
         for (kind, max, other) in [(Kick::Pass, Sound::Pass { max: true }, Sound::Pass { max: false }), (Kick::Lob, Sound::Lob { max: true }, Sound::Lob { max: false })] {
             assert_eq!(kick_sound(kind, kind.buildup(), 30.0, Vec3::ZERO).0, max);
             assert_eq!(kick_sound(kind, kind.buildup() * 0.8, 25.0, Vec3::ZERO).0, other);
+            // At full power: louder, with a crisp punch on top.
+            assert!(max.layers()[0].1 > other.layers()[0].1 && max.layers().iter().any(|l| l.0 == Sample::PunchMedium));
         }
+        assert!(pitch(Sound::Lob { max: false }) < pitch(Sound::Pass { max: false }), "a lob is scooped, lower");
         assert_eq!(kick_sound(Kick::ShortPass, 0.0, SHORT_PASS_SPEED, Vec3::ZERO).0, Sound::Pass { max: false });
         assert_eq!(kick_sound(Kick::DribblePushBall, 0.0, DRIBBLE_PUSH_BALL_SPEED, Vec3::ZERO).0, Sound::PushBall);
     }
@@ -952,51 +623,37 @@ mod tests {
         assert_eq!(landing(Vec3::Y * 0.3, Vec3::Y * 0.2, Vec3::Y * -6.0, Vec3::Y * 2.8), Some(6.0));
         assert_eq!(landing(Vec3::Y * 3.0, Vec3::Y * 2.9, Vec3::Y * -6.0, Vec3::Y * 2.8), None, "the crossbar's top isn't the grass");
         assert_eq!((bounce_hit(2.0), bounce_hit(6.0), bounce_hit(12.0)), (Hit::Light, Hit::Medium, Hit::Strong));
+        assert_eq!((wall_hit(5.0), wall_hit(10.0), wall_hit(20.0)), (Hit::Light, Hit::Medium, Hit::Strong));
+        assert_eq!(Sound::Wall(Hit::Strong).layers()[0].0, Sample::PlateHeavy);
         assert_eq!((control_height(BALL_RADIUS), control_height(1.0), control_height(1.6)), (Height::Foot, Height::Knee, Height::Chest));
         assert_eq!((pace(2.0, false), pace(5.0, false), pace(7.5, true)), (Pace::Walk, Pace::Run, Pace::Rush));
     }
 
     #[test]
-    fn every_sound_renders_short_and_clean() {
-        for sound in Sound::all() {
-            let samples = render(sound);
-            let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
-            assert!(!samples.is_empty() && samples.len() < 4 * RATE as usize, "{sound:?} is {} samples", samples.len());
-            assert!(samples.iter().all(|s| s.is_finite()) && peak > 0.5 && peak <= 0.951, "{sound:?} peaks at {peak}");
+    fn layers_play_at_sane_levels() {
+        for sound in every_sound() {
+            for (sample, volume, speed) in sound.layers() {
+                assert!(volume > 0.0 && volume <= 1.0 && (0.5..=2.0).contains(&speed), "{sound:?}: {sample:?} at {volume}, x{speed}");
+            }
         }
     }
 
-    /// `RE_SFX_DUMP=<dir> cargo test previews` writes every sound there as a WAV file to listen to.
+    /// assets/sfx holds exactly the takes the sounds use, and Kenney's licence; Bevy's decoder reads
+    /// every take.
     #[test]
-    fn previews() {
-        let Some(dir) = std::env::var_os("RE_SFX_DUMP") else { return };
-        let dir = std::path::Path::new(&dir);
-        std::fs::create_dir_all(dir).unwrap();
-        for sound in Sound::all() {
-            let name = format!("{sound:?}").to_lowercase().split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join("_");
-            std::fs::write(dir.join(format!("{name}.wav")), wav(&render(sound))).unwrap();
+    fn the_shipped_samples_are_the_used_ones() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let used: Vec<Sample> = Sample::ALL.into_iter().filter(|s| every_sound().iter().any(|sound| sound.layers().iter().any(|l| l.0 == *s))).collect();
+        assert_eq!(used, Sample::ALL, "a sample nothing plays");
+        let mut wanted: Vec<String> = Sample::ALL.iter().flat_map(|s| (0..Sample::TAKES).map(|take| s.path(take))).collect();
+        wanted.push("sfx/License.txt".into());
+        wanted.sort();
+        let mut shipped: Vec<String> = std::fs::read_dir(dir.join("sfx")).unwrap().map(|e| format!("sfx/{}", e.unwrap().file_name().to_string_lossy())).collect();
+        shipped.sort();
+        assert_eq!(shipped, wanted);
+        for path in wanted.iter().filter(|p| p.ends_with(".ogg")) {
+            let source = AudioSource { bytes: std::fs::read(dir.join(path)).unwrap().into() };
+            assert!(source.decoder().count() > 1000, "{path} decodes to almost nothing");
         }
-    }
-
-    /// 16-bit mono PCM.
-    fn wav(samples: &[f32]) -> Vec<u8> {
-        let data = (samples.len() * 2) as u32;
-        let mut out = Vec::with_capacity(44 + data as usize);
-        out.extend_from_slice(b"RIFF");
-        out.extend_from_slice(&(36 + data).to_le_bytes());
-        out.extend_from_slice(b"WAVEfmt ");
-        out.extend_from_slice(&16u32.to_le_bytes());
-        out.extend_from_slice(&1u16.to_le_bytes()); // PCM
-        out.extend_from_slice(&1u16.to_le_bytes()); // mono
-        out.extend_from_slice(&RATE.to_le_bytes());
-        out.extend_from_slice(&(RATE * 2).to_le_bytes());
-        out.extend_from_slice(&2u16.to_le_bytes());
-        out.extend_from_slice(&16u16.to_le_bytes());
-        out.extend_from_slice(b"data");
-        out.extend_from_slice(&data.to_le_bytes());
-        for s in samples {
-            out.extend_from_slice(&((s.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
-        }
-        out
     }
 }

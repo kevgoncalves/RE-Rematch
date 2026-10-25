@@ -7,7 +7,10 @@ lives in the Wwise project, which isn't in our extracted data. So below:
 - **inferred** = the most likely reading of what was found;
 - **guessed** = our own choice, for our prototype.
 
-None of the game's audio is used. Every sound in `game/src/sfx.rs` is synthesised at startup.
+None of the game's audio is used. Our sounds are samples from Kenney's Impact Sounds pack (CC0;
+`game/assets/sfx/`, with its `License.txt`). Each sound plays one or more of them at a set volume
+and playback speed (which is pitch too), a random take of the five each time. The table is
+`Sound::layers` in `game/src/sfx.rs`; "Ours" below says which sample each event plays.
 
 ## Sources
 
@@ -71,20 +74,25 @@ The game works in centimetres. The ball component divides speeds by 100, so most
 
 **Ours:**
 
-| Kick | Sound | Variants |
-|---|---|---|
-| Shot | strike + whoosh | 3 powers × 3 spins |
-| Pass | strike | max (crisp, louder, short whoosh) or not (round "tock") |
-| Lob | strike + rising air | max (crisp, longer air) or not (hollow "thock") |
-| Low-power pass / lob | the non-max pass / lob | quieter |
-| Push ball, dribble push ball, extra effort's auto tap | toe poke | |
-| Fake shot (pass pressed while charging a shot) | leg swish, no ball | |
+Samples are written as Kenney's names without `impact`, then (volume, speed).
+
+| Kick | Samples |
+|---|---|
+| Shot, low power (under 29.41 m/s) | Punch_medium (0.6, 1.1) |
+| Shot, mid (29.41 to 34.82) | Punch_medium (0.85, 1.0) + Soft_medium (0.35, 0.9) |
+| Shot, power (34.82 and up) | Punch_heavy (1.0, 0.95) + Soft_heavy (0.6, 0.9) |
+| Pass | Soft_medium (0.6, 1.05) |
+| Pass at full power | Soft_heavy (0.75, 1.1) + Punch_medium (0.4, 1.3) |
+| Lob | Soft_medium (0.6, 0.85): the pass's thud, lower |
+| Lob at full power | Soft_heavy (0.75, 0.9) + Punch_medium (0.4, 1.1) |
+| Low-power pass / lob | the non-max pass / lob, at 75% |
+| Push ball, dribble push ball, extra effort's auto tap | Soft_medium (0.5, 1.25) |
+
+- **Shot volume:** also 85% at 24 m/s, rising to 100% at 38 m/s.
+- **Shot spin:** the speed of the punch layer is multiplied by 1.12 for topspin and 0.89 for
+  downspin (about two semitones up or down).
 
 Shots in detail:
-- **Power:**
-  - Low (under 29.41 m/s): light thump, short quiet whoosh.
-  - Mid (29.41 to 34.82): solid thump.
-  - Power (34.82 and up): deep thump + sub boom + a hard crack and a long loud whoosh.
 - **Spin:**
   - The shot's built-in lift (210, every shot has it) isn't counted.
   - What's left must be at least 40. If not, the shot is **none**.
@@ -92,12 +100,8 @@ Shots in detail:
     - side spin dominant: grouped with **none** (Kev's "none/sidespin");
     - dip dominant: **topspin**;
     - lift dominant: **downspin** (backspin: the ball floats).
-  - The whooshes:
-    - none: a flat whoosh, slightly falling;
-    - topspin: a steep falling sweep with a fast flutter;
-    - downspin: a rising sweep with a slow flutter.
   - *Guessed:* that Kev's "downspin" means the floating backspin shot. If he means the dip, swap
-    the two names; the three sounds stay distinct.
+    the two pitches.
 
 ## Controls and touches
 
@@ -121,12 +125,13 @@ Shots in detail:
 **Ours:**
 - **Control:** foot, knee or chest, by the ball's height when the control started (our control
   glides the ball down to the foot). It plays when the ball becomes yours, as in the game.
-  - Louder for a faster ball: full at 25 m/s (guessed).
+  - Foot: Soft_medium (0.6, 0.95). Knee: Soft_medium (0.55, 1.2). Chest: Soft_heavy (0.6, 0.85).
+  - Volume from 35% for a still ball up to 100% at 25 m/s (guessed).
   - A dash that picks up a loose ball counts too.
-- **Running touches with the ball:** a soft tap at each touch (the carry's touch beat), louder when
-  you run faster.
-- **Dribble and feint:** a body swish and a shoe scuff. A tired dribble is duller and slower.
-- **Extra effort taps** on a loose ball: the push ball's toe poke, quieter.
+- **Running touches with the ball:** Soft_medium (0.25, 1.45) at each touch (the carry's touch
+  beat), from 60% standing to 100% at sprint speed.
+- **Dribble and feint:** a hard foot plant, footstep_grass (0.7, 1.1). Tired: (0.5, 0.9).
+- **Extra effort taps** on a loose ball: the push ball's sound at 60%.
 
 ## Ball bounces and hits
 
@@ -148,15 +153,22 @@ Shots in detail:
 
 **Ours:**
 
-| Hit | Sound | When | Full volume at |
+| Hit | When | Samples | Full volume at |
 |---|---|---|---|
-| Ground | thump + slap: light, medium or strong | falling faster than 1 m/s; strong from 9 m/s, medium from 4 | 13 m/s |
-| Wall | panel knock | hitting it faster than 1.2 m/s | 25 m/s |
-| Post or crossbar | metal ring | hitting it faster than 1 m/s | 25 m/s |
+| Ground, light | falling 1 to 4 m/s | Soft_medium (0.35, 1.15) | 13 m/s |
+| Ground, medium | falling 4 to 9 m/s | Soft_medium (0.6, 1.0) | |
+| Ground, strong | falling 9 m/s and up | Soft_heavy (0.8, 1.0) | |
+| Wall, light | into it 1.2 to 8 m/s | Plate_light (0.5, 1.0) + Soft_medium (0.4, 1.1) | 25 m/s |
+| Wall, medium | into it 8 to 16 m/s | Plate_medium (0.7, 1.0) + Soft_medium (0.5, 1.0) | |
+| Wall, strong | into it 16 m/s and up | Plate_heavy (0.9, 1.0) + Soft_heavy (0.5, 1.0) | |
+| Post or crossbar | into it over 1 m/s | Metal_heavy (0.9, 1.0) + Bell_heavy (0.4, 1.0) | 25 m/s |
+
+- **Volume floor:** ground 25%, wall 20%, post 35%, up to 100% at the "full volume" speed.
 
 - **All thresholds are guessed.**
 - **Ground:** the falling speed sets the strength and the volume.
-- **Wall:** side walls, end walls and the ceiling. The speed into the wall sets the volume.
+- **Wall:** side walls, end walls and the ceiling. The speed into the wall sets the strength and
+  the volume.
 - **Post or crossbar:** told from a wall by the ball's path passing within reach of a post or the bar.
 - **Each surface rests 0.08 s** after it sounds, so a ball wedged in a corner doesn't buzz.
 - **Distance:** ball hits get quieter with distance from the camera: half volume at 30 m (guessed).
@@ -178,12 +190,12 @@ Shots in detail:
   - interceptions: `HappyReact`, cooldown 10 s.
 
 **Ours:**
-- **A goal:** the net's swish plus a crowd swell (formant-filtered noise with a slow wobble).
+- **A goal:** the net, Soft_heavy (0.5, 0.75) + footstep_grass (0.6, 0.7): a low catch and a
+  rustle.
   - Our goal resets the ball 0.4 m past the line, before it can reach the net, so the net sound
     plays with the goal.
-  - We have no teams, so there is one goal sound.
-- **A shot on the post or bar:** also a crowd "ooh", for hits over 8 m/s (guessed), at most once
-  every 5 s (the game's cooldown).
+- **No crowd:** no goal swell and no "ooh" at the post. The pack has no crowd, and Kev found the
+  synthesised one cheap.
 
 ## Player movement
 
@@ -204,10 +216,13 @@ Shots in detail:
 - **Footsteps:** a stride clock on your speed.
   - Steps per second (guessed): 1.6 at walking pace, 2.7 at 5 m/s, 3.3 at 8 m/s, up to 3.6.
   - Walk under 3 m/s, Rush when sprinting or above 6.5 m/s (a dash), Run otherwise.
-  - Soft grass taps, harder and brighter the faster you go.
-  - Each step is 3% higher or lower at random, so they don't sound identical.
-- **Dash** (without the ball): a body whoosh with two shoe scuffs (guessed from the scuff names).
-- **Extra effort:** a rising power-up when it starts, a short falling tone when it ends.
+  - footstep_grass: walk (0.3, 0.95), run (0.4, 1.0), rush (0.5, 1.05).
+  - Volume from 40% up to 100% at sprint speed.
+  - Steps, touches, bounces, push balls and controls play up to 3% higher or lower at random, so
+    they don't sound identical.
+- **Dash** (without the ball): a hard foot plant, footstep_grass (0.8, 0.95).
+- **Dropped, for want of a sample:** extra effort's start and end, the fake shot's swish, and the
+  flying ball's whoosh.
 
 ## Not done yet
 
@@ -217,10 +232,12 @@ Shots in detail:
 - **Sprint start and stop**, breathing, grunts, tackles, dives, keeper sounds, headers, volleys,
   the UI's control tick, and crowd beds and reactions other than goals and posts.
 - **Surfaces:** one sound per surface family. No dirt, plexi or repulsive-wall variants.
-- **Settings:** `SfxSettings` (on/off, master volume) exists in `sfx.rs`, for the settings menu to
-  drive. Nothing in the menu sets it yet.
+- **Crowd:** goal swell, gasps, beds.
+- **Settings:** the Audio tab's global and SFX volumes drive `SfxSettings` (`follow_volumes`).
 - **Unconfirmed:**
-  - the Light/Medium/Strong bounce speeds;
+  - the Light/Medium/Strong bounce and wall speeds;
+  - the sample choices, volumes and pitches, picked by name and by measuring the files, not yet by
+    ear in the game;
   - every volume curve;
   - the stride rates;
   - which events each kick type posts (the shoot SFX table isn't extracted).
