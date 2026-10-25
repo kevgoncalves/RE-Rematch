@@ -278,5 +278,4 @@ mod tests {
         assert_eq!(run(&mut pos, &mut ball, 0.5), None);
         assert!(ball.vel.z < 0.0, "the end wall sends it back");
     }
-
 }

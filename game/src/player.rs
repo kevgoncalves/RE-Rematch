@@ -228,11 +228,6 @@ impl Turn {
     }
 }
 
-/// Starts a turn toward `dir` (turns.md §2). Entering slower than top speed, the game treats you
-/// as at top speed and starts the brake where its curve gives your speed, at most 20% in.
-/// When a move hands control back (a dash, a pass's drag, a shot's follow-through) with the stick
-/// against the way you're going, you turn as from a run: brake to the pivot and re-accelerate,
-/// instead of arcing round (players confirm a smooth change of way after a dash).
 /// Kev's softer hand-back out of a dribble, a pass or lob's drag or a shot (the game brakes and
 /// pivots, which he finds too punishing): a quick pivot, your heading and body swinging round to
 /// the stick together, with no brake.
@@ -251,6 +246,9 @@ fn swing_side(facing: f32, dir: Vec3) -> f32 {
     if d.abs() > std::f32::consts::PI - 0.05 { 1.0 } else { d.signum() }
 }
 
+/// When a dash or a push ball's chase hands control back with the stick against the way you're
+/// going, you turn as from a run: brake to the pivot and re-accelerate, instead of arcing round
+/// (players confirm a smooth change of way after a dash).
 fn hand_back(p: &mut Player, dir_now: Vec3, walking: bool, top: f32) {
     if p.locked || dir_now == Vec3::ZERO {
         return;
@@ -273,6 +271,8 @@ fn body_turn_rate(p: &Player, stick: f32) -> f32 {
     }
 }
 
+/// Starts a turn toward `dir` (turns.md §2). Entering slower than top speed, the game treats you
+/// as at top speed and starts the brake where its curve gives your speed, at most 20% in.
 fn start_turn(p: &Player, dir: Vec3, big: bool, speed: f32, top: f32) -> Turn {
     let (brake, accel, share) = turn_data(p.sprint_running, p.has_ball, big);
     let pivot = share * top;
@@ -427,10 +427,7 @@ impl Kick {
             Kick::PushBall | Kick::DribblePushBall => PUSH_BALL_WINDUP,
         }
     }
-}
 
-impl Kick {
-    /// Passes and lobs follow the pass-aim option; shots and push balls don't.
     /// Frames the kicker and the ball freeze at the touch (ShootDataTable's freeze frames): the
     /// power shot 5, quick shots, passes and lobs 3, low-power ones 2; push balls none.
     fn freeze_frames(self, speed: f32) -> f32 {

@@ -155,7 +155,6 @@ pub struct Marker {
     chain: bool,
 }
 
-
 /// The volley diamond on the ball (GC_VolleyPredict).
 #[derive(Component)]
 pub struct VolleyDiamond;
@@ -185,8 +184,7 @@ pub fn volley_target(p: &Player, root: &Transform, pos: Vec3, ball: &Ball) -> Op
     // The side margin: a smooth rise from 0 at 1.2 m behind to 5 m at 3 m ahead.
     let margin = |f: f32| {
         let u = ((f + 1.2) / 4.2).clamp(0.0, 1.0);
-        let (h00, h10, h01) = (2.0 * u.powi(3) - 3.0 * u * u + 1.0, u.powi(3) - 2.0 * u * u + u, -2.0 * u.powi(3) + 3.0 * u * u);
-        let _ = h00;
+        let (h10, h01) = (u.powi(3) - 2.0 * u * u + u, -2.0 * u.powi(3) + 3.0 * u * u);
         h10 * 4.2 * 2.512 + h01 * 5.0
     };
     let (mut at, mut ball) = (pos, ball.clone());
@@ -278,11 +276,11 @@ pub struct FxState {
 /// The marker's ring, about 80 cm across (SM_Bounce_Circle, 75 x 86 cm).
 const MARKER_RADII: (f32, f32) = (0.36, 0.43);
 
-/// A flat ring (in the local XZ plane), filled to `fill` of the way round.
 /// The marker's colours: the game's effect hue row starts blue and slides to cyan (its sheen).
 const MARKER_BLUE: Vec3 = Vec3::new(0.0, 0.25, 0.84);
 const MARKER_CYAN: Vec3 = Vec3::new(0.0, 0.68, 0.74);
 
+/// The marker's ring, flat in the local XZ plane.
 fn ring() -> Mesh {
     let n = 48;
     let (inner, outer) = MARKER_RADII;

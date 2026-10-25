@@ -247,7 +247,6 @@ struct Clips {
     /// Lock move with the ball: the right sole on it.
     sole: Pose,
     dash_front: OneShot,
-
     dash_side: OneShot,
     dash_back: OneShot,
     cycles: Vec<(Cycle, Clip)>,
@@ -1241,7 +1240,6 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         roulette,
         sole,
         dash_front,
-
         dash_side,
         dash_back,
         cycles: vec![
