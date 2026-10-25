@@ -579,10 +579,11 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
             (THIGH_R, [-38.0, 0.0, 10.0]),
             (SHIN_R, [118.0, 0.0, 0.0]),
             (FOOT_R, [-70.0, 0.0, 0.0]),
-            (UPPER_L, [55.0, 0.0, -65.0]),
-            (FORE_L, [25.0, 0.0, 0.0]),
-            (UPPER_R, [-50.0, 0.0, 35.0]),
-            (FORE_R, [35.0, 0.0, 0.0]),
+            // Both arms out wide at shoulder height while it charges (Kev's practice recording).
+            (UPPER_L, [10.0, 0.0, -85.0]),
+            (FORE_L, [15.0, 0.0, 0.0]),
+            (UPPER_R, [-15.0, 0.0, 85.0]),
+            (FORE_R, [15.0, 0.0, 0.0]),
         ]),
         stand.with(&[
             (PELVIS, [0.0, 12.0, 0.0]),

@@ -290,8 +290,9 @@ pub const PASS_CONTACT: f32 = 20.0 / 60.0;
 pub const KICK_BALL_SPOT: (f32, f32) = (0.4, 0.1);
 pub const KICK_BALL_PULL: f32 = 6.0;
 /// A kick released late (charged) leaves once its strike has had this long, so the ball doesn't
-/// fly before the leg swings through.
-pub const KICK_STRIKE_MIN: f32 = 4.0 / 60.0;
+/// fly before the leg swings through (Kev's practice recording: a charged shot's contact flash
+/// shows within a frame of 30 fps video of the release).
+pub const KICK_STRIKE_MIN: f32 = 2.0 / 60.0;
 pub const WINDUP_SPEED_SCALE: f32 = 0.5; // TUNE: how much you slow down winding up a pass or lob
 /// A shot keeps your run-up: through the build-up you slide on in the same direction at a share
 /// of your speed at the press that shrinks to this (HighPowerBeforeShootScaleSpeedData: 0.75, 0.6

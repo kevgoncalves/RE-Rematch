@@ -39,6 +39,25 @@ the game.
   - the shot's backswing and follow-through poses are deeper;
   - `MAX_JOINT_SPEED` is 2400 deg/s.
 
+## Practice recordings with an input overlay (2026-10-25)
+`Videos/2026-10-25 02-33-58.mkv` (17.8 min) and `02-55-47.mkv` (7 min), both at 30 fps. A key
+overlay lights each key yellow while it is held. It sits at (0, 861) in the first recording and at
+(1361, 856) in the second, and `keys.py` in the scratchpad reads it into press intervals.
+- **Bindings seen:** LMB is shoot, RMB is pass, Shift is sprint (double-tapped for extra effort),
+  Ctrl is lock, and Tab spawns the cannon ball.
+- **Coverage:** most of both recordings is cannon practice, which means volleys and headers on balls
+  fired at the player.
+- **Ground shots on the run** are at 184–292 s in the first recording, mostly charged for 0.5–0.8 s.
+  The second recording has fake shots at 251–296 s, where pass is pressed about 0.3 s into a
+  charge.
+- **A charged shot pressed during a control** (213.43 s):
+  - the wind-up starts as the control ends, about 0.23 s after the press;
+  - while it charges, the body leans forward with the heel up behind and both arms out wide at
+    shoulder height;
+  - the contact flash shows within a frame of the release (0.73 s).
+- **Where these went:** the shot's backswing holds the arms out wide, and `KICK_STRIKE_MIN` drops from
+  4 to 2 frames.
+
 ## Still wanted
 These clips are matches, so the moments of the presses are unknown and the camera moves. Short
 practice-mode clips would let us measure the slide distance and the exact timings:
