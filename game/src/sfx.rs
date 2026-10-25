@@ -249,12 +249,14 @@ pub fn shot_spin(spin: Vec3) -> Spin {
 pub fn kick_sound(kind: Kick, held: f32, speed: f32, spin: Vec3) -> (Sound, f32) {
     let max = player::charge(kind, held) >= 1.0;
     match kind {
-        Kick::Shot => (Sound::Shot(shot_power(speed), shot_spin(spin)), 0.85 + 0.15 * ((speed - SHOT_FORCE[0].1) / 14.0).clamp(0.0, 1.0)),
-        Kick::Pass => (Sound::Pass { max }, 1.0),
+        Kick::Shot | Kick::VolleyShot => (Sound::Shot(shot_power(speed), shot_spin(spin)), 0.85 + 0.15 * ((speed - SHOT_FORCE[0].1) / 14.0).clamp(0.0, 1.0)),
+        Kick::Pass | Kick::VolleyPass => (Sound::Pass { max }, 1.0),
         Kick::Lob => (Sound::Lob { max }, 1.0),
         Kick::ShortPass => (Sound::Pass { max: false }, 0.75),
         Kick::ShortLob => (Sound::Lob { max: false }, 0.75),
-        Kick::PushBall | Kick::DribblePushBall => (Sound::PushBall, 1.0),
+        Kick::PushBall | Kick::DribblePushBall | Kick::VolleyPushBall => (Sound::PushBall, 1.0),
+        // The flick is a soft scoop up: the lob's sound, never its full one.
+        Kick::LobbedPushBall | Kick::DribbleLobbedPushBall | Kick::VolleyLobbedPushBall => (Sound::Lob { max: false }, 0.8),
     }
 }
 
@@ -392,13 +394,13 @@ fn listen(
             cues.push((Sound::Net, 1.0));
         }
 
-        // A kick: the ball leaves your foot.
-        if let Some(k) = seen.kick
-            && p.kick.is_none()
-            && seen.held
-            && !b.held
-        {
-            cues.push(kick_sound(k.kind, k.held, b.vel.length(), b.spin));
+        // A kick: the ball leaves your foot. A volley's ball was never yours: its touch is the
+        // ball's sudden change of speed.
+        if let Some(k) = seen.kick.filter(|_| p.kick.is_none()) {
+            let volleyed = k.kind.is_volley() && (b.vel - seen.vel).length() > 2.0;
+            if (seen.held && !b.held) || volleyed {
+                cues.push(kick_sound(k.kind, k.held, b.vel.length(), b.spin));
+            }
         }
 
         // A control sounds as the ball becomes yours (the game's ownership change), by the ball's

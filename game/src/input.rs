@@ -77,7 +77,7 @@ impl Action {
 
     /// Bound and saved already, but the gameplay behind it isn't in the prototype yet.
     pub fn implemented(self) -> bool {
-        !matches!(self, Action::StandingTackle | Action::SlidingTackle | Action::Dive | Action::Ping | Action::LobbedPushBall)
+        !matches!(self, Action::StandingTackle | Action::SlidingTackle | Action::Dive | Action::Ping)
     }
 
     /// Only fires when tapped twice quickly and held (Rematch's QuickPressAndHold).
@@ -88,7 +88,7 @@ impl Action {
     /// Tap moves count on the press, or on the release if they weren't allowed at the press
     /// (responsiveness.md §1). Other kicks count while held.
     fn tap(self) -> bool {
-        matches!(self, Action::PushBall | Action::Dash)
+        matches!(self, Action::PushBall | Action::LobbedPushBall | Action::Dash)
     }
 }
 

@@ -216,6 +216,10 @@ pub fn volley_target(p: &Player, root: &Transform, pos: Vec3, ball: &Ball) -> Op
     };
     let (mut at, mut ball) = (pos, ball.clone());
     let dt = 1.0 / 240.0;
+    // Of the points that fit, the one closest to your own pace, preferring the 0.4-0.6 s ones (the
+    // picker's speed difference and delay weight; how it scores them exactly isn't read).
+    let pace = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
+    let mut best: Option<(f32, VolleySpot)> = None;
     for i in 1..=(0.6 / dt) as usize {
         if ball.vel != Vec3::ZERO && step(&mut at, &mut ball, dt).is_some() {
             return None;
@@ -231,11 +235,12 @@ pub fn volley_target(p: &Player, root: &Transform, pos: Vec3, ball: &Ball) -> Op
             && s.abs() < margin(f)
             && at.y - feet < 2.8
             && rel.length() / t <= reach;
-        if fits {
-            return Some(VolleySpot { at, t });
+        let score = (rel.length() / t - pace).abs() + if t < 0.4 { 4.0 } else { 0.0 };
+        if fits && best.is_none_or(|(b, _)| score < b) {
+            best = Some((score, VolleySpot { at, t }));
         }
     }
-    None
+    best.map(|(_, spot)| spot)
 }
 
 /// A mesh from flat-shaded, vertex-coloured triangles (the effects are unlit, so normals only
@@ -765,7 +770,9 @@ pub fn kick_marker(
 ) {
     let (btf, b) = *ball;
     let (m, tf, vis) = &mut *marker;
-    let kicked = last_kick.is_some_and(|k| !matches!(k, Kick::PushBall | Kick::DribblePushBall)) && player.kick.is_none() && !b.held;
+    // Push balls none, flicks included: the game's rule for its push-ball abilities (whether the
+    // lobbed ones show it isn't in the data; TUNE with Kev).
+    let kicked = last_kick.is_some_and(|k| !k.is_push()) && player.kick.is_none() && !b.held;
     *last_kick = player.kick.map(|k| k.kind);
     let arrived = m.chain && m.left > 0.0 && m.left <= time.delta_secs();
     let spot = if kicked || arrived {
@@ -1129,11 +1136,12 @@ pub fn action_fx(
     *last_kick = p.kick.map(|k| k.kind);
     if let Some(kind) = kicked {
         match kind {
-            Kick::Shot => shot_strike(&mut s, &fx, &mut state.rng, at, b.vel.normalize_or(Vec3::NEG_Z), b.vel.length()),
-            Kick::PushBall | Kick::DribblePushBall => push_touch(&mut s, &fx, &mut state.rng, &mut state.ghosts, at),
+            _ if kind.is_shot() => shot_strike(&mut s, &fx, &mut state.rng, at, b.vel.normalize_or(Vec3::NEG_Z), b.vel.length()),
+            _ if kind.is_push() => push_touch(&mut s, &fx, &mut state.rng, &mut state.ghosts, at),
             _ => pass_release(&mut s, &fx, &mut state.rng, at),
         }
-        state.kick_trail = !matches!(kind, Kick::PushBall | Kick::DribblePushBall) || at.y > 0.75;
+        // Ground push balls leave no trail (one kicked off the ground does); a flick, lofted, does.
+        state.kick_trail = !matches!(kind, Kick::PushBall | Kick::DribblePushBall | Kick::VolleyPushBall) || at.y > 0.75;
     }
     if b.held {
         state.kick_trail = false;
@@ -1318,29 +1326,54 @@ pub fn volley_diamond(
     mut parts: Query<(&VolleyDiamond, &mut Transform, &mut Visibility, &MeshMaterial3d<StandardMaterial>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut shown: Local<f32>,
+    mut confirm: Local<Option<Confirm>>,
 ) {
     let ((p, root), (btf, b)) = (*player, *ball);
     let on = volley_target(p, root, btf.translation, b).is_some();
     *shown = if on { *shown + time.delta_secs() } else { 0.0 };
     let fade_in = (*shown / 0.05).min(1.0);
     let flare = 1.0 - (*shown / 0.17).min(1.0);
-    let facing = Transform::from_translation(btf.translation).looking_at(camera.translation(), Vec3::Y);
-    for (part, mut tf, mut vis, mat) in &mut parts {
-        vis.set_if_neq(if on { Visibility::Inherited } else { Visibility::Hidden });
-        if !on {
-            continue;
+    // Once a volley starts, the diamond turns green and follows the ball to the touch, then stays
+    // there fading out over 0.35 s (GC_Volley's confirm).
+    let volleying = p.kick.is_some_and(|k| k.volley.is_some());
+    *confirm = match *confirm {
+        _ if volleying => Some(Confirm { at: btf.translation, fading: None }),
+        Some(Confirm { at, fading }) => {
+            let age = fading.map_or(0.0, |a| a + time.delta_secs());
+            (age < CONFIRM_FADE).then_some(Confirm { at, fading: Some(age) })
         }
-        let (c, alpha, scale) = match part {
+        None => None,
+    };
+    let green = (*confirm).filter(|_| !on);
+    let at = green.map_or(btf.translation, |c| c.at);
+    let facing = Transform::from_translation(at).looking_at(camera.translation(), Vec3::Y);
+    for (part, mut tf, mut vis, mat) in &mut parts {
+        vis.set_if_neq(if on || green.is_some() { Visibility::Inherited } else { Visibility::Hidden });
+        let (c, alpha, scale) = match (part, green) {
+            (_, None) if !on => continue,
             // Brighter than white can paint, so they stay pale and lit once tone-mapped.
-            VolleyDiamond::Arrows => (DIAMOND.lerp(WHITE, 0.7 * flare) * (1.6 + flare), 1.0, 1.0),
-            VolleyDiamond::Glow => (DIAMOND_GLOW, 0.35 + 0.55 * flare, 0.33 * (1.0 + 0.4 * flare)),
+            (VolleyDiamond::Arrows, None) => (DIAMOND.lerp(WHITE, 0.7 * flare) * (1.6 + flare), fade_in, 1.0),
+            (VolleyDiamond::Glow, None) => (DIAMOND_GLOW, (0.35 + 0.55 * flare) * fade_in, 0.33 * (1.0 + 0.4 * flare)),
+            (VolleyDiamond::Arrows, Some(g)) => (CONFIRM_GREEN, 1.0 - g.fading.unwrap_or(0.0) / CONFIRM_FADE, 1.0),
+            (VolleyDiamond::Glow, Some(g)) => (CONFIRM_GREEN * 0.5, 0.6 * (1.0 - g.fading.unwrap_or(0.0) / CONFIRM_FADE), 0.33),
         };
         *tf = facing.with_scale(Vec3::splat(scale));
         if let Some(m) = materials.get_mut(&mat.0) {
-            m.base_color = Color::linear_rgba(c.x, c.y, c.z, alpha * fade_in);
+            m.base_color = Color::linear_rgba(c.x, c.y, c.z, alpha);
         }
     }
 }
+
+/// The volley's green confirm: where it is, and how long it has been fading since the touch.
+#[derive(Clone, Copy)]
+pub struct Confirm {
+    at: Vec3,
+    fading: Option<f32>,
+}
+
+/// The confirm's green (GC_Volley's, linear) and its fade after the touch.
+const CONFIRM_GREEN: Vec3 = Vec3::new(0.0875, 1.75, 0.226);
+const CONFIRM_FADE: f32 = 0.35;
 
 #[cfg(test)]
 mod tests {

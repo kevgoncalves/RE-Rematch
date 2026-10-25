@@ -91,7 +91,7 @@ fn main() {
                 menu::update_systems(),
                 (player::grab_cursor, menu::show_menu).chain(),
                 camera::camera_look,
-                player::player_move,
+                (scripted_ball, player::player_move).chain(),
                 player::kicking,
                 player::ball_call,
                 player::ball_control,
@@ -110,6 +110,25 @@ fn main() {
                 .chain(),
         )
         .run();
+}
+
+/// For checking volleys in a scripted (headless) run: `RE_BALL=t:x,y,z:vx,vy,vz` throws the ball
+/// from that point at that velocity at `t` s, like a practice cannon.
+fn scripted_ball(time: Res<Time>, mut ball: Single<(&mut Transform, &mut Ball)>, mut done: Local<bool>) {
+    if *done || !headless() {
+        return;
+    }
+    let Some(script) = std::env::var("RE_BALL").ok() else { return };
+    let parts: Vec<Vec<f32>> = script.split(':').map(|s| s.split(',').filter_map(|n| n.trim().parse().ok()).collect()).collect();
+    let [at, from, vel] = parts.as_slice() else { return };
+    if at.len() != 1 || from.len() != 3 || vel.len() != 3 || time.elapsed_secs() < at[0] {
+        return;
+    }
+    let (tf, b) = &mut *ball;
+    **b = Ball::default();
+    tf.translation = Vec3::new(from[0], from[1], from[2]);
+    b.vel = Vec3::new(vel[0], vel[1], vel[2]);
+    *done = true;
 }
 
 /// For checking visuals: `RE_SCREENSHOT=out.png` saves a frame after 2 s (or `RE_SHOT_AT` s), then quits.
@@ -267,11 +286,13 @@ fn update_hud(
         Some(k) if !k.released => {
             let force = match k.kind {
                 Kick::Shot => curve(&SHOT_FORCE, player::charge(k.kind, k.held)),
+                Kick::VolleyShot => curve(&VOLLEY_SHOT_FORCE, k.held),
                 Kick::Pass => curve(&PASS_FORCE, player::charge(k.kind, k.held)),
+                Kick::VolleyPass => curve(&VOLLEY_PASS_FORCE, k.held),
                 Kick::Lob => curve(&LOB_FORCE, player::charge(k.kind, k.held)),
                 _ => 0.0,
             };
-            let curve_info = if k.kind == Kick::Shot { format!("  curve ({:+.2}, {:+.2})", axes.curve.x, axes.curve.y) } else { String::new() };
+            let curve_info = if k.kind.is_shot() { format!("  curve ({:+.2}, {:+.2})", axes.curve.x, axes.curve.y) } else { String::new() };
             format!("{:?} {:.2}s -> {:.1} m/s{}", k.kind, k.held, force, curve_info)
         }
         Some(k) => format!("{:?} {:.2}s{}", k.kind, k.elapsed, if k.released { " released" } else { "" }),

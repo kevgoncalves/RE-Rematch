@@ -599,6 +599,195 @@ pub const IPPY_BALL_BLEND: f32 = 0.1;
 pub const CARRY_MAX_REL_SPEED: f32 = 6.0;
 pub const NO_RECONTROL_TIME: f32 = 0.5; // GE_LostBall: no control of your own kick for 0.5 s
 
+// The rainbow flick: the lobbed push ball (notes/volleys-and-flicks.md §4), GA_LobbedPushBall's data.
+/// 11.5 m/s at 65 deg above the ground, scooped up off your foot.
+pub const FLICK_SPEED: f32 = 11.5;
+pub const FLICK_ANGLE: f32 = 65.0;
+/// The touch comes 22f after the press flicking ahead (within 45 deg of your facing), 16f to the
+/// sides or back (DT_LobbedPushBall).
+pub const FLICK_WINDUP_AHEAD: f32 = 22.0 / 60.0;
+pub const FLICK_WINDUP_TURNED: f32 = 16.0 / 60.0;
+/// The flick's way against your facing at the touch, as a dot product: ahead from 0.9 (about 26 deg),
+/// behind under -0.25 (about 104 deg). Each way's (speed factor, degrees added to the angle): ahead
+/// x0.982 +3.5, sideways x0.9 +10, behind x0.975 +3.5 (BP_LobbedPushBall_ForceFromDirection and
+/// _AngleFromDirection).
+pub const FLICK_AHEAD_DOT: f32 = 0.9;
+pub const FLICK_BEHIND_DOT: f32 = -0.25;
+pub const FLICK_BY_WAY: [(f32, f32); 3] = [(0.982, 3.5), (0.9, 10.0), (0.975, 3.5)];
+/// Sprinting at the press: x1.2 and 12.5 deg flatter, so it goes further (BP_LobbedPushBall_ForceFromSpeed).
+pub const FLICK_SPRINT: (f32, f32) = (1.2, -12.5);
+/// Out of stamina: faster and flatter, (m/s, deg) (BP_ExhaustedLobbedPushBallAbilityData).
+pub const EXHAUSTED_FLICK: (f32, f32) = (13.0, 58.0);
+/// A huge forced dip (the game's Magnus -2500, our spin.y +2500): it goes up steeply and hooks down
+/// about 5 m on, just over a defender's head. Ground friction and air drag are the defaults.
+pub const FLICK_SPIN: f32 = 2500.0;
+pub const FLICK_FRICTION: f32 = BASE_FRICTION;
+/// Nobody can control it for 0.5 s (BP_NoControl_LobbedPushBall).
+pub const FLICK_NO_CONTROL: f32 = 0.5;
+pub const FLICK_COST: f32 = 0.75;
+/// Moving through the wind-up (LobbedPushBallBuildUp*Data, m/s): flicking ahead you run onto the
+/// ball at 6 m/s if moving (over 1 m/s), 4 standing, 3.5 out of stamina, the flick's way.
+pub const FLICK_WINDUP_RUN: [&[(f32, f32)]; 3] = [&[(0.0, 6.0), (1.0, 6.0)], &[(0.0, 4.0), (1.0, 4.0)], &[(0.0, 3.5), (1.0, 3.5)]];
+/// Flicking to the side or back you stop to do it: your speed x1 at 10% of the wind-up, nothing by
+/// 80%; from under 2.5 m/s a 5 m/s step that dies the same way.
+pub const FLICK_TURNED_BRAKE: [(f32, f32); 4] = [(0.0, 1.0), (0.1, 1.0), (0.8, 0.0), (1.0, 0.0)];
+pub const FLICK_TURNED_STEP: [(f32, f32); 4] = [(0.0, 5.0), (0.1, 5.0), (0.8, 0.0), (1.0, 0.0)];
+pub const FLICK_STEP_BELOW: f32 = 2.5;
+/// After the touch (LobbedPushBallDash*Data): ahead you run on at your speed for 20f; sideways or
+/// back you come to a stop by a quarter (back: 30%) of 36f. The body turns along the ball's way over
+/// the 13f after the touch (the redirect window), and the stick takes you back from 35f after the
+/// press (the push-ball layer).
+pub const FLICK_AFTER_AHEAD: (f32, &[(f32, f32)]) = (20.0 / 60.0, &[(0.0, 1.0), (1.0, 1.0)]);
+pub const FLICK_AFTER_SIDE: (f32, &[(f32, f32)]) = (36.0 / 60.0, &[(0.0, 1.0), (0.25, 0.0), (1.0, 0.0)]);
+pub const FLICK_AFTER_BACK: (f32, &[(f32, f32)]) = (36.0 / 60.0, &[(0.0, 1.0), (0.3, 0.0), (1.0, 0.0)]);
+pub const FLICK_REDIRECT: f32 = 13.0 / 60.0;
+pub const FLICK_FREE: f32 = 35.0 / 60.0;
+// The flick out of a dribble (§5, GA_DribbleLobbedPushBall): from the dribble's 12th frame to its end.
+/// 12.5 m/s at 65 deg every way (no way modifiers); sprinting x1.1 and 5 deg flatter; out of stamina
+/// 12.75 m/s at 62 deg (dribble.md).
+pub const DRIBBLE_FLICK_SPEED: f32 = 12.5;
+pub const DRIBBLE_FLICK_SPRINT: (f32, f32) = (1.1, -5.0);
+pub const EXHAUSTED_DRIBBLE_FLICK: (f32, f32) = (12.75, 62.0);
+/// The touch 16f after the press, every way (DT_LobbedPushBall's dribble rows).
+pub const DRIBBLE_FLICK_WINDUP: f32 = 16.0 / 60.0;
+/// You keep the dribble's pace through the wind-up, the flick's way (BP_DribbleLobbedPushBallBuildUpData):
+/// 5 -> 6.5 m/s by 15% moving (over 1 m/s), 5 -> 6 by 10% standing, 3.5 -> 4.5 out of stamina; after
+/// the touch 20f at your speed (DribbleLobbedPushBallDashData).
+pub const DRIBBLE_FLICK_RUN: [&[(f32, f32)]; 3] = [&[(0.0, 5.0), (0.15, 6.5), (1.0, 6.5)], &[(0.0, 5.0), (0.1, 6.0), (1.0, 6.0)], &[(0.0, 3.5), (0.1, 4.5), (1.0, 4.5)]];
+pub const DRIBBLE_FLICK_AFTER: (f32, &[(f32, f32)]) = (20.0 / 60.0, &[(0.0, 1.0), (1.0, 1.0)]);
+
+// Volleys (§0): first-time kicks on a loose ball you don't own. Pressed while the volley diamond
+// shows (fx::volley_target), the kick meets the ball where that query found it, when the ball gets
+// there (0.33-0.6 s on): you run there meanwhile, and no control takes the ball first.
+/// Above this the meeting point is an air candidate: the push volleys become their jumping forms.
+pub const VOLLEY_GROUND_MAX: f32 = 2.1;
+/// At the touch the ball must still be this close to where it was to be met (m), or the volley
+/// misses (something else touched it). TUNE.
+pub const VOLLEY_REACH: f32 = 1.0;
+/// The approach runs at whatever speed gets you there in time, at most the query's limit (9.2 m/s,
+/// 11 in extra effort).
+pub const VOLLEY_APPROACH_SPEED: (f32, f32) = (9.2, 11.0);
+/// Where the ball meets you at the touch, by body part (foot, thigh, stomach, chest, head, jumping
+/// chest, jumping head): (m ahead of your root, m out to the ball's side). TUNE.
+pub const VOLLEY_CONTACT: [(f32, f32); 7] = [(0.45, 0.15), (0.35, 0.12), (0.3, 0.0), (0.28, 0.0), (0.22, 0.0), (0.3, 0.0), (0.25, 0.0)];
+/// The body sets itself for the touch this long before it (the run cycle plays until then). TUNE.
+pub const VOLLEY_SET: f32 = 0.15;
+/// Jumping touches leave the ground from 16f before the touch to 22f after (the clips' fly windows
+/// around their touch), high enough for the chest (1.35 m) or the head (1.75 m) to meet the ball:
+/// 0.15 to 0.8 m. TUNE.
+pub const VOLLEY_AIR: (f32, f32) = (16.0 / 60.0, 22.0 / 60.0);
+pub const VOLLEY_JUMP_REACH: (f32, f32) = (1.35, 1.75);
+pub const VOLLEY_JUMP_LIMITS: (f32, f32) = (0.15, 0.8);
+
+// The volley push ball (§3, GA_VolleyPushBall).
+/// The body part by the ball's height (m): foot under 0.3, thigh under 0.7, stomach under 1.2, chest
+/// under 1.65, head up to 2.1 (BP_VolleyPushBallMontagePicker).
+pub const VOLLEY_PUSH_HEIGHTS: [f32; 4] = [0.30, 0.70, 1.20, 1.65];
+/// Flat at 11.25 m/s, weaker off a higher ball (1 -> 0.8 by 3 m, read at the height less 0.15 m), x1.4
+/// sprinting at the touch, x0.9 pushed 45 deg or more off your facing; and never more than 30 deg off
+/// your facing (BP_VolleyPushBallAbilityData and its BP_VolleyFastTap_* modifiers).
+pub const VOLLEY_PUSH_SPEED: f32 = 11.25;
+pub const VOLLEY_PUSH_BY_HEIGHT: [(f32, f32); 2] = [(0.0, 1.0), (3.0, 0.8)];
+pub const VOLLEY_PUSH_SPRINT: f32 = 1.4;
+pub const VOLLEY_PUSH_TURNED: (f32, f32) = (45.0, 0.9);
+pub const VOLLEY_PUSH_CLAMP: f32 = 30.0;
+/// It rolls a little short (friction x1.6) and dips (the game's Magnus -1000, our spin.y +1000).
+pub const VOLLEY_PUSH_FRICTION: f32 = BASE_FRICTION * 1.6;
+pub const VOLLEY_PUSH_SPIN: f32 = 1000.0;
+/// Above 2.1 m, the jumping head push: 9 m/s at 40 deg, x0.7 to the sides (45-135 deg off your
+/// facing), x0.65 back, default friction and no forced spin (BP_VolleyAerialPushBallAbilityData).
+pub const AERIAL_PUSH: (f32, f32) = (9.0, 40.0);
+/// The jumping push takes the ball with the chest up to here, with the head higher (m). TUNE: the
+/// data has both clips but its picker wasn't read.
+pub const VOLLEY_AERIAL_CHEST_MAX: f32 = 2.4;
+pub const AERIAL_BY_WAY: [f32; 3] = [1.0, 0.7, 0.65];
+/// After the touch you run after it at 5.5 m/s (8.5 sprinting, 5 tired: the redirect and dash
+/// data); the stick takes you back from 12f after the touch (only sprint and extra effort are
+/// allowed then), the run ends at 26f (the push-ball layer).
+pub const VOLLEY_PUSH_RUN: [&[(f32, f32)]; 3] = [&[(0.0, 5.5), (1.0, 5.5)], &[(0.0, 8.5), (1.0, 8.5)], &[(0.0, 5.0), (1.0, 5.0)]];
+pub const VOLLEY_PUSH_FREE: f32 = 12.0 / 60.0;
+pub const VOLLEY_PUSH_AFTER: f32 = 26.0 / 60.0;
+
+// The volley lobbed push ball (§6, GA_VolleyLobbedPushBall): the flick of a loose ball.
+/// The body part by the ball's height (m): foot under 0.4, thigh under 0.8, stomach under 1.2, chest
+/// under 1.6, head up to 2.1 (BP_VolleyLobbedPushBallMontagePicker); above it the jumping flick.
+pub const VOLLEY_FLICK_HEIGHTS: [f32; 4] = [0.40, 0.80, 1.20, 1.60];
+/// 13.5 m/s at 75 deg, x r and r x -10 deg added, where r falls with the height of the touch (the
+/// ball's lowest point, m): 1 on the ground, 0.7 at 1.79 m, 0.5 at 3 m. So off the ground it goes up
+/// at 65 deg (BP_VolleyLobbedPushBallAbilityData, _ForceFromHeight).
+pub const VOLLEY_FLICK: (f32, f32) = (13.5, 75.0);
+pub const VOLLEY_FLICK_BY_HEIGHT: [(f32, f32); 3] = [(0.0, 1.0), (1.791, 0.7), (3.0, 0.5)];
+pub const VOLLEY_FLICK_HEIGHT_ANGLE: f32 = -10.0;
+/// Sprinting at the press: x1.1 and 10 deg flatter (_ForceFromSpeed). Out of stamina: 14.5 m/s at
+/// 68 deg, the height modifier only.
+pub const VOLLEY_FLICK_SPRINT: (f32, f32) = (1.1, -10.0);
+pub const EXHAUSTED_VOLLEY_FLICK: (f32, f32) = (14.5, 68.0);
+/// Above 2.1 m the jumping flick: 10 m/s at 65 deg, x0.7 sideways, x0.65 back (AERIAL_BY_WAY), no
+/// forced spin (BP_VolleyAerialLobbedPushBallAbilityData).
+pub const AERIAL_FLICK: (f32, f32) = (10.0, 65.0);
+/// After the touch you turn after the ball (the redirect): 3 m/s, rising to 5.25 by half of it
+/// (5 to 7.5 coming in faster than 1 m/s); the push-ball layer opens 22f after the touch.
+pub const VOLLEY_FLICK_RUN: [&[(f32, f32)]; 2] = [&[(0.0, 3.0), (0.1, 3.0), (0.5, 5.25), (1.0, 5.25)], &[(0.0, 5.0), (0.1, 5.0), (0.5, 7.5), (1.0, 7.5)]];
+pub const VOLLEY_FLICK_AFTER: f32 = 22.0 / 60.0;
+
+// The volley pass (§1, GA_VolleyTap).
+/// Volleys charge by seconds held, full at 0.25 s (their force curves' last key; read as seconds,
+/// TUNE if Kev finds it too quick). Still held at the touch, the touch reads it then.
+pub const VOLLEY_CHARGE_FULL: f32 = 0.25;
+/// The body part by the ball's height (m): foot under 0.2, thigh under 0.7, stomach under 1.2, chest
+/// under 1.7, head under 2.3, then the jumping header (BP_VolleyTapBuildupMontagePicker).
+pub const VOLLEY_PASS_HEIGHTS: [f32; 5] = [0.20, 0.70, 1.20, 1.70, 2.30];
+/// Speed by seconds held: the pass's curve squeezed into 0.25 s (BP_VolleyTapAbilityData_AnalogPower).
+pub const VOLLEY_PASS_FORCE: [(f32, f32); 5] = [(0.0, 20.0), (0.087, 20.0), (0.1725, 32.0), (0.1726, 25.6), (0.25, 30.65)];
+/// x by the ball's height (m): charged past 69% (a lifted pass) gently, otherwise down to 0.8 by
+/// 0.7 m; a ball above 1 m also x (1 to 35%, 0.89 at 69%, 1 full) of the charge
+/// (BP_VolleyTap_ForceDependingBallHeightAndTime).
+pub const VOLLEY_PASS_FLAT_BY_HEIGHT: [(f32, f32); 6] = [(0.11, 1.0), (0.115, 1.05), (0.18, 1.0), (0.20, 0.96), (0.70, 0.80), (3.2, 0.72)];
+pub const VOLLEY_PASS_LIFTED_BY_HEIGHT: [(f32, f32); 3] = [(0.15, 1.0), (1.0, 0.93), (3.2, 0.9)];
+pub const VOLLEY_PASS_HIGH_BALL: [(f32, f32); 4] = [(0.0, 1.0), (0.348, 1.0), (0.69, 0.89), (1.0, 1.0)];
+pub const VOLLEY_PASS_LIFTED_FROM: f32 = 0.69;
+/// Degrees up by the charge (lifted past 69%), and down by the ball's height (m) so a high ball
+/// isn't skied (Curve_VolleyTapPitchModifierDependingTime, BP_VolleyTap_AngleDependingBallHeight).
+pub const VOLLEY_PASS_LIFT: [(f32, f32); 4] = [(0.0, 0.0), (0.69, 0.0), (0.691, 3.9), (1.0, 6.0)];
+pub const VOLLEY_PASS_HEIGHT_PITCH: [(f32, f32); 3] = [(0.0, 0.0), (0.15, 0.0), (2.9, -8.0)];
+/// The touch freezes 3 frames (ShootDataTable's VolleyTap); you can act again this long after it,
+/// by body part (DT_VolleyTap): foot 10f, thigh 9, stomach 13, chest 15, head 16, jumping chest 26,
+/// jumping head 31.
+pub const VOLLEY_PASS_ACT: [f32; 7] = [10.0 / 60.0, 9.0 / 60.0, 13.0 / 60.0, 15.0 / 60.0, 16.0 / 60.0, 26.0 / 60.0, 31.0 / 60.0];
+/// Through that recovery you slow from your approach to this share of it. TUNE.
+pub const VOLLEY_RECOVERY: [(f32, f32); 2] = [(0.0, 1.0), (1.0, 0.3)];
+
+// The volley shot (§2, GA_VolleyShoot).
+/// The body part by the ball's height (m), standing (under 3 m/s at the press): foot under 0.3, thigh
+/// under 0.6 (the stomach to the sides, 40-125 deg off your facing), stomach under 1.3, chest under
+/// 1.6, head under 2.1, jumping chest under 2.5. Moving: foot under 0.4, thigh under 1.2, chest
+/// under 1.8, jumping chest under 2.3. Higher, the jumping head (moving's set; standing, the data
+/// falls back to the moving foot volley, which can't reach a ball that high: a deliberate change)
+/// (BP_VolleyShootMontagePicker).
+pub const VOLLEY_SHOT_MOVING: f32 = 3.0;
+pub const VOLLEY_SHOT_STANDING_HEIGHTS: [f32; 6] = [0.30, 0.60, 1.30, 1.60, 2.10, 2.50];
+pub const VOLLEY_SHOT_MOVING_HEIGHTS: [f32; 4] = [0.40, 1.20, 1.80, 2.30];
+pub const VOLLEY_SHOT_SIDE: (f32, f32) = (40.0, 125.0);
+/// Speed by seconds held: 24 m/s to 0.05 s, 38 at 0.25 s (BP_ShootForceFromInputCurve).
+pub const VOLLEY_SHOT_FORCE: [(f32, f32); 3] = [(0.0, 24.0), (0.05, 24.0), (0.25, 38.0)];
+/// On top, the shot's own bonuses (BP_Shoot_BallCharaOrientationModifier), scaled by the charge as
+/// for a shot (SHOT_RUN_BONUS_BY_FORCE): your run-up's (SHOT_FORCE_BY_RUN_SPEED), less off a high
+/// contact (x1 to 1.2 m, 0.9 at 1.5, 0.75 at 1.8, 0.4 at 2.2); and the incoming ball's pace sent
+/// back the way it came (+0 at 2 m/s to +3.25 at 30 m/s, all of it when the shot goes back within
+/// 120 deg of the ball's way in, none from 87 deg).
+pub const SHOT_BONUS_BY_IMPACT_HEIGHT: [(f32, f32); 5] = [(0.0, 1.0), (1.2, 1.0), (1.5, 0.9), (1.8, 0.75), (2.2, 0.4)];
+pub const SHOT_FORCE_BY_BALL_SPEED: [(f32, f32); 2] = [(2.0, 0.0), (30.0, 3.25)];
+pub const SHOT_BALL_DIR_RATIO: [(f32, f32); 4] = [(-1.0, 1.0), (-0.5, 1.0), (0.05, 0.0), (1.0, 0.0)];
+/// Degrees added to the camera's elevation by the ball's height (m): high volleys are kept down
+/// (BP_VolleyShoot_PitchDependingBallHeigh).
+pub const VOLLEY_SHOT_HEIGHT_PITCH: [(f32, f32); 5] = [(0.5, 0.5), (1.54, -3.25), (1.541, -3.5), (2.1, -6.0), (3.0, -8.0)];
+/// Every volley shot freezes 5 frames at the touch (ShootDataTable's VolleyShoot), and you can act
+/// again this long after it, by body part (the clips' cancel-window ends and GenericAll frames,
+/// rounded over the standing and moving sets): foot, thigh, stomach and head 30f, chest 35, jumping
+/// chest 33, jumping head 43.
+pub const VOLLEY_SHOT_FREEZE: f32 = 5.0;
+pub const VOLLEY_SHOT_ACT: [f32; 7] = [30.0 / 60.0, 30.0 / 60.0, 30.0 / 60.0, 35.0 / 60.0, 30.0 / 60.0, 33.0 / 60.0, 43.0 / 60.0];
+
 // Freeplay ball call
 pub const FEED_DISTANCE: f32 = 15.0; // TUNE
 pub const FEED_SPEED: f32 = 16.0; // TUNE

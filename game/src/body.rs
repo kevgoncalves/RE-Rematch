@@ -15,7 +15,7 @@ use std::sync::LazyLock;
 use bevy::prelude::*;
 
 use crate::fx::TrailPoint;
-use crate::player::{FeintTurn, Heading, Kick, KickState, Player, charge, contact_time, dribble_contact, roulette_turn, turn_out_angle, yaw_of};
+use crate::player::{FeintTurn, Heading, Kick, KickState, Part, Player, charge, contact_time, dribble_contact, roulette_turn, turn_out_angle, yaw_of};
 use crate::tuning::*;
 
 // Rematch's player (notes/animation.md §1), metres. The root entity is the capsule's centre.
@@ -232,6 +232,15 @@ struct Clips {
     shot_side: [Pose; 3],
     shot_back: [Pose; 3],
     heel: [Pose; 3],
+    /// The rainbow flick: ahead, and across the body to the left (mirrored for the right).
+    flick: [Pose; 3],
+    flick_side: [Pose; 3],
+    /// Volley touches on a ball in the air, the right side's (mirrored for a ball on the left): the
+    /// foot, the thigh, the stomach, the chest and the head; and a jumping header.
+    touch: [[Pose; 3]; 5],
+    jump_head: [Pose; 3],
+    /// The scissor kick: a volley shot struck high off the ground, falling back.
+    scissor: [Pose; 3],
     /// Landing out of a kick (the right foot), after its follow-through.
     land: Pose,
     start: OneShot,
@@ -980,6 +989,415 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
             (FORE_R, [30.0, 0.0, 0.0]),
         ]),
     ];
+    // The rainbow flick ahead (our own keys, from the description in volleys-and-flicks.md): the
+    // left foot plants beside the ball with the right toe dropped behind it; the toe slides under
+    // the ball and snaps up with the body upright and the arms out; the knee drives on up high and
+    // the body leans back, the head following the ball up and over.
+    let flick = [
+        stand.with(&[
+            (PELVIS, [0.0, -6.0, 0.0]),
+            (SPINE_J, [14.0, 0.0, -2.0]),
+            (CHEST_J, [2.0, 4.0, 0.0]),
+            (NECK_J, [-10.0, 0.0, 0.0]),
+            (THIGH_L, [22.0, 0.0, -6.0]),
+            (SHIN_L, [44.0, 0.0, 0.0]),
+            (FOOT_L, [-22.0, 0.0, 6.0]),
+            (THIGH_R, [-12.0, 0.0, 6.0]),
+            (SHIN_R, [62.0, 0.0, 0.0]),
+            (FOOT_R, [-40.0, 0.0, 0.0]),
+            (UPPER_L, [10.0, 0.0, -40.0]),
+            (FORE_L, [25.0, 0.0, 0.0]),
+            (UPPER_R, [0.0, 0.0, 40.0]),
+            (FORE_R, [25.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [0.0, 4.0, 0.0]),
+            (SPINE_J, [2.0, 0.0, 0.0]),
+            (CHEST_J, [-2.0, 0.0, 0.0]),
+            (NECK_J, [4.0, 0.0, 0.0]),
+            (THIGH_L, [12.0, 0.0, -6.0]),
+            (SHIN_L, [28.0, 0.0, 0.0]),
+            (FOOT_L, [-6.0, 0.0, 6.0]),
+            (THIGH_R, [38.0, 0.0, 2.0]),
+            (SHIN_R, [22.0, 0.0, 0.0]),
+            (FOOT_R, [-12.0, 0.0, 0.0]),
+            (UPPER_L, [25.0, 0.0, -55.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [15.0, 0.0, 55.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [0.0, 8.0, 0.0]),
+            (SPINE_J, [-10.0, 0.0, 0.0]),
+            (CHEST_J, [-4.0, 0.0, 0.0]),
+            (NECK_J, [-12.0, 0.0, 0.0]),
+            (THIGH_L, [4.0, 0.0, -4.0]),
+            (SHIN_L, [12.0, 0.0, 0.0]),
+            (FOOT_L, [20.0, 0.0, 4.0]),
+            (THIGH_R, [88.0, 0.0, 0.0]),
+            (SHIN_R, [70.0, 0.0, 0.0]),
+            (FOOT_R, [5.0, 0.0, 0.0]),
+            (UPPER_L, [40.0, 0.0, -65.0]),
+            (FORE_L, [35.0, 0.0, 0.0]),
+            (UPPER_R, [30.0, 0.0, 65.0]),
+            (FORE_R, [35.0, 0.0, 0.0]),
+        ]),
+    ];
+    // The flick across the body to the left (the right foot; mirrored for the right): the leg reaches
+    // out to the right with the toe under the ball, scoops it across and up with the inside of the
+    // foot, and follows on high across, the hips turning through.
+    let flick_side = [
+        stand.with(&[
+            (PELVIS, [0.0, -18.0, 0.0]),
+            (SPINE_J, [12.0, 0.0, -4.0]),
+            (CHEST_J, [2.0, 8.0, 0.0]),
+            (NECK_J, [-8.0, 6.0, 0.0]),
+            (THIGH_L, [20.0, 0.0, -8.0]),
+            (SHIN_L, [42.0, 0.0, 0.0]),
+            (FOOT_L, [-22.0, 0.0, 8.0]),
+            (THIGH_R, [-8.0, -25.0, 22.0]),
+            (SHIN_R, [48.0, 0.0, 0.0]),
+            (FOOT_R, [-30.0, 0.0, -12.0]),
+            (UPPER_L, [20.0, 0.0, -55.0]),
+            (FORE_L, [25.0, 0.0, 0.0]),
+            (UPPER_R, [-10.0, 0.0, 50.0]),
+            (FORE_R, [25.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [0.0, 14.0, 0.0]),
+            (SPINE_J, [4.0, 0.0, 6.0]),
+            (CHEST_J, [0.0, -6.0, 0.0]),
+            (NECK_J, [2.0, 0.0, 0.0]),
+            (THIGH_L, [14.0, 0.0, -6.0]),
+            (SHIN_L, [30.0, 0.0, 0.0]),
+            (FOOT_L, [-10.0, 0.0, 6.0]),
+            (THIGH_R, [34.0, 30.0, -8.0]),
+            (SHIN_R, [28.0, 0.0, 0.0]),
+            (FOOT_R, [-8.0, 0.0, 14.0]),
+            (UPPER_L, [30.0, 0.0, -60.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [10.0, 0.0, 60.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [0.0, 26.0, 0.0]),
+            (SPINE_J, [-6.0, 0.0, 8.0]),
+            (CHEST_J, [-2.0, -8.0, 0.0]),
+            (NECK_J, [-8.0, 10.0, 0.0]),
+            (THIGH_L, [4.0, 0.0, -4.0]),
+            (SHIN_L, [14.0, 0.0, 0.0]),
+            (FOOT_L, [18.0, 0.0, 4.0]),
+            (THIGH_R, [70.0, 38.0, -22.0]),
+            (SHIN_R, [55.0, 0.0, 0.0]),
+            (FOOT_R, [4.0, 0.0, 18.0]),
+            (UPPER_L, [40.0, 0.0, -60.0]),
+            (FORE_L, [35.0, 0.0, 0.0]),
+            (UPPER_R, [25.0, 0.0, 65.0]),
+            (FORE_R, [35.0, 0.0, 0.0]),
+        ]),
+    ];
+
+    // Volley touches (our own keys): the body sets itself under the ball, meets it and lets it go.
+    // The foot: the knee lifts and the foot cushions the ball on ahead, the laces flat.
+    let touch_foot = [
+        stand.with(&[
+            (SPINE_J, [10.0, 0.0, 0.0]),
+            (NECK_J, [6.0, 0.0, 0.0]),
+            (THIGH_L, [14.0, 0.0, -4.0]),
+            (SHIN_L, [30.0, 0.0, 0.0]),
+            (FOOT_L, [-16.0, 0.0, 4.0]),
+            (THIGH_R, [12.0, 0.0, 4.0]),
+            (SHIN_R, [52.0, 0.0, 0.0]),
+            (FOOT_R, [-30.0, 0.0, 0.0]),
+            (UPPER_L, [5.0, 0.0, -30.0]),
+            (UPPER_R, [0.0, 0.0, 30.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [6.0, 0.0, 0.0]),
+            (NECK_J, [8.0, 0.0, 0.0]),
+            (THIGH_L, [12.0, 0.0, -4.0]),
+            (SHIN_L, [28.0, 0.0, 0.0]),
+            (FOOT_L, [-16.0, 0.0, 4.0]),
+            (THIGH_R, [42.0, 0.0, 2.0]),
+            (SHIN_R, [30.0, 0.0, 0.0]),
+            (FOOT_R, [-2.0, 0.0, 0.0]),
+            (UPPER_L, [10.0, 0.0, -35.0]),
+            (UPPER_R, [0.0, 0.0, 35.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [8.0, 0.0, 0.0]),
+            (THIGH_L, [12.0, 0.0, -4.0]),
+            (SHIN_L, [26.0, 0.0, 0.0]),
+            (FOOT_L, [-14.0, 0.0, 4.0]),
+            (THIGH_R, [30.0, 0.0, 2.0]),
+            (SHIN_R, [42.0, 0.0, 0.0]),
+            (FOOT_R, [-6.0, 0.0, 0.0]),
+            (UPPER_L, [8.0, 0.0, -30.0]),
+            (UPPER_R, [0.0, 0.0, 30.0]),
+        ]),
+    ];
+    // The thigh: the knee comes up to hip height, the thigh flat under the ball, eyes on it.
+    let touch_thigh = [
+        stand.with(&[
+            (SPINE_J, [2.0, 0.0, 0.0]),
+            (NECK_J, [6.0, 0.0, 0.0]),
+            (THIGH_L, [12.0, 0.0, -4.0]),
+            (SHIN_L, [26.0, 0.0, 0.0]),
+            (FOOT_L, [-14.0, 0.0, 4.0]),
+            (THIGH_R, [30.0, 0.0, 6.0]),
+            (SHIN_R, [70.0, 0.0, 0.0]),
+            (FOOT_R, [-20.0, 0.0, 0.0]),
+            (UPPER_L, [10.0, 0.0, -45.0]),
+            (UPPER_R, [10.0, 0.0, 45.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [-4.0, 0.0, 0.0]),
+            (NECK_J, [12.0, 0.0, 0.0]),
+            (THIGH_L, [8.0, 0.0, -4.0]),
+            (SHIN_L, [20.0, 0.0, 0.0]),
+            (FOOT_L, [-6.0, 0.0, 4.0]),
+            (THIGH_R, [75.0, 0.0, 4.0]),
+            (SHIN_R, [85.0, 0.0, 0.0]),
+            (FOOT_R, [10.0, 0.0, 0.0]),
+            (UPPER_L, [15.0, 0.0, -55.0]),
+            (UPPER_R, [15.0, 0.0, 55.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [2.0, 0.0, 0.0]),
+            (NECK_J, [8.0, 0.0, 0.0]),
+            (THIGH_L, [10.0, 0.0, -4.0]),
+            (SHIN_L, [22.0, 0.0, 0.0]),
+            (FOOT_L, [-10.0, 0.0, 4.0]),
+            (THIGH_R, [55.0, 0.0, 4.0]),
+            (SHIN_R, [70.0, 0.0, 0.0]),
+            (FOOT_R, [5.0, 0.0, 0.0]),
+            (UPPER_L, [12.0, 0.0, -50.0]),
+            (UPPER_R, [12.0, 0.0, 50.0]),
+        ]),
+    ];
+    // The stomach: the arms swing back and the hips push through, the back arched over the ball.
+    let touch_belly = [
+        stand.with(&[
+            (SPINE_J, [12.0, 0.0, 0.0]),
+            (NECK_J, [4.0, 0.0, 0.0]),
+            (THIGH_L, [16.0, 0.0, -6.0]),
+            (SHIN_L, [32.0, 0.0, 0.0]),
+            (FOOT_L, [-16.0, 0.0, 6.0]),
+            (THIGH_R, [16.0, 0.0, 6.0]),
+            (SHIN_R, [32.0, 0.0, 0.0]),
+            (FOOT_R, [-16.0, 0.0, -6.0]),
+            (UPPER_L, [20.0, 0.0, -30.0]),
+            (UPPER_R, [20.0, 0.0, 30.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [-14.0, 0.0, 0.0]),
+            (CHEST_J, [-6.0, 0.0, 0.0]),
+            (NECK_J, [18.0, 0.0, 0.0]),
+            (THIGH_L, [-6.0, 0.0, -6.0]),
+            (SHIN_L, [22.0, 0.0, 0.0]),
+            (FOOT_L, [-28.0, 0.0, 6.0]),
+            (THIGH_R, [-6.0, 0.0, 6.0]),
+            (SHIN_R, [22.0, 0.0, 0.0]),
+            (FOOT_R, [-28.0, 0.0, -6.0]),
+            (UPPER_L, [-30.0, 0.0, -30.0]),
+            (UPPER_R, [-30.0, 0.0, 30.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [-4.0, 0.0, 0.0]),
+            (NECK_J, [8.0, 0.0, 0.0]),
+            (THIGH_L, [6.0, 0.0, -6.0]),
+            (SHIN_L, [16.0, 0.0, 0.0]),
+            (FOOT_L, [-10.0, 0.0, 6.0]),
+            (THIGH_R, [6.0, 0.0, 6.0]),
+            (SHIN_R, [16.0, 0.0, 0.0]),
+            (FOOT_R, [-10.0, 0.0, -6.0]),
+            (UPPER_L, [-10.0, 0.0, -35.0]),
+            (UPPER_R, [-10.0, 0.0, 35.0]),
+        ]),
+    ];
+    // The chest: knees bent and arms wide, the body leans back and the chest takes the ball, the
+    // chin down watching it.
+    let touch_chest = [
+        stand.with(&[
+            (SPINE_J, [4.0, 0.0, 0.0]),
+            (NECK_J, [-6.0, 0.0, 0.0]),
+            (THIGH_L, [24.0, 0.0, -6.0]),
+            (SHIN_L, [44.0, 0.0, 0.0]),
+            (FOOT_L, [-20.0, 0.0, 6.0]),
+            (THIGH_R, [24.0, 0.0, 6.0]),
+            (SHIN_R, [44.0, 0.0, 0.0]),
+            (FOOT_R, [-20.0, 0.0, -6.0]),
+            (UPPER_L, [10.0, 0.0, -60.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [10.0, 0.0, 60.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [-18.0, 0.0, 0.0]),
+            (CHEST_J, [-10.0, 0.0, 0.0]),
+            (NECK_J, [16.0, 0.0, 0.0]),
+            (THIGH_L, [20.0, 0.0, -6.0]),
+            (SHIN_L, [36.0, 0.0, 0.0]),
+            (FOOT_L, [-16.0, 0.0, 6.0]),
+            (THIGH_R, [20.0, 0.0, 6.0]),
+            (SHIN_R, [36.0, 0.0, 0.0]),
+            (FOOT_R, [-16.0, 0.0, -6.0]),
+            (UPPER_L, [-10.0, 0.0, -70.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [-10.0, 0.0, 70.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [-6.0, 0.0, 0.0]),
+            (CHEST_J, [-2.0, 0.0, 0.0]),
+            (NECK_J, [6.0, 0.0, 0.0]),
+            (THIGH_L, [12.0, 0.0, -6.0]),
+            (SHIN_L, [24.0, 0.0, 0.0]),
+            (FOOT_L, [-12.0, 0.0, 6.0]),
+            (THIGH_R, [12.0, 0.0, 6.0]),
+            (SHIN_R, [24.0, 0.0, 0.0]),
+            (FOOT_R, [-12.0, 0.0, -6.0]),
+            (UPPER_L, [5.0, 0.0, -55.0]),
+            (UPPER_R, [5.0, 0.0, 55.0]),
+        ]),
+    ];
+    // The head: knees bent and the head back, then the neck nods through the ball as the legs
+    // straighten onto the toes, the arms swinging down.
+    let touch_head = [
+        stand.with(&[
+            (SPINE_J, [-10.0, 0.0, 0.0]),
+            (NECK_J, [-20.0, 0.0, 0.0]),
+            (THIGH_L, [22.0, 0.0, -6.0]),
+            (SHIN_L, [40.0, 0.0, 0.0]),
+            (FOOT_L, [-18.0, 0.0, 6.0]),
+            (THIGH_R, [22.0, 0.0, 6.0]),
+            (SHIN_R, [40.0, 0.0, 0.0]),
+            (FOOT_R, [-18.0, 0.0, -6.0]),
+            (UPPER_L, [30.0, 0.0, -50.0]),
+            (FORE_L, [40.0, 0.0, 0.0]),
+            (UPPER_R, [30.0, 0.0, 50.0]),
+            (FORE_R, [40.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [10.0, 0.0, 0.0]),
+            (NECK_J, [16.0, 0.0, 0.0]),
+            (THIGH_L, [6.0, 0.0, -6.0]),
+            (SHIN_L, [10.0, 0.0, 0.0]),
+            (FOOT_L, [6.0, 0.0, 6.0]),
+            (THIGH_R, [6.0, 0.0, 6.0]),
+            (SHIN_R, [10.0, 0.0, 0.0]),
+            (FOOT_R, [6.0, 0.0, -6.0]),
+            (UPPER_L, [-10.0, 0.0, -45.0]),
+            (FORE_L, [25.0, 0.0, 0.0]),
+            (UPPER_R, [-10.0, 0.0, 45.0]),
+            (FORE_R, [25.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [16.0, 0.0, 0.0]),
+            (NECK_J, [10.0, 0.0, 0.0]),
+            (THIGH_L, [10.0, 0.0, -6.0]),
+            (SHIN_L, [18.0, 0.0, 0.0]),
+            (FOOT_L, [-6.0, 0.0, 6.0]),
+            (THIGH_R, [10.0, 0.0, 6.0]),
+            (SHIN_R, [18.0, 0.0, 0.0]),
+            (FOOT_R, [-6.0, 0.0, -6.0]),
+            (UPPER_L, [0.0, 0.0, -40.0]),
+            (UPPER_R, [0.0, 0.0, 40.0]),
+        ]),
+    ];
+    // A jumping header: a deep crouch with the arms back to take off, then in the air the body
+    // arches and snaps the head through the ball, the legs trailing and the arms up and out; it
+    // lands on bent knees.
+    let jump_head = [
+        stand.with(&[
+            (SPINE_J, [24.0, 0.0, 0.0]),
+            (NECK_J, [-14.0, 0.0, 0.0]),
+            (THIGH_L, [45.0, 0.0, -6.0]),
+            (SHIN_L, [85.0, 0.0, 0.0]),
+            (FOOT_L, [-35.0, 0.0, 6.0]),
+            (THIGH_R, [45.0, 0.0, 6.0]),
+            (SHIN_R, [85.0, 0.0, 0.0]),
+            (FOOT_R, [-35.0, 0.0, -6.0]),
+            (UPPER_L, [-40.0, 0.0, -20.0]),
+            (UPPER_R, [-40.0, 0.0, 20.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [8.0, 0.0, 0.0]),
+            (CHEST_J, [4.0, 0.0, 0.0]),
+            (NECK_J, [18.0, 0.0, 0.0]),
+            (THIGH_L, [-10.0, 0.0, -6.0]),
+            (SHIN_L, [60.0, 0.0, 0.0]),
+            (FOOT_L, [20.0, 0.0, 6.0]),
+            (THIGH_R, [10.0, 0.0, 6.0]),
+            (SHIN_R, [70.0, 0.0, 0.0]),
+            (FOOT_R, [20.0, 0.0, -6.0]),
+            (UPPER_L, [60.0, 0.0, -60.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [60.0, 0.0, 60.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (SPINE_J, [16.0, 0.0, 0.0]),
+            (NECK_J, [4.0, 0.0, 0.0]),
+            (THIGH_L, [30.0, 0.0, -6.0]),
+            (SHIN_L, [55.0, 0.0, 0.0]),
+            (FOOT_L, [-25.0, 0.0, 6.0]),
+            (THIGH_R, [30.0, 0.0, 6.0]),
+            (SHIN_R, [55.0, 0.0, 0.0]),
+            (FOOT_R, [-25.0, 0.0, -6.0]),
+            (UPPER_L, [20.0, 0.0, -50.0]),
+            (UPPER_R, [20.0, 0.0, 50.0]),
+        ]),
+    ];
+    let touch = [touch_foot, touch_thigh, touch_belly, touch_chest, touch_head];
+    // The scissor kick (Kev's recording of a jumping volley: the knee up a moment before the touch,
+    // the body almost flat, the foot at head height, then the fall): the left knee drives up to take
+    // off; in the air the body tilts back and the right leg swings up through the ball, the left
+    // tucked; then the body falls on back, the arms reaching back for the ground.
+    let scissor = [
+        stand.with(&[
+            (SPINE_J, [10.0, 0.0, 0.0]),
+            (NECK_J, [-10.0, 0.0, 0.0]),
+            (THIGH_L, [70.0, 0.0, -6.0]),
+            (SHIN_L, [90.0, 0.0, 0.0]),
+            (FOOT_L, [-10.0, 0.0, 6.0]),
+            (THIGH_R, [10.0, 0.0, 6.0]),
+            (SHIN_R, [40.0, 0.0, 0.0]),
+            (FOOT_R, [-20.0, 0.0, -6.0]),
+            (UPPER_L, [20.0, 0.0, -70.0]),
+            (UPPER_R, [-10.0, 0.0, 70.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [-40.0, 0.0, 0.0]),
+            (SPINE_J, [-10.0, 0.0, 0.0]),
+            (NECK_J, [20.0, 0.0, 0.0]),
+            (THIGH_L, [40.0, 0.0, -6.0]),
+            (SHIN_L, [80.0, 0.0, 0.0]),
+            (FOOT_L, [0.0, 0.0, 6.0]),
+            (THIGH_R, [115.0, 0.0, -4.0]),
+            (SHIN_R, [10.0, 0.0, 0.0]),
+            (FOOT_R, [40.0, 0.0, 0.0]),
+            (UPPER_L, [30.0, 0.0, -80.0]),
+            (FORE_L, [20.0, 0.0, 0.0]),
+            (UPPER_R, [0.0, 0.0, 80.0]),
+            (FORE_R, [20.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [-55.0, 0.0, 0.0]),
+            (SPINE_J, [-6.0, 0.0, 0.0]),
+            (NECK_J, [16.0, 0.0, 0.0]),
+            (THIGH_L, [70.0, 0.0, -6.0]),
+            (SHIN_L, [60.0, 0.0, 0.0]),
+            (FOOT_L, [0.0, 0.0, 6.0]),
+            (THIGH_R, [70.0, 0.0, 0.0]),
+            (SHIN_R, [30.0, 0.0, 0.0]),
+            (FOOT_R, [30.0, 0.0, 0.0]),
+            (UPPER_L, [-40.0, 0.0, -40.0]),
+            (FORE_L, [10.0, 0.0, 0.0]),
+            (UPPER_R, [-40.0, 0.0, 40.0]),
+            (FORE_R, [10.0, 0.0, 0.0]),
+        ]),
+    ];
 
     // Dribbles, timed to their touch. A fast cut drops into a deep crouch on the left foot, drives
     // the ball on with the right at 17f low and leaning in, then runs out of it.
@@ -1425,6 +1843,11 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         shot_side,
         shot_back,
         heel,
+        flick,
+        flick_side,
+        touch,
+        jump_head,
+        scissor,
         land,
         start,
         stop,
@@ -1492,10 +1915,15 @@ fn play_rate(speed: f32, clip: &Clip, corner: f32) -> f32 {
 
 /// A kick's follow-through after its contact, to where the run picks up again (a power shot's
 /// in Kev's practice recording; lighter kicks go through the same in less time).
-fn follow_time(kind: Kick) -> f32 {
-    match kind {
-        Kick::Shot => 0.5,
+fn follow_time(k: &KickState) -> f32 {
+    match k.kind {
+        // A jumping volley follows through until it lands.
+        _ if k.volley.is_some_and(|v| v.jump > 0.0) => VOLLEY_AIR.1 + 0.15,
+        Kick::VolleyPushBall => 0.25,
+        Kick::Shot | Kick::VolleyShot => 0.5,
         Kick::PushBall | Kick::DribblePushBall => 0.2,
+        // The knee stays up a moment after the scoop.
+        Kick::LobbedPushBall | Kick::DribbleLobbedPushBall => 0.3,
         // Passes and lobs are back in their run 0.15-0.28 s after the touch.
         _ => 0.25,
     }
@@ -1508,6 +1936,30 @@ fn kick_size(kind: Kick) -> f32 {
         Kick::Pass | Kick::Lob => 1.0,
         Kick::ShortPass | Kick::ShortLob => 0.75,
         Kick::PushBall | Kick::DribblePushBall => 0.4,
+        Kick::LobbedPushBall | Kick::DribbleLobbedPushBall => 0.9,
+        Kick::VolleyPushBall | Kick::VolleyLobbedPushBall => 0.85,
+        Kick::VolleyPass => 0.9,
+        Kick::VolleyShot => 1.0,
+    }
+}
+
+/// A volley's keys by the body part it meets the ball with, for the right side.
+fn volley_keys(clips: &Clips, kind: Kick, part: Part) -> [Pose; 3] {
+    match part {
+        // A flick off the foot is the rainbow flick's scoop; a pass, the inside of the foot's.
+        Part::Foot if kind.is_flick() => clips.flick,
+        Part::Foot if kind == Kick::VolleyPass => clips.kicks[1],
+        // A shot: the half-volley is the shot's strike, the thigh to chest a volley swept across the
+        // body, the head a header, a jumping one the scissor kick.
+        Part::Foot if kind == Kick::VolleyShot => clips.kicks[0],
+        Part::Thigh | Part::Pelvis | Part::Chest if kind == Kick::VolleyShot => clips.shot_side,
+        Part::JumpChest | Part::JumpHead if kind == Kick::VolleyShot => clips.scissor,
+        Part::Foot => clips.touch[0],
+        Part::Thigh => clips.touch[1],
+        Part::Pelvis => clips.touch[2],
+        Part::Chest => clips.touch[3],
+        Part::Head => clips.touch[4],
+        Part::JumpChest | Part::JumpHead => clips.jump_head,
     }
 }
 
@@ -1525,10 +1977,10 @@ pub struct Animator {
     lateral: f32,
     heading: Vec3,
     kick: Option<KickState>,
-    follow: Option<(f32, Kick)>,
+    follow: Option<(f32, KickState)>,
     action: f32,
     /// The kick pose last shown, kept to fade out from once the kick is over.
-    kick_last: Option<(Pose, Kick, f32)>,
+    kick_last: Option<(Pose, KickState, f32)>,
     /// The kick's sector against the body (degrees, left +) and its charge (0..1): they pick its
     /// clip, its turn and the size of its backswing.
     kick_turn: f32,
@@ -1863,7 +2315,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
 
     // Kicks on top: wind up while charging, swing to the contact frame, follow through.
     match (anim.kick, p.kick) {
-        (Some(was), None) if p.fake.is_none() => anim.follow = Some((0.0, was.kind)),
+        (Some(was), None) if p.fake.is_none() => anim.follow = Some((0.0, was)),
         (_, Some(_)) => anim.follow = None,
         _ => {}
     }
@@ -1871,9 +2323,9 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     // The follow-through holds while the kick still slides you on (its drag), then fades; running
     // on out of it, it fades quicker into the run.
     let run_out = speed > 1.5 && !p.kick_sliding();
-    if let Some((t, kind)) = anim.follow.as_mut() {
+    if let Some((t, k)) = anim.follow.as_mut() {
         *t += dt;
-        if *t > follow_time(*kind) && !p.kick_sliding() {
+        if *t > follow_time(k) && !p.kick_sliding() {
             anim.follow = None;
         }
     }
@@ -1881,13 +2333,21 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     // mirrored onto the other foot): shots forward, across the body or turning back; passes and
     // lobs open toward their target, a heel flick going back. With it, how much of the sector's
     // turn the body adds on top (the side and back clips carry their own).
-    let keys = |kind: Kick, turn: f32| -> ([Pose; 3], f32) {
+    let keys = |k: &KickState, turn: f32| -> ([Pose; 3], f32) {
+        // A volley's by the part it meets the ball with, the left side's mirrored.
+        if let Some(v) = k.volley {
+            let set = volley_keys(clips, k.kind, v.part);
+            return (if v.left { set.map(|p| p.mirror()) } else { set }, 0.0);
+        }
+        let kind = k.kind;
         let side = |set: &[Pose; 3]| if turn < 0.0 { set.map(|p| p.mirror()) } else { *set };
         match kind {
             Kick::Shot if turn.abs() > 120.0 => (side(&clips.shot_back), 0.0),
             Kick::Shot if turn.abs() > 30.0 => (side(&clips.shot_side), 0.3),
             Kick::Shot => (clips.kicks[0], 1.0),
             _ if turn.abs() > 135.0 => (clips.heel, 0.0),
+            _ if kind.is_flick() && turn.abs() > 45.0 => (side(&clips.flick_side), 0.3),
+            _ if kind.is_flick() => (clips.flick, 1.0),
             Kick::Pass | Kick::ShortPass => (clips.kicks[1], 1.0),
             Kick::Lob | Kick::ShortLob => (clips.kicks[2], 1.0),
             _ => (clips.kicks[0], 1.0),
@@ -1899,7 +2359,14 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     // against the body. Each of the game's clips carries its own turn that way.
     let wrap = |a: f32| (a + PI).rem_euclid(TAU) - PI;
     if let Some(k) = p.kick {
-        let aim = if k.kind != Kick::Shot && k.steer != Vec3::ZERO { yaw_of(k.steer) } else { k.aim.x.to_radians() };
+        // A flick with no stick goes the way you face.
+        let aim = if k.kind != Kick::Shot && k.steer != Vec3::ZERO {
+            yaw_of(k.steer)
+        } else if k.kind.is_flick() {
+            p.facing
+        } else {
+            k.aim.x.to_radians()
+        };
         anim.kick_turn = wrap(aim - p.facing).to_degrees().clamp(-150.0, 150.0);
         anim.kick_power = charge(k.kind, k.held);
     }
@@ -1911,7 +2378,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     const STRIKE: f32 = 4.0 / 60.0;
     const WINDUP_IN: f32 = 0.12;
     let kick_pose = if let Some(k) = p.kick.filter(|k| !push(k.kind)) {
-        let ([windup, hit, _], _) = keys(k.kind, anim.kick_turn);
+        let ([windup, hit, _], _) = keys(&k, anim.kick_turn);
         let first = contact_time(&k);
         let up = |t: f32, end: f32| {
             let u = (t / end.max(1.0 / 60.0)).min(1.0);
@@ -1920,11 +2387,18 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         // Passes and lobs don't cock the leg early or hold it while they charge: you run on until
         // the standing foot plants PASS_PLANT before the strike, then the leg swings back and
         // through (Kev's practice recording).
+        // A volley sets itself VOLLEY_SET before its touch (a jump crouches as it takes off), the
+        // run cycle playing as you get there until then.
         const PASS_PLANT: f32 = 0.06;
-        let late = k.kind.is_pass();
+        let late = k.kind.is_pass() || k.kind.is_flick() || k.volley.is_some();
+        let plant = match k.volley {
+            Some(v) if v.jump > 0.0 => VOLLEY_AIR.0,
+            Some(_) => VOLLEY_SET,
+            None => PASS_PLANT,
+        };
         let release = (k.held - k.pre).max(0.0);
         let strike_at = (first - STRIKE).max(if k.released { release } else { f32::INFINITY });
-        if late && k.elapsed < strike_at - PASS_PLANT {
+        if late && k.elapsed < strike_at - plant {
             None
         } else {
         let (key, turn) = if !k.released && !late {
@@ -1932,7 +2406,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             (clips.stand.lerp(&windup, w), 0.3 * w)
         } else {
             if k.elapsed < strike_at {
-                let w = if late { up(k.elapsed - (strike_at - PASS_PLANT), PASS_PLANT) } else { up(k.elapsed, strike_at.min(WINDUP_IN)) };
+                let w = if late { up(k.elapsed - (strike_at - plant), plant) } else { up(k.elapsed, strike_at.min(WINDUP_IN)) };
                 (clips.stand.lerp(&windup, w), 0.3 * w)
             } else {
                 let s = ((k.elapsed - strike_at) / (first.max(release) - strike_at).max(4.0 / 60.0)).clamp(0.0, 1.0);
@@ -1940,16 +2414,17 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
                 (windup.lerp(&hit, s), 0.3 + 0.4 * s)
             }
         };
-        Some((key, k.kind, turn))
+        Some((key, k, turn))
         }
     } else {
         // After the touch, as in Kev's practice recording of power shots on the run: the leg drives
         // up high by a fifth of the follow-through (0.1 s) with the body leaning back, stays up to
         // two fifths, comes down into a long lunging stride by seven tenths, and the run picks up
         // from it at the end (held while the kick slides you).
-        anim.follow.filter(|(_, kind)| !push(*kind)).map(|(t, kind)| {
-            let ([_, hit, through], _) = keys(kind, anim.kick_turn);
-            let u = t / follow_time(kind);
+        anim.follow.filter(|(_, k)| !push(k.kind)).map(|(t, k)| {
+            let kind = k.kind;
+            let ([_, hit, through], _) = keys(&k, anim.kick_turn);
+            let u = t / follow_time(&k);
             let a = (u / 0.2).min(1.0);
             let a = 1.0 - (1.0 - a) * (1.0 - a);
             let b = ((u - 0.4) / 0.3).clamp(0.0, 1.0);
@@ -1959,14 +2434,14 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             let left_foot = kind == Kick::Shot && anim.kick_turn < -30.0;
             let land = if left_foot { clips.land.mirror() } else { clips.land };
             let land = if kind == Kick::Shot { land } else { clips.stand.lerp(&land, 0.4) };
-            (hit.lerp(&through, a).lerp(&land, b), kind, 0.7 + 0.15 * a)
+            (hit.lerp(&through, a).lerp(&land, b), k, 0.7 + 0.15 * a)
         })
     };
     // A push ball: the right foot reaches through the ball by its touch (8f) and back, the legs
     // running on underneath.
-    let push_touch = match (p.kick.filter(|k| push(k.kind)), anim.follow.filter(|(_, kind)| push(*kind))) {
+    let push_touch = match (p.kick.filter(|k| push(k.kind)), anim.follow.filter(|(_, k)| push(k.kind))) {
         (Some(k), _) => (k.elapsed / contact_time(&k).max(1.0 / 60.0)).min(1.0),
-        (_, Some((t, kind))) => 1.0 - t / follow_time(kind),
+        (_, Some((t, k))) => 1.0 - t / follow_time(&k),
         _ => 0.0,
     };
     if push_touch > 0.0 {
@@ -2016,13 +2491,28 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     } else if anim.action <= 0.0 {
         anim.kick_last = None;
     }
-    if let Some((key, kind, turn)) = anim.kick_last {
+    if let Some((key, k, turn)) = anim.kick_last {
         // Power shows in the swing's size: three quarters for a tap, all of it fully charged.
-        let size = kick_size(kind) * (0.75 + 0.25 * anim.kick_power);
+        let size = kick_size(k.kind) * (0.75 + 0.25 * anim.kick_power);
         let w = anim.action * anim.action * (3.0 - 2.0 * anim.action);
         pose = pose.lerp(&clips.stand.lerp(&key, size), w);
-        pose.0[PELVIS].y += anim.kick_turn * turn * keys(kind, anim.kick_turn).1 * w;
+        pose.0[PELVIS].y += anim.kick_turn * turn * keys(&k, anim.kick_turn).1 * w;
     }
+    // A jumping volley leaves the ground around its touch: up and down on a parabola over its
+    // flight (VOLLEY_AIR), as high as it needs.
+    let air = match (p.kick, anim.follow) {
+        (Some(k), _) => k.volley.map(|v| (k.elapsed - v.t, v.jump)),
+        (None, Some((t, k))) => k.volley.map(|v| (t, v.jump)),
+        _ => None,
+    };
+    if let Some((tau, jump)) = air.filter(|(_, jump)| *jump > 0.0) {
+        let (before, after) = VOLLEY_AIR;
+        let u = (tau + before) / (before + after);
+        if (0.0..=1.0).contains(&u) {
+            lift += jump * 4.0 * u * (1.0 - u);
+        }
+    }
+
     // Dribbles and dashes on top (the game's move montages): in over 0.05 s (dashes 0.1 s), out over
     // BLEND_OUT from when you get the stick back (the montage's blend-out, not its end), faster
     // under a kick. A chained move crossfades from the last one over 0.1 s (the feint's blend-in).

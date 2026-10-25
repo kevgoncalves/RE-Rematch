@@ -209,8 +209,8 @@ impl CameraState {
 fn pick_state(p: &Player) -> CamState {
     use CamState::*;
     match p.kick {
-        Some(k) if k.kind == Kick::Shot && !k.released => return Shoot,
-        Some(k) if k.kind == Kick::Shot => return LockShot,
+        Some(k) if k.kind.is_shot() && !k.released => return Shoot,
+        Some(k) if k.kind.is_shot() => return LockShot,
         _ => {}
     }
     match (p.locked, p.has_ball) {
@@ -268,14 +268,14 @@ pub fn camera_look(
         // press. The camera keeps following you as you slide on and turns to keep the crosshair
         // on that point (the lock shot; players confirm the aim locks as a shot starts, and passes
         // and lobs don't lock).
-        Some(k) if k.kind == Kick::Shot && bindings.shot_camera_lock(actions.device) => {
+        Some(k) if k.kind.is_shot() && bindings.shot_camera_lock(actions.device) => {
             rig.yaw = yaw_of(crosshair_point(k.eye, k.aim.x.to_radians()) - camera.translation).to_degrees();
             rig.pitch = k.aim.y;
         }
         // Otherwise the stick still turns the camera while you kick (a shot's camera at its slower
         // 120/60 deg/s, then not at all from the release), but only so far from where it pointed
         // at the press (Kev).
-        Some(k) if actions.device == Device::Gamepad && matches!(k.kind, Kick::Shot | Kick::Pass | Kick::Lob) => {
+        Some(k) if actions.device == Device::Gamepad && matches!(k.kind, Kick::Shot | Kick::Pass | Kick::Lob | Kick::VolleyPass | Kick::VolleyShot) => {
             (rig.yaw, rig.pitch) = kick_limit(rig.yaw, rig.pitch, k.aim);
         }
         _ => {}
