@@ -553,6 +553,10 @@ pub const CAMERA_BOOST_DOWN: f32 = 0.1;
 /// The movement's sideways offset freezes when you stop, then eases back after 0.2 s at 0.5 /s.
 pub const CAMERA_SIDE_IDLE: f32 = 0.2;
 pub const CAMERA_SIDE_RETURN: f32 = 0.5;
+/// Without the camera lock, a gamepad kick only lets the camera turn this far from the press:
+/// (yaw, pitch) in degrees. The files have no such clamp (Kev says there is one); this is what the
+/// shot camera's 120/60 deg/s allow over a full shot's 31-frame charge (camera-lock.md).
+pub const CAMERA_KICK_LIMIT: (f32, f32) = (62.0, 31.0);
 /// The crosshair (the camera's sight point) sits at this share of the screen's height.
 pub const CROSSHAIR_SCREEN_Y: f32 = 0.38;
 /// The FOV option's range (players report a 90 deg maximum; the minimum is a guess: TUNE).

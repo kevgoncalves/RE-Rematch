@@ -76,11 +76,11 @@ fn main() {
         .add_systems(
             Update,
             (
-                menu::toggle_menu,
+                menu::menu_keys,
                 input::read_input,
                 // Capture before clicks, so the click that opens a capture isn't bound.
                 (menu::capture_binding, menu::menu_clicks, menu::drag_sliders, menu::refresh_labels).chain(),
-                player::grab_cursor,
+                (player::grab_cursor, menu::show_menu).chain(),
                 camera::camera_look,
                 player::player_move,
                 player::kicking,
@@ -106,7 +106,8 @@ fn main() {
 /// For checking visuals: `RE_SCREENSHOT=out.png` saves a frame after 2 s (or `RE_SHOT_AT` s), then quits.
 /// `RE_VIEW=x,y,z[,tx,ty,tz]` looks from that point at the centre spot (or the target) instead;
 /// `RE_VIEW=@x,y,z` looks at the player from that offset.
-/// `RE_MENU=1` opens the F1 menu first.
+/// `RE_MENU=1` opens the Esc menu after 1 s; `RE_MENU=controls` or `RE_MENU=cheats` opens that
+/// settings tab.
 fn auto_screenshot(
     mut commands: Commands,
     time: Res<Time>,
@@ -115,14 +116,16 @@ fn auto_screenshot(
     mut camera: Single<&mut Transform, With<Camera3d>>,
     player: Single<&Transform, (With<Player>, Without<Camera3d>)>,
     mut menu: ResMut<menu::Menu>,
-    mut menu_root: Single<&mut Node, With<menu::MenuRoot>>,
     target: Option<Res<HeadlessTarget>>,
 ) {
     let Ok(path) = std::env::var("RE_SCREENSHOT") else { return };
     let at = std::env::var("RE_SHOT_AT").ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
-    if std::env::var("RE_MENU").is_ok() && !*taken && time.elapsed_secs() > 1.0 {
-        menu.open = true;
-        menu_root.display = Display::Flex;
+    if let Ok(page) = std::env::var("RE_MENU")
+        && !menu.open()
+        && !*taken
+        && time.elapsed_secs() > 1.0
+    {
+        menu.open_scripted(&page);
     }
     if let Ok(view) = std::env::var("RE_VIEW") {
         let v: Vec<f32> = view.trim_start_matches('@').split(',').filter_map(|n| n.trim().parse().ok()).collect();
@@ -167,7 +170,8 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials
         let mut image = Image::new_fill(size, TextureDimension::D2, &[0, 0, 0, 255], TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default());
         image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT;
         let handle = images.add(image);
-        commands.entity(camera).insert(Camera { target: RenderTarget::Image(handle.clone().into()), ..default() });
+        // Bevy only draws the UI (HUD, reticle, menu) on a window's camera unless told otherwise.
+        commands.entity(camera).insert((Camera { target: RenderTarget::Image(handle.clone().into()), ..default() }, IsDefaultUiCamera));
         commands.insert_resource(HeadlessTarget(handle));
     }
     commands.spawn((
@@ -220,7 +224,7 @@ fn update_hud(
         _ => "-".into(),
     };
     let text = format!(
-        "Score  {} - {}\nStamina {:4.1}/10{}   Extra effort {:3.0}%{}\nSpeed {:4.1} m/s{}{}\nCharge {}\nBall {:4.1} m/s\n\nF1 Controls",
+        "Score  {} - {}\nStamina {:4.1}/10{}   Extra effort {:3.0}%{}\nSpeed {:4.1} m/s{}{}\nCharge {}\nBall {:4.1} m/s\n\nEsc Menu   F1 Settings",
         score.0[0],
         score.0[1],
         p.stamina,

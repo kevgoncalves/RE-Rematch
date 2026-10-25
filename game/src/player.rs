@@ -1403,11 +1403,14 @@ pub fn kicking(
         _ => PUSH_BALL_BACK_FACTOR,
     };
     let sprint = |factor: f32| if k.sprint { factor } else { 1.0 };
+    // A locked shot aims with the camera at the press. On a gamepad without the camera lock it aims
+    // with the camera at the strike, which can't turn from the release on (camera-lock.md).
+    let (eye, aim) = if bindings.shot_camera_lock(actions.device) { (k.eye, k.aim) } else { (camera.translation, Vec2::new(rig.yaw, rig.pitch)) };
     let (speed, elevation, friction, no_control) = match k.kind {
         // Height from the camera's pitch; a dip launches a little higher to make up for it.
         Kick::Shot => (
             shot_speed(&k),
-            curve(&ELEVATION_BY_PITCH, k.aim.y) + SHOT_DIP_PITCH_CORRECTION * (-axes.curve.y).max(0.0),
+            curve(&ELEVATION_BY_PITCH, aim.y) + SHOT_DIP_PITCH_CORRECTION * (-axes.curve.y).max(0.0),
             SHOT_FRICTION,
             NO_RECONTROL_TIME,
         ),
@@ -1433,9 +1436,9 @@ pub fn kicking(
         // The extra effort auto tap goes the way your body faces, not your input.
         Kick::PushBall if p.extra_active => p.facing,
         Kick::PushBall | Kick::DribblePushBall => yaw_of(push_dir),
-        // Toward the crosshair's point on the walls (aim locked at the press), turned a little
-        // against the curve so the ball bends back toward it.
-        Kick::Shot => crosshair_yaw(k.eye, k.aim.x, ball_tf.translation) + (side * AIM_NUDGE).to_radians(),
+        // Toward the crosshair's point on the walls (`aim` above), turned a little against the
+        // curve so the ball bends back toward it.
+        Kick::Shot => crosshair_yaw(eye, aim.x, ball_tf.translation) + (side * AIM_NUDGE).to_radians(),
         _ => pass_yaw(bindings.pass_aim, &axes, &rig, crosshair_yaw(camera.translation, rig.yaw, ball_tf.translation)),
     };
     let flat = forward(yaw);

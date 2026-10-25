@@ -7,7 +7,7 @@ use std::f32::consts::PI;
 use bevy::prelude::*;
 
 use crate::ball::Ball;
-use crate::input::{Action, Actions, Axes, Bindings};
+use crate::input::{Action, Actions, Axes, Bindings, Device};
 use crate::player::{CameraRig, Kick, Player, crosshair_point, yaw_of};
 use crate::tuning::*;
 
@@ -263,13 +263,31 @@ pub fn camera_look(
     let lim = cam.blended();
     rig.yaw -= d.x;
     rig.pitch = (rig.pitch + d.y).clamp(-lim.down, lim.up);
-    // A shot locks its aim at the press. The camera keeps following you as you slide on and turns
-    // to keep the crosshair on that point (the lock shot; players confirm the aim locks as a shot
-    // starts, and passes and lobs don't lock).
-    if let Some(k) = p.kick.filter(|k| k.kind == Kick::Shot) {
-        rig.yaw = yaw_of(crosshair_point(k.eye, k.aim.x.to_radians()) - camera.translation).to_degrees();
-        rig.pitch = k.aim.y;
+    match p.kick {
+        // On keyboard and mouse, or a gamepad with the camera lock, a shot locks its aim at the
+        // press. The camera keeps following you as you slide on and turns to keep the crosshair
+        // on that point (the lock shot; players confirm the aim locks as a shot starts, and passes
+        // and lobs don't lock).
+        Some(k) if k.kind == Kick::Shot && bindings.shot_camera_lock(actions.device) => {
+            rig.yaw = yaw_of(crosshair_point(k.eye, k.aim.x.to_radians()) - camera.translation).to_degrees();
+            rig.pitch = k.aim.y;
+        }
+        // Otherwise the stick still turns the camera while you kick (a shot's camera at its slower
+        // 120/60 deg/s, then not at all from the release), but only so far from where it pointed
+        // at the press (Kev).
+        Some(k) if actions.device == Device::Gamepad && matches!(k.kind, Kick::Shot | Kick::Pass | Kick::Lob) => {
+            (rig.yaw, rig.pitch) = kick_limit(rig.yaw, rig.pitch, k.aim);
+        }
+        _ => {}
     }
+}
+
+/// Keeps the camera within CAMERA_KICK_LIMIT of `press` (yaw, pitch in degrees).
+fn kick_limit(yaw: f32, pitch: f32, press: Vec2) -> (f32, f32) {
+    let (max_yaw, max_pitch) = CAMERA_KICK_LIMIT;
+    let off = (yaw - press.x + 180.0).rem_euclid(360.0) - 180.0;
+    let yaw = if off.abs() > max_yaw { press.x + off.signum() * max_yaw } else { yaw };
+    (yaw, pitch.clamp(press.y - max_pitch, press.y + max_pitch))
 }
 
 pub fn camera_follow(
@@ -381,6 +399,17 @@ mod tests {
         assert!((d.arm(15.0) - v(-4.0, 0.6, 0.0)).length() < 1e-4);
         // Camera height above the feet at level pitch: capsule centre 0.9 + fulcrum 0.45 + 0.1.
         assert!((0.9 + d.fulcrum + d.arm(0.0).z - 1.45).abs() < 1e-4);
+    }
+
+    #[test]
+    fn gamepad_kick_limit() {
+        let press = Vec2::new(10.0, -5.0);
+        // Inside the limit nothing changes; outside, it stops at 62 deg yaw and 31 deg pitch.
+        assert_eq!(kick_limit(40.0, 0.0, press), (40.0, 0.0));
+        assert_eq!(kick_limit(100.0, 40.0, press), (72.0, 26.0));
+        assert_eq!(kick_limit(-60.0, -40.0, press), (-52.0, -36.0));
+        // Measured the short way round: -340 deg is 10 deg past a press at 10.
+        assert_eq!(kick_limit(-340.0, 0.0, press), (-340.0, 0.0));
     }
 
     #[test]
