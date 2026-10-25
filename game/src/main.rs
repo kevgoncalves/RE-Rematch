@@ -165,7 +165,8 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials
         let mut image = Image::new_fill(size, TextureDimension::D2, &[0, 0, 0, 255], TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default());
         image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT;
         let handle = images.add(image);
-        commands.entity(camera).insert(Camera { target: RenderTarget::Image(handle.clone().into()), ..default() });
+        // Bevy only draws the UI (HUD, reticle, menu) on a window's camera unless told otherwise.
+        commands.entity(camera).insert((Camera { target: RenderTarget::Image(handle.clone().into()), ..default() }, IsDefaultUiCamera));
         commands.insert_resource(HeadlessTarget(handle));
     }
     commands.spawn((
