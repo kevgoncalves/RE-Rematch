@@ -210,7 +210,7 @@ impl DribbleState {
             (true, _, Side) => &EXHAUSTED_DRIBBLE_SIDE,
             (true, _, Back) => &EXHAUSTED_DRIBBLE_BACK,
             (_, true, Forward) => match self.turn {
-                FeintTurn::Roulette => &ROULETTE_SPEED,
+                FeintTurn::Roulette => &FEINT_FORWARD,
                 FeintTurn::TurnOut(_) => &TURN_OUT_SPEED,
                 FeintTurn::None => &FEINT_FORWARD,
             },
@@ -666,9 +666,10 @@ pub fn player_move(
             let dir = if tap_input == Vec2::ZERO { Vec2::Y } else { tap_input.normalize() };
             let heading = dribble_heading(dir);
             let cut = if heading == Heading::Forward { dir.x } else { 0.0 };
-            // The forward feint: the roulette, or out of a fast cut its turn-out.
+            // The forward feint is the roulette, any way forward you press it (Kev), except straight
+            // ahead (W) out of a fast cut: that one is the turn-out (Kev's recording).
             let turn = match p.dribble.filter(|_| feint && heading == Heading::Forward) {
-                Some(first) if first.heading == Heading::Forward && first.cut.abs() > 0.3 => FeintTurn::TurnOut(first.cut.signum()),
+                Some(first) if first.heading == Heading::Forward && first.cut.abs() > 0.3 && cut.abs() <= 0.3 => FeintTurn::TurnOut(first.cut.signum()),
                 Some(_) => FeintTurn::Roulette,
                 None => FeintTurn::None,
             };
@@ -1509,11 +1510,7 @@ pub fn kicking(
     // speed going sideways or back and gains it when sprinting; the dribble one only when sprinting.
     let push_dir = if k.steer == Vec3::ZERO { forward(p.facing) } else { k.steer };
     let push_angle = forward(p.facing).angle_between(push_dir).to_degrees();
-    // How far the push turns you: against your facing at the touch, and against your run at the
-    // press, so turning toward the push during its wind-up still counts as pushing into a turn.
-    let run_way = Vec3::new(k.entry.x, 0.0, k.entry.z);
-    let turn_angle = if run_way.length() > 1.0 { push_angle.max(run_way.angle_between(push_dir).to_degrees()) } else { push_angle };
-    let push_factor = match turn_angle {
+    let push_factor = match push_angle {
         a if a <= 60.0 => 1.0,
         a if a <= 95.0 => PUSH_BALL_SIDE_FACTOR,
         _ => PUSH_BALL_BACK_FACTOR,
@@ -1804,8 +1801,8 @@ mod tests {
 
     #[test]
     fn the_forward_feint_is_a_roulette_or_a_turn_out_by_the_first_dribble() {
-        // W or D then W: the roulette. W+D then W: the turn-out to the right (W+A: left). D then A
-        // stays a side feint.
+        // W or D then W: the roulette, and so is any diagonal second press. W+D then W: the
+        // turn-out to the right (W+A: left). D then A stays a side feint.
         let d = std::f32::consts::FRAC_1_SQRT_2;
         let cases = [
             (Vec2::Y, Vec2::Y, FeintTurn::Roulette),
@@ -1813,6 +1810,9 @@ mod tests {
             (Vec2::new(d, d), Vec2::Y, FeintTurn::TurnOut(1.0)),
             (Vec2::new(-d, d), Vec2::Y, FeintTurn::TurnOut(-1.0)),
             (Vec2::X, Vec2::NEG_X, FeintTurn::None),
+            (Vec2::new(d, d), Vec2::new(-d, d), FeintTurn::Roulette),
+            (Vec2::new(d, d), Vec2::new(d, d), FeintTurn::Roulette),
+            (Vec2::X, Vec2::new(-d, d), FeintTurn::Roulette),
         ];
         for (first, second, want) in cases {
             let mut app = App::new();

@@ -242,9 +242,9 @@ pub const FEINT_BACK: [(f32, f32); 5] = [(0.0, 3.0), (0.1, 5.8), (0.2, 5.8), (0.
 /// The forward feint out of a straight or side dribble is the roulette (Kev's practice recording,
 /// V1 634.07, 635.50, 640.47 s): the sole stops the ball, the turn to the left starts at 0.23 s,
 /// faces back at 0.45 s and holds there to 0.52 s, and is round again at 0.83 s (seconds from the
-/// press; 270 degrees comes at about 0.64 s). You go on only a little meanwhile, then pick up.
+/// press; 270 degrees comes at about 0.64 s). It travels at the forward feint's speeds (Kev: on
+/// its own slow speeds the player barely moved).
 pub const ROULETTE_TURN: (f32, f32, f32, f32) = (0.23, 0.45, 0.52, 0.83);
-pub const ROULETTE_SPEED: [(f32, f32); 4] = [(0.0, 2.5), (0.3, 1.0), (0.9, 1.0), (1.0, 2.0)];
 /// Out of a fast cut the forward feint turns you out the cut's way (degrees beyond your facing)
 /// into a deep crouch and back, facing on again by the second figure (s; V1 177.43, V2 200.10 s).
 /// You nearly stop in the crouch, then go on.
@@ -422,11 +422,10 @@ pub const PUSH_BALL_REGEN_DELAY: f32 = 1.0;
 /// that, chasing at your sprint.
 pub const PUSH_BALL_SPRINT_FACTOR: f32 = 1.05;
 pub const SPRINT_PUSH_BALL_FRICTION: f32 = BASE_FRICTION;
-/// Ball speed by how far the push turns you: up to 60 deg, to 95 deg, beyond. A push into a turn
-/// in the recording stays within about 0.8 m of you and is yours again by about +0.8 s: chased at
-/// your run or your sprint, these keep it there (at a sprint it leads by 0.4 m at most).
-pub const PUSH_BALL_SIDE_FACTOR: f32 = 0.72;
-pub const PUSH_BALL_BACK_FACTOR: f32 = 0.64;
+/// Ball speed by push direction against your facing: up to 60 deg, to 95 deg, beyond (Kev: the
+/// lower factors from his recording sent pushes back too short).
+pub const PUSH_BALL_SIDE_FACTOR: f32 = 0.89;
+pub const PUSH_BALL_BACK_FACTOR: f32 = 0.79;
 pub const EXHAUSTED_PUSH_BALL_SPEED: f32 = 11.25;
 pub const EXHAUSTED_PUSH_BALL_LIFT: f32 = 13.0; // degrees
 /// After the touch you chase the ball on a scripted speed (m/s over the rest of the move),
@@ -530,8 +529,8 @@ pub const CONTROL_SLOW_BALL: f32 = 1.5;
 /// (Kev: a push ball with no input shouldn't end in a control).
 pub const OWN_PUSH_HANDS_OFF: f32 = 1.5;
 /// A dash pressed almost on top of a loose ball (this close, m) is a dribble at once (Kev: from
-/// further off it is a dash, and the ball is controlled the normal way).
-pub const DASH_DRIBBLE_REACH: f32 = 1.2;
+/// further off it is a dash, and the ball is controlled the normal way; 1.2 m reached too far).
+pub const DASH_DRIBBLE_REACH: f32 = 0.9;
 /// The ball becomes yours 12 frames into the control (it settles at your feet), and you can act
 /// from the control's action frame, by the height you take it at: feet and thighs 14f, stomach
 /// 16f, chest 20f, head 22f.
