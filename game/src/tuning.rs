@@ -86,9 +86,11 @@ pub const OVERSPEED_DECEL: f32 = 15.0;
 /// effort doesn't hand you the ball at once (the game's no-control for the kicker is 0.5 s; Kev
 /// wants the magnet back a little sooner).
 pub const EE_TOUCH_NO_CONTROL: f32 = 0.3;
-/// Letting go of extra effort keeps your magnet off this long too (Kev: the magnet doesn't come
-/// back at once, which the pros use to run over a push ball and take it further on). TUNE.
+/// Letting go of extra effort within its start phase (the game's first 0.6 s, its burst) keeps your
+/// magnet off this long too, which the pros use to run over a push ball and take it further on.
+/// Kev: only then; let go later and the magnet is back at once, touch delays and all. TUNE.
 pub const EE_END_NO_CONTROL: f32 = 0.2;
+pub const EE_START_PHASE: f32 = 0.6;
 /// Time to stop from full speed by state (the stop transitions): run, with ball, sprint, sprint with ball.
 pub const STOP_TIME: [f32; 4] = [0.38, 0.7, 0.68, 1.0];
 
@@ -435,6 +437,9 @@ pub const EXTRA_EFFORT_TAP_IN_180_TURN: f32 = 0.5;
 pub const EXTRA_EFFORT_TAP_HIGH_BALL: (f32, f32) = (0.2, 0.9);
 /// Ball centre distance at which the body touches it (capsule 0.35 m + ball).
 pub const EXTRA_EFFORT_KNOCK_REACH: f32 = 0.35 + BALL_RADIUS + 0.05;
+/// In extra effort a ball less than this far ahead of you along your way is being overtaken: the
+/// body knocks it on even through your own push ball's no-control (m). TUNE.
+pub const EE_OVERTAKE_AHEAD: f32 = 0.15;
 
 // Ball control (hitboxes.md)
 // Ball control zones (the character's control hitboxes; m, centred at pitch level, `forward` ahead

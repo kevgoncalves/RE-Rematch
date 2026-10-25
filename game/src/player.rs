@@ -59,8 +59,8 @@ pub struct Player {
     pub push_sprinted: bool,
     /// Your magnet is off this long after an extra-effort touch on the ball or its end.
     pub magnet_off: f32,
-    /// Extra effort was on last frame.
-    pub ee_was: bool,
+    /// How long extra effort has been on (0 when off).
+    pub ee_on: f32,
     /// An extra-effort cut's time left, and whether it cuts right.
     pub ee_cut: f32,
     pub ee_cut_right: bool,
@@ -382,7 +382,7 @@ impl Default for Player {
             push_sprinted: false,
             ee_cut: 0.0,
             magnet_off: 0.0,
-            ee_was: false,
+            ee_on: 0.0,
             ee_cut_right: false,
             last_input: Vec3::ZERO,
             freeze: 0.0,
@@ -731,10 +731,10 @@ pub fn player_move(
     p.own_push += dt;
     p.ee_cut -= dt;
     p.magnet_off -= dt;
-    if p.ee_was && !p.extra_active {
-        p.magnet_off = p.magnet_off.max(EE_END_NO_CONTROL);
+    if p.ee_on > 0.0 && !p.extra_active {
+        p.magnet_off = if p.ee_on < EE_START_PHASE { p.magnet_off.max(EE_END_NO_CONTROL) } else { 0.0 };
     }
-    p.ee_was = p.extra_active;
+    p.ee_on = if p.extra_active { p.ee_on + dt } else { 0.0 };
     // After the hand-back a dribble keeps only its permissions, to the animation's end.
     if let Some(mut d) = p.dribble.filter(|d| !d.moving()) {
         d.t += dt;
@@ -1079,7 +1079,11 @@ pub fn ball_control(
         // body is still turning. Changing direction on the ball is just touching it with a new
         // input (extra-effort.md, the control tap).
         let dir = control_tap_dir(axes.movement, rig.yaw, p.facing);
-        let touching = btf.translation.y < CONTROL_MAX_HEIGHT && b.no_control <= 0.0 && flat.length() < EXTRA_EFFORT_KNOCK_REACH;
+        // Your own push ball's no-control doesn't stop extra effort running into it: overtaking it,
+        // the body knocks it on (Kev: after a dribble push ball it was left behind).
+        let way = Vec2::new(p.vel.x, p.vel.z).normalize_or_zero();
+        let overtaking = flat.dot(way) < EE_OVERTAKE_AHEAD;
+        let touching = btf.translation.y < CONTROL_MAX_HEIGHT && (b.no_control <= 0.0 || overtaking) && flat.length() < EXTRA_EFFORT_KNOCK_REACH;
         match touching.then(|| effort_touch(b.vel, dir, p.effort_ride)) {
             Some(EffortTouch::Ride) => {
                 p.magnet_off = EE_TOUCH_NO_CONTROL;
@@ -1791,6 +1795,25 @@ mod tests {
             ball = carry_ball(&mut p, root, ball, i as f32 * dt, dt);
         }
         assert!(ball.x > root.x + 0.1 && (ball.z - root.z).abs() < 0.5, "ball {ball} root {root}");
+    }
+
+    #[test]
+    fn extra_effort_overtaking_its_own_push_ball_knocks_it_on() {
+        let mut app = App::new();
+        app.init_resource::<Axes>().init_resource::<Time>().add_systems(Update, ball_control);
+        app.world_mut().spawn(CameraRig::default());
+        app.world_mut().spawn((Transform::default(), Player { extra_active: true, vel: Vec3::NEG_Z * EXTRA_EFFORT_SPEED, facing: 0.0, ..default() }));
+        // Level with you and still marked by the push: knocked on, not run past.
+        let ball = app.world_mut().spawn((Transform::from_xyz(0.0, BALL_RADIUS, -0.05), Ball { vel: Vec3::NEG_Z * 5.0, no_control: 0.3, ..default() })).id();
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(1.0 / 60.0));
+        app.update();
+        let b = app.world().get::<Ball>(ball).unwrap();
+        assert!(b.vel.z < -5.5, "ball {:?}", b.vel);
+        // Still well ahead of you, the push keeps its no-control.
+        app.world_mut().get_mut::<Transform>(ball).unwrap().translation.z = -0.4;
+        app.world_mut().get_mut::<Ball>(ball).unwrap().vel = Vec3::NEG_Z * 5.0;
+        app.update();
+        assert_eq!(app.world().get::<Ball>(ball).unwrap().vel, Vec3::NEG_Z * 5.0);
     }
 
     #[test]
