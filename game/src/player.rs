@@ -365,6 +365,8 @@ pub struct Run {
     exit: f32,
     /// Hand back softly at its end (soft_hand_back).
     soft: bool,
+    /// Holds against the stick held its own way too until `free_at` (a pass or lob's slide).
+    hold: bool,
     /// The body's turn over the run: from, by how much (radians), over which stretch (s).
     face: Option<(f32, f32, f32, f32)>,
 }
@@ -830,7 +832,7 @@ pub fn player_move(
         // A kick's drag lets the stick held its own way go at once (no turn shows); any other way
         // waits for it to free you (Kev: turning to the stick mid follow-through lost the run and
         // faced the wrong way).
-        let straight_on = r.soft && r.tables.is_none() && off <= RUN_TURN_LIMIT;
+        let straight_on = r.soft && r.tables.is_none() && !r.hold && off <= RUN_TURN_LIMIT;
         let exit = straight_on || (r.t >= r.free_at && off <= r.exit);
         p.run = (r.t < r.length && !exit).then_some(r);
         if p.run.is_none() {
@@ -1601,12 +1603,12 @@ pub fn kicking(
     p.freeze = ball.freeze;
     if k.kind == Kick::Shot {
         let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
-        p.run = Some(Run { t: 0.0, length: SHOT_AFTER_TOUCH, free_at: KICK_TURN_FREE, dir: Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: speed, exit: 180.0, soft: true, face: None });
+        p.run = Some(Run { t: 0.0, length: SHOT_AFTER_TOUCH, free_at: KICK_TURN_FREE, hold: false, dir: Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: speed, exit: 180.0, soft: true, face: None });
     }
-    // After the touch a pass or lob keeps dragging you until its move interrupt. Either drag lets
-    // the stick held its own way go at once; any other way turns you only from KICK_TURN_FREE.
+    // After the touch a shot's drag lets the stick held its own way go at once, any other way from
+    // KICK_TURN_FREE; a pass or lob's slides you on whatever the stick until PASS_SLIDE.
     if let Some(drag) = pass_drag(&k) {
-        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: KICK_TURN_FREE, dir: Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or(drag.normalize()), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: drag.length(), exit: 180.0, soft: true, face: None });
+        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: PASS_SLIDE, hold: true, dir: Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or(drag.normalize()), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: drag.length(), exit: 180.0, soft: true, face: None });
     }
     if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) {
         p.own_push = 0.0;
@@ -1635,7 +1637,7 @@ pub fn kicking(
         };
         let speeds = tables[state];
         // The chase runs to the animation's blend-out, or ends earlier on a stick exit.
-        p.run = Some(Run { t: 0.0, length: length - BLEND_OUT - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, dir: flat, speeds, tables: Some(tables), scale: 1.0, exit: RUN_TURN_LIMIT, soft: false, face });
+        p.run = Some(Run { t: 0.0, length: length - BLEND_OUT - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, hold: false, dir: flat, speeds, tables: Some(tables), scale: 1.0, exit: RUN_TURN_LIMIT, soft: false, face });
     }
 }
 
