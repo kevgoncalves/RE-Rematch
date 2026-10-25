@@ -1141,7 +1141,6 @@ pub fn action_fx(
     if let Some(kind) = kicked {
         match kind {
             _ if kind.is_shot() => shot_strike(&mut s, &fx, &mut state.rng, at, b.vel.normalize_or(Vec3::NEG_Z), b.vel.length()),
-
             _ if kind.is_push() => push_touch(&mut s, &fx, &mut state.rng, &mut state.ghosts, at),
             _ => pass_release(&mut s, &fx, &mut state.rng, at),
         }

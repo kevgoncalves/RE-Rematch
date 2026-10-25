@@ -92,7 +92,6 @@ fn main() {
                 (player::grab_cursor, menu::show_menu).chain(),
                 camera::camera_look,
                 (scripted_ball, player::player_move).chain(),
-
                 player::kicking,
                 player::ball_call,
                 player::ball_control,
@@ -133,7 +132,6 @@ fn scripted_ball(time: Res<Time>, mut ball: Single<(&mut Transform, &mut Ball)>,
 }
 
 /// For checking visuals: `RE_SCREENSHOT=out.png` saves a frame after 2 s (or `RE_SHOT_AT` s), then quits.
-
 /// `RE_VIEW=x,y,z[,tx,ty,tz]` looks from that point at the centre spot (or the target) instead;
 /// `RE_VIEW=@x,y,z` looks at the player from that offset.
 /// `RE_MENU=1` opens the Esc menu after 1 s; `RE_MENU=gameplay`, `audio`, `controls` or `cheats`
@@ -291,12 +289,10 @@ fn update_hud(
                 Kick::VolleyShot => curve(&VOLLEY_SHOT_FORCE, k.held),
                 Kick::Pass => curve(&PASS_FORCE, player::charge(k.kind, k.held)),
                 Kick::VolleyPass => curve(&VOLLEY_PASS_FORCE, k.held),
-
                 Kick::Lob => curve(&LOB_FORCE, player::charge(k.kind, k.held)),
                 _ => 0.0,
             };
             let curve_info = if k.kind.is_shot() { format!("  curve ({:+.2}, {:+.2})", axes.curve.x, axes.curve.y) } else { String::new() };
-
             format!("{:?} {:.2}s -> {:.1} m/s{}", k.kind, k.held, force, curve_info)
         }
         Some(k) => format!("{:?} {:.2}s{}", k.kind, k.elapsed, if k.released { " released" } else { "" }),

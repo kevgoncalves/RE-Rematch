@@ -1954,9 +1954,6 @@ fn volley_keys(clips: &Clips, kind: Kick, part: Part) -> [Pose; 3] {
         Part::Foot if kind == Kick::VolleyShot => clips.kicks[0],
         Part::Thigh | Part::Pelvis | Part::Chest if kind == Kick::VolleyShot => clips.shot_side,
         Part::JumpChest | Part::JumpHead if kind == Kick::VolleyShot => clips.scissor,
-
-
-
         Part::Foot => clips.touch[0],
         Part::Thigh => clips.touch[1],
         Part::Pelvis => clips.touch[2],
@@ -2351,7 +2348,6 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             _ if turn.abs() > 135.0 => (clips.heel, 0.0),
             _ if kind.is_flick() && turn.abs() > 45.0 => (side(&clips.flick_side), 0.3),
             _ if kind.is_flick() => (clips.flick, 1.0),
-
             Kick::Pass | Kick::ShortPass => (clips.kicks[1], 1.0),
             Kick::Lob | Kick::ShortLob => (clips.kicks[2], 1.0),
             _ => (clips.kicks[0], 1.0),

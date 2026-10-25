@@ -474,7 +474,6 @@ fn volley_part(kind: Kick, h: f32) -> Part {
         // wasn't read; TUNE), the head higher.
         Kick::VolleyPushBall if h > VOLLEY_AERIAL_CHEST_MAX => Part::JumpHead,
         Kick::VolleyPushBall if h > VOLLEY_GROUND_MAX => Part::JumpChest,
-
         _ => VOLLEY_PUSH_HEIGHTS.iter().zip(parts).find(|(top, _)| h < **top).map_or(Part::Head, |(_, part)| part),
     }
 }
@@ -603,7 +602,6 @@ impl Kick {
             Kick::VolleyPushBall | Kick::VolleyLobbedPushBall => PUSH_BALL_WINDUP,
             // Charged volleys fill their gauge in VOLLEY_CHARGE_FULL (less the gauge's frame).
             Kick::VolleyPass | Kick::VolleyShot => VOLLEY_CHARGE_FULL + 1.0 / 60.0,
-
         }
     }
 
@@ -1978,7 +1976,6 @@ pub fn kicking(
         // The volley flick's redirect runs on its own speeds; the others scale your own.
         let speed = if k.volley.is_some() { 1.0 } else { Vec3::new(p.vel.x, 0.0, p.vel.z).length() };
         let free_at = if k.volley.is_some() { VOLLEY_FLICK_AFTER } else { (FLICK_FREE - contact_time(&k)).max(0.0) };
-
         p.run = Some(Run { t: 0.0, length: length.max(free_at), free_at, dir: flat, speeds, tables: None, scale: speed, exit: RUN_TURN_LIMIT, soft: false, face: Some((p.facing, by, 0.0, FLICK_REDIRECT)) });
     }
 }
@@ -1992,7 +1989,6 @@ fn flick_windup(p: &Player, k: &KickState, way: Vec3) -> Run {
     let (dir, speeds, scale): (Vec3, &'static [(f32, f32)], f32) = match k.heading {
         _ if k.kind == Kick::DribbleLobbedPushBall => (way, DRIBBLE_FLICK_RUN[state], 1.0),
         Heading::Forward => (way, FLICK_WINDUP_RUN[state], 1.0),
-
         _ if speed < FLICK_STEP_BELOW => (if speed > 0.5 { flat.normalize() } else { way }, &FLICK_TURNED_STEP, 1.0),
         _ => (flat.normalize(), &FLICK_TURNED_BRAKE, speed),
     };
@@ -2036,7 +2032,6 @@ pub fn contact_time(k: &KickState) -> f32 {
         Kick::Pass | Kick::Lob => PASS_CONTACT - TAP_NETWORK_MARGIN,
         Kick::LobbedPushBall if k.heading != Heading::Forward => FLICK_WINDUP_TURNED,
         _ if k.volley.is_some() => k.volley.map_or(0.0, |v| v.t),
-
         _ => k.kind.buildup(),
     }
 }
@@ -2054,7 +2049,6 @@ fn volley_shot_speed(k: &KickState, h: f32, ball: Vec3, dir: Vec3) -> f32 {
 
 /// A shot's ball speed: the force curve by seconds held (at least the build-up), plus your run-up
 /// speed's bonus, which only counts for stronger shots.
-
 fn shot_speed(k: &KickState) -> f32 {
     let force = curve(&SHOT_FORCE, charge(Kick::Shot, k.held));
     let strength = (force - SHOT_FORCE[0].1) / (SHOT_FORCE[2].1 - SHOT_FORCE[0].1);
@@ -2280,7 +2274,6 @@ mod tests {
         // Its gauge reads as an empty one, never NaN (the body sizes the touch by it).
         assert_eq!(charge(Kick::VolleyPushBall, 0.0), 0.0);
         // The body part by the ball's height; above 2.1 m the jumping push.
-
         assert_eq!(volley_part(Kick::VolleyPushBall, 0.5), Part::Thigh);
         assert_eq!(volley_part(Kick::VolleyPushBall, 1.0), Part::Pelvis);
         assert_eq!(volley_part(Kick::VolleyPushBall, 1.4), Part::Chest);

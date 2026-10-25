@@ -118,7 +118,6 @@ pub fn update_reticle(
     // Aiming lasts the whole shot, until the ball leaves, and the aim-in always plays to the end
     // (as the game's widget animations do), so a tapped shot still shows.
     let shooting = player.kick.is_some_and(|k| k.kind.is_shot());
-
     if shooting {
         anim.aim_latched = true;
     }
