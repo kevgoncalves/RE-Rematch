@@ -213,6 +213,8 @@ pub fn kick_sound(kind: Kick, held: f32, speed: f32, spin: Vec3) -> (Sound, f32)
         Kick::ShortPass => (Sound::Pass { max: false }, 0.75),
         Kick::ShortLob => (Sound::Lob { max: false }, 0.75),
         Kick::PushBall | Kick::DribblePushBall => (Sound::PushBall, 1.0),
+        // The flick is a soft scoop up: the lob's sound, never its full one.
+        Kick::LobbedPushBall => (Sound::Lob { max: false }, 0.8),
     }
 }
 

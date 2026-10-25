@@ -597,6 +597,50 @@ pub const IPPY_BALL_BLEND: f32 = 0.1;
 pub const CARRY_MAX_REL_SPEED: f32 = 6.0;
 pub const NO_RECONTROL_TIME: f32 = 0.5; // GE_LostBall: no control of your own kick for 0.5 s
 
+// The rainbow flick: the lobbed push ball (notes/volleys-and-flicks.md §4), GA_LobbedPushBall's data.
+/// 11.5 m/s at 65 deg above the ground, scooped up off your foot.
+pub const FLICK_SPEED: f32 = 11.5;
+pub const FLICK_ANGLE: f32 = 65.0;
+/// The touch comes 22f after the press flicking ahead (within 45 deg of your facing), 16f to the
+/// sides or back (DT_LobbedPushBall).
+pub const FLICK_WINDUP_AHEAD: f32 = 22.0 / 60.0;
+pub const FLICK_WINDUP_TURNED: f32 = 16.0 / 60.0;
+/// The flick's way against your facing at the touch, as a dot product: ahead from 0.9 (about 26 deg),
+/// behind under -0.25 (about 104 deg). Each way's (speed factor, degrees added to the angle): ahead
+/// x0.982 +3.5, sideways x0.9 +10, behind x0.975 +3.5 (BP_LobbedPushBall_ForceFromDirection and
+/// _AngleFromDirection).
+pub const FLICK_AHEAD_DOT: f32 = 0.9;
+pub const FLICK_BEHIND_DOT: f32 = -0.25;
+pub const FLICK_BY_WAY: [(f32, f32); 3] = [(0.982, 3.5), (0.9, 10.0), (0.975, 3.5)];
+/// Sprinting at the press: x1.2 and 12.5 deg flatter, so it goes further (BP_LobbedPushBall_ForceFromSpeed).
+pub const FLICK_SPRINT: (f32, f32) = (1.2, -12.5);
+/// Out of stamina: faster and flatter, (m/s, deg) (BP_ExhaustedLobbedPushBallAbilityData).
+pub const EXHAUSTED_FLICK: (f32, f32) = (13.0, 58.0);
+/// A huge forced dip (the game's Magnus -2500, our spin.y +2500): it goes up steeply and hooks down
+/// about 5 m on, just over a defender's head. Ground friction and air drag are the defaults.
+pub const FLICK_SPIN: f32 = 2500.0;
+pub const FLICK_FRICTION: f32 = BASE_FRICTION;
+/// Nobody can control it for 0.5 s (BP_NoControl_LobbedPushBall).
+pub const FLICK_NO_CONTROL: f32 = 0.5;
+pub const FLICK_COST: f32 = 0.75;
+/// Moving through the wind-up (LobbedPushBallBuildUp*Data, m/s): flicking ahead you run onto the
+/// ball at 6 m/s if moving (over 1 m/s), 4 standing, 3.5 out of stamina, the flick's way.
+pub const FLICK_WINDUP_RUN: [&[(f32, f32)]; 3] = [&[(0.0, 6.0), (1.0, 6.0)], &[(0.0, 4.0), (1.0, 4.0)], &[(0.0, 3.5), (1.0, 3.5)]];
+/// Flicking to the side or back you stop to do it: your speed x1 at 10% of the wind-up, nothing by
+/// 80%; from under 2.5 m/s a 5 m/s step that dies the same way.
+pub const FLICK_TURNED_BRAKE: [(f32, f32); 4] = [(0.0, 1.0), (0.1, 1.0), (0.8, 0.0), (1.0, 0.0)];
+pub const FLICK_TURNED_STEP: [(f32, f32); 4] = [(0.0, 5.0), (0.1, 5.0), (0.8, 0.0), (1.0, 0.0)];
+pub const FLICK_STEP_BELOW: f32 = 2.5;
+/// After the touch (LobbedPushBallDash*Data): ahead you run on at your speed for 20f; sideways or
+/// back you come to a stop by a quarter (back: 30%) of 36f. The body turns along the ball's way over
+/// the 13f after the touch (the redirect window), and the stick takes you back from 35f after the
+/// press (the push-ball layer).
+pub const FLICK_AFTER_AHEAD: (f32, &[(f32, f32)]) = (20.0 / 60.0, &[(0.0, 1.0), (1.0, 1.0)]);
+pub const FLICK_AFTER_SIDE: (f32, &[(f32, f32)]) = (36.0 / 60.0, &[(0.0, 1.0), (0.25, 0.0), (1.0, 0.0)]);
+pub const FLICK_AFTER_BACK: (f32, &[(f32, f32)]) = (36.0 / 60.0, &[(0.0, 1.0), (0.3, 0.0), (1.0, 0.0)]);
+pub const FLICK_REDIRECT: f32 = 13.0 / 60.0;
+pub const FLICK_FREE: f32 = 35.0 / 60.0;
+
 // Freeplay ball call
 pub const FEED_DISTANCE: f32 = 15.0; // TUNE
 pub const FEED_SPEED: f32 = 16.0; // TUNE

@@ -769,7 +769,9 @@ pub fn kick_marker(
 ) {
     let (btf, b) = *ball;
     let (m, tf, vis) = &mut *marker;
-    let kicked = last_kick.is_some_and(|k| !matches!(k, Kick::PushBall | Kick::DribblePushBall)) && player.kick.is_none() && !b.held;
+    // Push balls none, flicks included: the game's rule for its push-ball abilities (whether the
+    // lobbed ones show it isn't in the data; TUNE with Kev).
+    let kicked = last_kick.is_some_and(|k| !k.is_push()) && player.kick.is_none() && !b.held;
     *last_kick = player.kick.map(|k| k.kind);
     let arrived = m.chain && m.left > 0.0 && m.left <= time.delta_secs();
     let spot = if kicked || arrived {
@@ -1134,9 +1136,10 @@ pub fn action_fx(
     if let Some(kind) = kicked {
         match kind {
             Kick::Shot => shot_strike(&mut s, &fx, &mut state.rng, at, b.vel.normalize_or(Vec3::NEG_Z), b.vel.length()),
-            Kick::PushBall | Kick::DribblePushBall => push_touch(&mut s, &fx, &mut state.rng, &mut state.ghosts, at),
+            _ if kind.is_push() => push_touch(&mut s, &fx, &mut state.rng, &mut state.ghosts, at),
             _ => pass_release(&mut s, &fx, &mut state.rng, at),
         }
+        // Ground push balls leave no trail (one kicked off the ground does); a flick, lofted, does.
         state.kick_trail = !matches!(kind, Kick::PushBall | Kick::DribblePushBall) || at.y > 0.75;
     }
     if b.held {

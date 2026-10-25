@@ -232,6 +232,9 @@ struct Clips {
     shot_side: [Pose; 3],
     shot_back: [Pose; 3],
     heel: [Pose; 3],
+    /// The rainbow flick: ahead, and across the body to the left (mirrored for the right).
+    flick: [Pose; 3],
+    flick_side: [Pose; 3],
     /// Landing out of a kick (the right foot), after its follow-through.
     land: Pose,
     start: OneShot,
@@ -980,6 +983,113 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
             (FORE_R, [30.0, 0.0, 0.0]),
         ]),
     ];
+    // The rainbow flick ahead (our own keys, from the description in volleys-and-flicks.md): the
+    // left foot plants beside the ball with the right toe dropped behind it; the toe slides under
+    // the ball and snaps up with the body upright and the arms out; the knee drives on up high and
+    // the body leans back, the head following the ball up and over.
+    let flick = [
+        stand.with(&[
+            (PELVIS, [0.0, -6.0, 0.0]),
+            (SPINE_J, [14.0, 0.0, -2.0]),
+            (CHEST_J, [2.0, 4.0, 0.0]),
+            (NECK_J, [-10.0, 0.0, 0.0]),
+            (THIGH_L, [22.0, 0.0, -6.0]),
+            (SHIN_L, [44.0, 0.0, 0.0]),
+            (FOOT_L, [-22.0, 0.0, 6.0]),
+            (THIGH_R, [-12.0, 0.0, 6.0]),
+            (SHIN_R, [62.0, 0.0, 0.0]),
+            (FOOT_R, [-40.0, 0.0, 0.0]),
+            (UPPER_L, [10.0, 0.0, -40.0]),
+            (FORE_L, [25.0, 0.0, 0.0]),
+            (UPPER_R, [0.0, 0.0, 40.0]),
+            (FORE_R, [25.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [0.0, 4.0, 0.0]),
+            (SPINE_J, [2.0, 0.0, 0.0]),
+            (CHEST_J, [-2.0, 0.0, 0.0]),
+            (NECK_J, [4.0, 0.0, 0.0]),
+            (THIGH_L, [12.0, 0.0, -6.0]),
+            (SHIN_L, [28.0, 0.0, 0.0]),
+            (FOOT_L, [-6.0, 0.0, 6.0]),
+            (THIGH_R, [38.0, 0.0, 2.0]),
+            (SHIN_R, [22.0, 0.0, 0.0]),
+            (FOOT_R, [-12.0, 0.0, 0.0]),
+            (UPPER_L, [25.0, 0.0, -55.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [15.0, 0.0, 55.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [0.0, 8.0, 0.0]),
+            (SPINE_J, [-10.0, 0.0, 0.0]),
+            (CHEST_J, [-4.0, 0.0, 0.0]),
+            (NECK_J, [-12.0, 0.0, 0.0]),
+            (THIGH_L, [4.0, 0.0, -4.0]),
+            (SHIN_L, [12.0, 0.0, 0.0]),
+            (FOOT_L, [20.0, 0.0, 4.0]),
+            (THIGH_R, [88.0, 0.0, 0.0]),
+            (SHIN_R, [70.0, 0.0, 0.0]),
+            (FOOT_R, [5.0, 0.0, 0.0]),
+            (UPPER_L, [40.0, 0.0, -65.0]),
+            (FORE_L, [35.0, 0.0, 0.0]),
+            (UPPER_R, [30.0, 0.0, 65.0]),
+            (FORE_R, [35.0, 0.0, 0.0]),
+        ]),
+    ];
+    // The flick across the body to the left (the right foot; mirrored for the right): the leg reaches
+    // out to the right with the toe under the ball, scoops it across and up with the inside of the
+    // foot, and follows on high across, the hips turning through.
+    let flick_side = [
+        stand.with(&[
+            (PELVIS, [0.0, -18.0, 0.0]),
+            (SPINE_J, [12.0, 0.0, -4.0]),
+            (CHEST_J, [2.0, 8.0, 0.0]),
+            (NECK_J, [-8.0, 6.0, 0.0]),
+            (THIGH_L, [20.0, 0.0, -8.0]),
+            (SHIN_L, [42.0, 0.0, 0.0]),
+            (FOOT_L, [-22.0, 0.0, 8.0]),
+            (THIGH_R, [-8.0, -25.0, 22.0]),
+            (SHIN_R, [48.0, 0.0, 0.0]),
+            (FOOT_R, [-30.0, 0.0, -12.0]),
+            (UPPER_L, [20.0, 0.0, -55.0]),
+            (FORE_L, [25.0, 0.0, 0.0]),
+            (UPPER_R, [-10.0, 0.0, 50.0]),
+            (FORE_R, [25.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [0.0, 14.0, 0.0]),
+            (SPINE_J, [4.0, 0.0, 6.0]),
+            (CHEST_J, [0.0, -6.0, 0.0]),
+            (NECK_J, [2.0, 0.0, 0.0]),
+            (THIGH_L, [14.0, 0.0, -6.0]),
+            (SHIN_L, [30.0, 0.0, 0.0]),
+            (FOOT_L, [-10.0, 0.0, 6.0]),
+            (THIGH_R, [34.0, 30.0, -8.0]),
+            (SHIN_R, [28.0, 0.0, 0.0]),
+            (FOOT_R, [-8.0, 0.0, 14.0]),
+            (UPPER_L, [30.0, 0.0, -60.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [10.0, 0.0, 60.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
+        ]),
+        stand.with(&[
+            (PELVIS, [0.0, 26.0, 0.0]),
+            (SPINE_J, [-6.0, 0.0, 8.0]),
+            (CHEST_J, [-2.0, -8.0, 0.0]),
+            (NECK_J, [-8.0, 10.0, 0.0]),
+            (THIGH_L, [4.0, 0.0, -4.0]),
+            (SHIN_L, [14.0, 0.0, 0.0]),
+            (FOOT_L, [18.0, 0.0, 4.0]),
+            (THIGH_R, [70.0, 38.0, -22.0]),
+            (SHIN_R, [55.0, 0.0, 0.0]),
+            (FOOT_R, [4.0, 0.0, 18.0]),
+            (UPPER_L, [40.0, 0.0, -60.0]),
+            (FORE_L, [35.0, 0.0, 0.0]),
+            (UPPER_R, [25.0, 0.0, 65.0]),
+            (FORE_R, [35.0, 0.0, 0.0]),
+        ]),
+    ];
 
     // Dribbles, timed to their touch. A fast cut drops into a deep crouch on the left foot, drives
     // the ball on with the right at 17f low and leaning in, then runs out of it.
@@ -1425,6 +1535,8 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         shot_side,
         shot_back,
         heel,
+        flick,
+        flick_side,
         land,
         start,
         stop,
@@ -1496,6 +1608,8 @@ fn follow_time(kind: Kick) -> f32 {
     match kind {
         Kick::Shot => 0.5,
         Kick::PushBall | Kick::DribblePushBall => 0.2,
+        // The knee stays up a moment after the scoop.
+        Kick::LobbedPushBall => 0.3,
         // Passes and lobs are back in their run 0.15-0.28 s after the touch.
         _ => 0.25,
     }
@@ -1508,6 +1622,7 @@ fn kick_size(kind: Kick) -> f32 {
         Kick::Pass | Kick::Lob => 1.0,
         Kick::ShortPass | Kick::ShortLob => 0.75,
         Kick::PushBall | Kick::DribblePushBall => 0.4,
+        Kick::LobbedPushBall => 0.9,
     }
 }
 
@@ -1888,6 +2003,8 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             Kick::Shot if turn.abs() > 30.0 => (side(&clips.shot_side), 0.3),
             Kick::Shot => (clips.kicks[0], 1.0),
             _ if turn.abs() > 135.0 => (clips.heel, 0.0),
+            Kick::LobbedPushBall if turn.abs() > 45.0 => (side(&clips.flick_side), 0.3),
+            Kick::LobbedPushBall => (clips.flick, 1.0),
             Kick::Pass | Kick::ShortPass => (clips.kicks[1], 1.0),
             Kick::Lob | Kick::ShortLob => (clips.kicks[2], 1.0),
             _ => (clips.kicks[0], 1.0),
@@ -1899,7 +2016,14 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     // against the body. Each of the game's clips carries its own turn that way.
     let wrap = |a: f32| (a + PI).rem_euclid(TAU) - PI;
     if let Some(k) = p.kick {
-        let aim = if k.kind != Kick::Shot && k.steer != Vec3::ZERO { yaw_of(k.steer) } else { k.aim.x.to_radians() };
+        // A flick with no stick goes the way you face.
+        let aim = if k.kind != Kick::Shot && k.steer != Vec3::ZERO {
+            yaw_of(k.steer)
+        } else if k.kind.is_flick() {
+            p.facing
+        } else {
+            k.aim.x.to_radians()
+        };
         anim.kick_turn = wrap(aim - p.facing).to_degrees().clamp(-150.0, 150.0);
         anim.kick_power = charge(k.kind, k.held);
     }
@@ -1921,7 +2045,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         // the standing foot plants PASS_PLANT before the strike, then the leg swings back and
         // through (Kev's practice recording).
         const PASS_PLANT: f32 = 0.06;
-        let late = k.kind.is_pass();
+        let late = k.kind.is_pass() || k.kind.is_flick();
         let release = (k.held - k.pre).max(0.0);
         let strike_at = (first - STRIKE).max(if k.released { release } else { f32::INFINITY });
         if late && k.elapsed < strike_at - PASS_PLANT {
