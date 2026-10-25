@@ -476,10 +476,7 @@ pub fn kick_marker(
     let kicked = last_kick.is_some_and(|k| !matches!(k, Kick::PushBall | Kick::DribblePushBall)) && player.kick.is_none() && !b.held;
     *last_kick = player.kick.map(|k| k.kind);
     let arrived = m.chain && m.left > 0.0 && m.left <= time.delta_secs();
-    let spot = if kicked {
-        m.left = 0.0;
-        marker_for(btf.translation, b)
-    } else if arrived {
+    let spot = if kicked || arrived {
         m.left = 0.0;
         marker_for(btf.translation, b)
     } else {

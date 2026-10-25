@@ -293,8 +293,11 @@ impl Actions {
         self.pending.remove(&a);
     }
     fn update_pending(&mut self) {
-        let fresh: Vec<Action> = Action::ALL.into_iter().filter(|a| self.just_pressed(*a)).collect();
-        self.pending.extend(fresh);
+        for a in Action::ALL {
+            if self.just_pressed(a) {
+                self.pending.insert(a);
+            }
+        }
         let (now, prev) = (&self.now, &self.prev);
         self.pending.retain(|a| now.contains(a) || (a.tap() && prev.contains(a)));
     }

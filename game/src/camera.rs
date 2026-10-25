@@ -243,8 +243,7 @@ pub fn camera_look(
     let dt = time.delta_secs().min(0.05);
     let (ptf, p) = *player;
     if actions.just_pressed(Action::LookAtBall) {
-        let to_ball = ball.translation - ptf.translation;
-        rig.yaw = (-to_ball.x).atan2(-to_ball.z).to_degrees();
+        rig.yaw = yaw_of(ball.translation - ptf.translation).to_degrees();
     }
     let (h, vert, hb, vb) = turn(cam.state);
     let stick = axes.look_pad.clamp(Vec2::NEG_ONE, Vec2::ONE);

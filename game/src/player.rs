@@ -481,10 +481,9 @@ pub fn pass_yaw(aim: PassAim, axes: &Axes, rig: &CameraRig, crosshair: f32) -> f
     if stick.length() < dead_zone {
         return crosshair;
     }
-    let dir = camera_relative(stick.normalize(), rig.yaw);
-    let yaw = (-dir.x).atan2(-dir.z);
+    let yaw = yaw_of(camera_relative(stick.normalize(), rig.yaw));
     // Straight ahead snaps to the crosshair within a few degrees (the "Top" tolerance).
-    let off = (yaw - rig.yaw.to_radians() + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+    let off = angle_diff(yaw, rig.yaw.to_radians());
     if off.abs() < PASS_FORWARD_SNAP.to_radians() { crosshair } else { yaw }
 }
 
@@ -615,7 +614,7 @@ pub fn player_move(
             // A fast cut goes where the camera looks (flick, then dribble) and turns you that way;
             // side dribbles and drag backs keep you facing forward.
             let dir = camera_relative(dir, rig.yaw);
-            let facing = if heading == Heading::Forward { (-dir.x).atan2(-dir.z) } else { rig.yaw.to_radians() };
+            let facing = if heading == Heading::Forward { yaw_of(dir) } else { rig.yaw.to_radians() };
             p.dribble = Some(DribbleState { t: 0.0, feint, exhausted: p.exhausted, heading, dir, facing });
             // A new move takes over from a kick's drag (or any other scripted run).
             p.run = None;
@@ -802,7 +801,7 @@ pub fn player_move(
         }
     } else if p.locked {
         // Lock move (mechanics.md §2): face the camera, strafe, slower going backwards.
-        let diff = (rig.yaw.to_radians() - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        let diff = angle_diff(rig.yaw.to_radians(), p.facing);
         let max_turn = LOCK_TURN_RATE.to_radians() * dt;
         p.facing += diff.clamp(-max_turn, max_turn);
         let (top, accel, by_angle): (f32, f32, &[(f32, f32)]) =
@@ -825,8 +824,7 @@ pub fn player_move(
             p.ee_cut_right = flat.cross(wish).y < 0.0;
         }
         p.vel = p.vel.move_towards(target, accel * dt);
-        let yaw = (-p.vel.x).atan2(-p.vel.z);
-        let diff = (yaw - p.facing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        let diff = angle_diff(yaw_of(p.vel), p.facing);
         let max_turn = if p.ee_cut > 0.0 { EE_CUT_TURN } else { EE_BODY_TURN.max(turn) }.to_radians() * dt;
         p.facing += diff.clamp(-max_turn, max_turn);
     } else if p.pivot > 0.0 && wish != Vec3::ZERO {
@@ -1068,8 +1066,6 @@ pub fn ball_control(
         b.spin = Vec3::ZERO;
         return;
     }
-    let hands_off = p.own_push < OWN_PUSH_HANDS_OFF && wish.is_none();
-    let in_reach = b.no_control <= 0.0 && p.magnet_off <= 0.0 && !hands_off && in_control_zone(rel, vel, speed, p.locked, starting || p.turn.is_some());
     if p.extra_active {
         // Extra effort can't control the ball: touching it taps it on at 12 m/s, flat, wherever
         // your movement input points at that moment (relative to the camera), whatever way your
@@ -1099,6 +1095,8 @@ pub fn ball_control(
         }
         return;
     }
+    let hands_off = p.own_push < OWN_PUSH_HANDS_OFF && wish.is_none();
+    let in_reach = b.no_control <= 0.0 && p.magnet_off <= 0.0 && !hands_off && in_control_zone(rel, vel, speed, p.locked, starting || p.turn.is_some());
     if in_reach {
         p.receiving = Some(0.0);
         b.spin = Vec3::ZERO;
@@ -1419,7 +1417,7 @@ pub fn kicking(
     let yaw = match k.kind {
         // The extra effort auto tap goes the way your body faces, not your input.
         Kick::PushBall if p.extra_active => p.facing,
-        Kick::PushBall | Kick::DribblePushBall => (-push_dir.x).atan2(-push_dir.z),
+        Kick::PushBall | Kick::DribblePushBall => yaw_of(push_dir),
         // Toward the crosshair's point on the walls (aim locked at the press), turned a little
         // against the curve so the ball bends back toward it.
         Kick::Shot => crosshair_yaw(k.eye, k.aim.x, ball_tf.translation) + (side * AIM_NUDGE).to_radians(),
