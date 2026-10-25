@@ -1096,11 +1096,12 @@ fn pass_release(s: &mut Spawner, fx: &FxAssets, rng: &mut Rng, at: Vec3) {
 }
 
 /// Two broken rings closing on the ball, camera-facing and turning against each other, painted over
-/// the scene so their colour stays true on the grass.
+/// the scene so their colour stays true on the grass (and brighter than white can paint, so they
+/// stay vivid once tone-mapped).
 fn closing_rings(s: &mut Spawner, fx: &FxAssets, rng: &mut Rng, at: Vec3, rings: [(f32, f32); 2], life: f32, from: Vec3, to: Vec3) {
     for (i, (r0, r1)) in rings.into_iter().enumerate() {
         let way = if i == 0 { 1.0 } else { -1.0 };
-        s.bit(&fx.arcs, at, Bit::new(life, from).to(to).alpha(1.0).hold(0.6).size(r0, r1).spin(rng.next() * TAU, way * 2.5).follow().blend());
+        s.bit(&fx.arcs, at, Bit::new(life, from * 1.8).to(to * 1.8).alpha(1.0).hold(0.6).size(r0, r1).spin(rng.next() * TAU, way * 2.5).follow().blend());
     }
 }
 
