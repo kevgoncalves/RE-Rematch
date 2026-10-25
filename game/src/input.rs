@@ -115,7 +115,21 @@ pub struct Bindings {
     /// press, as on keyboard and mouse (notes/camera-lock.md). Off by default.
     #[serde(default)]
     pub camera_lock: bool,
+    /// Rematch's "Mouse sensitivity": scales how far the mouse turns the camera.
+    #[serde(default = "one")]
+    pub mouse_sensitivity: f32,
+    /// Rematch's "Mouse sensitivity : vertical scale": the mouse's up and down on top of that.
+    #[serde(default = "one")]
+    pub mouse_vertical_scale: f32,
+    /// Rematch's "Inverted look Y axis" and "Inverted look X axis" (mouse and right stick).
+    #[serde(default)]
+    pub invert_y: bool,
+    #[serde(default)]
+    pub invert_x: bool,
 }
+
+/// The mouse sensitivity options' range (Rematch's slider puts the default of 1 near its left end).
+pub const MOUSE_SENSITIVITY_RANGE: (f32, f32) = (0.1, 5.0);
 
 fn one() -> f32 {
     1.0
@@ -203,6 +217,10 @@ impl Default for Bindings {
             magnus_sensitivity: one(),
             fov: default_fov(),
             camera_lock: false,
+            mouse_sensitivity: one(),
+            mouse_vertical_scale: one(),
+            invert_y: false,
+            invert_x: false,
         }
     }
 }
@@ -248,6 +266,10 @@ impl Bindings {
     }
 
     pub fn save(&self) {
+        // Tests click through the menu too; they mustn't overwrite the player's bindings.
+        if cfg!(test) {
+            return;
+        }
         if let Ok(s) = ron::ser::to_string_pretty(self, default()) {
             let _ = std::fs::write(SAVE_PATH, s);
         }
@@ -264,6 +286,14 @@ impl Bindings {
     /// gamepad with the camera lock option.
     pub fn shot_camera_lock(&self, device: Device) -> bool {
         device == Device::Keyboard || self.camera_lock
+    }
+
+    /// What the look options do to the camera input: the mouse's and the right stick's factors
+    /// on each axis (sensitivity and inversion).
+    pub fn look_factors(&self) -> (Vec2, Vec2) {
+        let sign = Vec2::new(if self.invert_x { -1.0 } else { 1.0 }, if self.invert_y { -1.0 } else { 1.0 });
+        let mouse = Vec2::new(self.mouse_sensitivity, self.mouse_sensitivity * self.mouse_vertical_scale);
+        (mouse * sign, sign)
     }
 }
 
@@ -483,8 +513,9 @@ pub fn read_input(
         movement = scripted_movement(&script, t);
     }
     axes.movement = movement.clamp_length_max(1.0);
-    axes.look_mouse = look_mouse;
-    axes.look_pad = look_pad;
+    let (mouse_look, pad_look) = bindings.look_factors();
+    axes.look_mouse = look_mouse * mouse_look;
+    axes.look_pad = look_pad * pad_look;
     axes.curve = (axes.curve_mouse + stick_curve).clamp_length_max(1.0);
 }
 
@@ -508,26 +539,44 @@ fn scripted_movement(script: &str, t: f32) -> Vec2 {
     dir
 }
 
+/// An input's name as Rematch's keycaps write it ("LEFT SHIFT", "SPACE", "RB").
 pub fn input_name(input: &Input) -> String {
     match input {
         Input::Key(k) => {
             let s = format!("{k:?}");
             match s.as_str() {
-                "ShiftLeft" => "LShift".into(),
-                "ShiftRight" => "RShift".into(),
-                "ControlLeft" => "LCtrl".into(),
-                "ControlRight" => "RCtrl".into(),
-                "AltLeft" => "LAlt".into(),
-                _ => s.trim_start_matches("Key").trim_start_matches("Digit").to_string(),
+                "ShiftLeft" => "LEFT SHIFT".into(),
+                "ShiftRight" => "RIGHT SHIFT".into(),
+                "ControlLeft" => "LEFT CTRL".into(),
+                "ControlRight" => "RIGHT CTRL".into(),
+                "AltLeft" => "LEFT ALT".into(),
+                "AltRight" => "RIGHT ALT".into(),
+                "SuperLeft" | "SuperRight" => "WIN".into(),
+                "Escape" => "ESC".into(),
+                "CapsLock" => "CAPS LOCK".into(),
+                "Backquote" => "`".into(),
+                "Minus" => "-".into(),
+                "Equal" => "=".into(),
+                "BracketLeft" => "[".into(),
+                "BracketRight" => "]".into(),
+                "Backslash" => "\\".into(),
+                "Semicolon" => ";".into(),
+                "Quote" => "'".into(),
+                "Comma" => ",".into(),
+                "Period" => ".".into(),
+                "Slash" => "/".into(),
+                _ if s.starts_with("Arrow") => s.trim_start_matches("Arrow").to_uppercase(),
+                _ if s.starts_with("Numpad") => format!("NUM {}", s.trim_start_matches("Numpad").to_uppercase()),
+                _ => s.trim_start_matches("Key").trim_start_matches("Digit").to_uppercase(),
             }
         }
         Input::Mouse(m) => match m {
             MouseButton::Left => "LMB".into(),
             MouseButton::Right => "RMB".into(),
             MouseButton::Middle => "MMB".into(),
-            MouseButton::Back => "Mouse4".into(),
-            MouseButton::Forward => "Mouse5".into(),
-            MouseButton::Other(n) => format!("Mouse{n}"),
+            MouseButton::Back => "MOUSE 4".into(),
+            MouseButton::Forward => "MOUSE 5".into(),
+            MouseButton::Other(n) => format!("MOUSE {n}"),
         },
         Input::Pad(b) => match b {
             GamepadButton::South => "A".into(),
@@ -538,11 +587,17 @@ pub fn input_name(input: &Input) -> String {
             GamepadButton::RightTrigger => "RB".into(),
             GamepadButton::LeftTrigger2 => "LT".into(),
             GamepadButton::RightTrigger2 => "RT".into(),
-            GamepadButton::LeftThumb => "L3".into(),
-            GamepadButton::RightThumb => "R3".into(),
-            other => format!("{other:?}"),
+            GamepadButton::LeftThumb => "LS".into(),
+            GamepadButton::RightThumb => "RS".into(),
+            GamepadButton::Select => "VIEW".into(),
+            GamepadButton::Start => "MENU".into(),
+            GamepadButton::DPadUp => "UP".into(),
+            GamepadButton::DPadDown => "DOWN".into(),
+            GamepadButton::DPadLeft => "LEFT".into(),
+            GamepadButton::DPadRight => "RIGHT".into(),
+            other => format!("{other:?}").to_uppercase(),
         },
-        Input::Modifier => "Modifier".into(),
+        Input::Modifier => "MODIFIER".into(),
     }
 }
 
@@ -571,5 +626,17 @@ mod tests {
         // Keyboard and mouse always lock; the option only frees or locks the gamepad.
         assert!(off.shot_camera_lock(Device::Keyboard) && on.shot_camera_lock(Device::Keyboard));
         assert!(!off.shot_camera_lock(Device::Gamepad) && on.shot_camera_lock(Device::Gamepad));
+    }
+
+    #[test]
+    fn look_options() {
+        assert!(Bindings::default().look_factors() == (Vec2::ONE, Vec2::ONE));
+        let b = Bindings { mouse_sensitivity: 2.0, mouse_vertical_scale: 0.5, invert_y: true, ..Bindings::default() };
+        // Sensitivity is the mouse's only; inverting turns both the mouse and the stick around.
+        assert!(b.look_factors() == (Vec2::new(2.0, -1.0), Vec2::new(1.0, -1.0)));
+        // An old save without the new options loads them at their defaults.
+        let old = "(keyboard: {}, gamepad: {}, magnus_sensitivity: 1.0, fov: 80.0, camera_lock: false)";
+        let loaded = ron::from_str::<Bindings>(old).unwrap();
+        assert!(loaded.mouse_sensitivity == 1.0 && loaded.mouse_vertical_scale == 1.0 && !loaded.invert_x && !loaded.invert_y);
     }
 }
