@@ -612,10 +612,10 @@ pub fn player_move(
         // The feint needs lock move held all through dribble 1 (Kev: let go and lock again, and the
         // next press is dribble 1 again, not the feint).
         let feint = !p.exhausted && p.dribble_lock && p.dribble.is_some_and(|d| !d.feint && !d.exhausted && d.t >= DRIBBLE_WINDOW_OPENS && d.t < d.length() - FEINT_WINDOW_CUT);
-        // A new dribble 1 from FEINT_WINDOW_CUT before any dribble's end, a feint's too (Kev: the
-        // game's 1 s lock after a feint made dribbles feel late), and never sooner, lock let go or
-        // not (Kev: two dribble 1s back to back were too quick; the game has none before the end).
-        let again = p.dribble.is_none_or(|d| d.t >= d.length() - FEINT_WINDOW_CUT);
+        // A new dribble 1 from FEINT_WINDOW_CUT before a dribble 1's end, and never sooner, lock
+        // let go or not (Kev: two back to back were too quick; the game has none before the end).
+        // After a feint, only once it ends (Kev; the game's 1 s lock after it made dribbles late).
+        let again = p.dribble.is_none_or(|d| !d.feint && d.t >= d.length() - FEINT_WINDOW_CUT);
         if feint || again {
             // No direction is a forward dribble. Keyboard diagonals sit on the 45/135 deg sector edges:
             // W+A and W+D are fast cuts, S+A and S+D side dribbles going back (players confirm).
@@ -1683,10 +1683,14 @@ mod tests {
         frames(&mut app, lock, 5, 0.04);
         frames(&mut app, press, 1, 0.016);
         assert!(dribble(&mut app).is_some_and(|d| d.feint && d.t < 0.05), "the feint chains from 0.2 s");
-        // Nothing chains after the feint.
+        // Nothing chains after the feint, even late in it.
         frames(&mut app, lock, 6, 0.04);
         frames(&mut app, press, 1, 0.016);
         assert!(dribble(&mut app).is_some_and(|d| d.feint && d.t > 0.2));
+        let length = dribble(&mut app).unwrap().length();
+        frames(&mut app, lock, ((length - 0.1 - 0.26) / 0.016) as u32, 0.016);
+        frames(&mut app, press, 1, 0.016);
+        assert!(dribble(&mut app).is_some_and(|d| d.feint && d.t > length - 0.15), "no dribble 1 out of the feint's end");
     }
 
     #[test]
