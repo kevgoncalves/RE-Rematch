@@ -2,12 +2,19 @@
 
 Run headless with Blender 5.2:
 
-    blender -b --factory-startup --python tools/mixamo_to_glb.py -- [--raw DIR] [--out FILE.glb]
+    blender -b --factory-startup --python tools/mixamo_to_glb.py -- [--raw DIR] [--out FILE.glb] [--style toon|real]
 
 --raw defaults to art/mixamo/raw next to this repo (git-ignored: shannon.fbx, anims/*.fbx and
 "Soccer Game Pack.zip"); --out to game/assets/characters/shannon.glb. Both outputs are git-ignored:
 Mixamo's licence lets us use the assets inside the game but not hand them out on their own, so only
 this script is committed.
+
+--style toon (the default, Kev's pick: Rematch is clean flat colours, not a photo) keeps the
+proportions but not the detail: the hair cards and eyelashes go (the head's own painted hair takes
+their place), the body under the clothes goes, every mesh is decimated to about 11k triangles in
+all, and the photo textures become one flat colour per region, as materials the game recolours:
+skin, hair (also the brows and eyes), shirt, shorts, socks, boots. --style real keeps Mixamo's
+meshes and textures (shrunk to 1K).
 
 What it does:
   1. imports the character, turns it to face the game's forward (glTF -Z) and applies the FBX's
@@ -19,8 +26,9 @@ What it does:
      smoothed path of a one-shot) is taken out, the height kept; spins and turns also lose the
      hips' heading, which the game turns itself. What was taken out goes in the JSON sidecar, with
      each cycle's speed and foot phase and each kick's contact;
-  4. shrinks the 4K textures, drops the specular and glossiness maps (Blender links the glossiness
-     map as roughness, inverted) and exports one .glb with the mesh, textures and all the actions.
+  4. styles the meshes (above), or for the realistic look shrinks the 4K textures and drops the
+     specular and glossiness maps (Blender links the glossiness map as roughness, inverted), and
+     exports one .glb with the meshes, materials and all the actions.
 
 Prints the clips with their durations and frame counts.
 """
@@ -49,6 +57,23 @@ ROUGHNESS = 0.65
 # One-shots: the travel taken out is the hips' path smoothed over this long; what's left is the
 # body's own sway over the feet.
 SMOOTH_WINDOW = 0.5
+
+# The toon style's regions: each mesh's share of triangles kept, and the flat colours (sRGB; the
+# kit's are the prototype's blue kit, which the game recolours per team).
+DECIMATE = {"Ch38_Body": 0.4, "Ch38_Shirt": 0.32, "Ch38_Shorts": 0.24, "Ch38_Shoes": 0.3, "Ch38_Socks": 0.45}
+REGION_OF_MESH = {"Ch38_Shirt": "shirt", "Ch38_Shorts": "shorts", "Ch38_Socks": "socks", "Ch38_Shoes": "boots"}
+COLOURS = {
+    "skin": (0.80, 0.60, 0.47),
+    "hair": (0.10, 0.07, 0.05),
+    "shirt": (0.10, 0.30, 0.85),
+    "shorts": (0.05, 0.10, 0.32),
+    "socks": (0.92, 0.92, 0.90),
+    "boots": (0.06, 0.06, 0.07),
+}
+# Above this height the body is the head; where its painted texture is darker than this, it's hair,
+# brows or eyes.
+HEAD_FROM = 1.5
+DARK = 0.12
 
 
 @dataclass
@@ -111,7 +136,7 @@ def mirrored(name):
 
 def args():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
-    opts = {"raw": os.path.join(REPO, "art", "mixamo", "raw"), "out": os.path.join(REPO, "game", "assets", "characters", "shannon.glb")}
+    opts = {"raw": os.path.join(REPO, "art", "mixamo", "raw"), "out": os.path.join(REPO, "game", "assets", "characters", "shannon.glb"), "style": "toon"}
     for i in range(0, len(argv) - 1, 2):
         opts[argv[i].lstrip("-")] = argv[i + 1]
     return opts
@@ -387,6 +412,102 @@ def shrink_textures(tmp):
             bpy.data.images.remove(im)
 
 
+def srgb_to_linear(c):
+    return tuple(x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4 for x in c)
+
+
+def flat_material(name):
+    mat = bpy.data.materials.new(name)
+    bsdf = next(n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+    bsdf.inputs["Base Color"].default_value = (*srgb_to_linear(COLOURS[name]), 1.0)
+    bsdf.inputs["Roughness"].default_value = 0.8
+    bsdf.inputs["Specular IOR Level"].default_value = 0.3
+    return mat
+
+
+def base_colour_pixels(mat):
+    """A material's base colour texture as an (h, w, 4) array."""
+    bsdf = next(n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+    image = bsdf.inputs["Base Color"].links[0].from_node.image
+    w, h = image.size
+    px = np.empty(w * h * 4, dtype=np.float32)
+    image.pixels.foreach_get(px)
+    return px.reshape(h, w, 4)
+
+
+def apply_modifier(obj, mod):
+    with bpy.context.temp_override(object=obj, active_object=obj):
+        bpy.ops.object.modifier_move_to_index(modifier=mod.name, index=0)
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+
+
+def stylise(meshes):
+    """The toon style (see the notes at the top). Returns the meshes kept."""
+    from mathutils.bvhtree import BVHTree
+
+    for m in [m for m in meshes if m.name not in DECIMATE]:
+        bpy.data.objects.remove(m, do_unlink=True)
+    meshes = [m for m in bpy.data.objects if m.type == "MESH"]
+    body = next(m for m in meshes if m.name == "Ch38_Body")
+    cloth = [m for m in meshes if m.name in REGION_OF_MESH]
+    mats = {name: flat_material(name) for name in COLOURS}
+
+    # The body: skin, and hair where the head's painted texture is dark (the scalp under the hair
+    # cards, the brows, the eyes); the faces under the clothes go (a ray out from them meets cloth
+    # within 5 cm), so nothing pokes through and no triangles are spent unseen.
+    px = base_colour_pixels(body.data.materials[0])
+    h, w = px.shape[:2]
+    # (Material slots first: a face can't keep an index past the slots there are.)
+    body.data.materials.clear()
+    body.data.materials.append(mats["skin"])
+    body.data.materials.append(mats["hair"])
+    trees = []
+    for m in cloth:
+        cbm = bmesh.new()
+        cbm.from_mesh(m.data)
+        trees.append(BVHTree.FromBMesh(cbm))
+        cbm.free()
+    bm = bmesh.new()
+    bm.from_mesh(body.data)
+    uv = bm.loops.layers.uv.active
+    hidden = []
+    for f in bm.faces:
+        c = f.calc_center_median()
+        f.material_index = 0
+        if c.z < HEAD_FROM - 0.05:
+            if any(t.ray_cast(c + f.normal * 1e-3, f.normal, 0.05)[0] is not None for t in trees):
+                hidden.append(f)
+        elif c.z >= HEAD_FROM:
+            st = sum((loop[uv].uv for loop in f.loops), Vector((0.0, 0.0))) / len(f.loops)
+            r, g, b, _ = px[int((st.y % 1.0) * (h - 1)), int((st.x % 1.0) * (w - 1))]
+            if 0.2126 * r + 0.7152 * g + 0.0722 * b < DARK:
+                f.material_index = 1
+    bmesh.ops.delete(bm, geom=hidden, context="FACES")
+    bm.to_mesh(body.data)
+    bm.free()
+    print(f"body: {len(hidden)} faces under the clothes gone, {sum(p.material_index == 1 for p in body.data.polygons)} hair faces")
+    for m in cloth:
+        m.data.materials.clear()
+        m.data.materials.append(mats[REGION_OF_MESH[m.name]])
+        for p in m.data.polygons:
+            p.material_index = 0
+
+    for m in meshes:
+        mod = m.modifiers.new("decimate", "DECIMATE")
+        mod.ratio = DECIMATE[m.name]
+        mod.use_collapse_triangulate = True
+        apply_modifier(m, mod)
+        # Flat colours: no UVs needed.
+        while m.data.uv_layers:
+            m.data.uv_layers.remove(m.data.uv_layers[0])
+
+    for mat in [mat for mat in bpy.data.materials if mat.name not in COLOURS]:
+        bpy.data.materials.remove(mat)
+    for im in list(bpy.data.images):
+        bpy.data.images.remove(im)
+    return meshes
+
+
 def main():
     opts = args()
     raw, out = opts["raw"], opts["out"]
@@ -428,9 +549,12 @@ def main():
         strip = track.strips.new(action.name, 0, action)
         strip.action_slot = action.slots[0]
 
-    tex = os.path.join(tmp, "tex")
-    os.makedirs(tex)
-    shrink_textures(tex)
+    if opts["style"] == "toon":
+        meshes = stylise(meshes)
+    else:
+        tex = os.path.join(tmp, "tex")
+        os.makedirs(tex)
+        shrink_textures(tex)
 
     os.makedirs(os.path.dirname(out), exist_ok=True)
     select_only([char] + meshes)
@@ -445,7 +569,8 @@ def main():
         export_optimize_animation_size=True,
         export_skins=True,
         export_morph=False,
-        export_tangents=True,
+        # Only the realistic look has normal maps.
+        export_tangents=opts["style"] != "toon",
         export_image_format="AUTO",
         export_yup=True,
         export_apply=False,
@@ -454,7 +579,8 @@ def main():
     with open(side, "w") as f:
         json.dump({"fps": FPS, "clips": meta}, f, indent=1)
 
-    print(f"\n{out}: {os.path.getsize(out) / 1e6:.1f} MB, {sum(len(m.data.vertices) for m in meshes)} vertices, {len(bones)} animated bones")
+    triangles = sum(len(p.vertices) - 2 for m in meshes for p in m.data.polygons)
+    print(f"\n{out}: {opts['style']}, {os.path.getsize(out) / 1e6:.1f} MB, {triangles} triangles, {len(bones)} animated bones")
     print(f"{'clip':22} {'secs':>5} {'frames':>6}  notes")
     for name, m in meta.items():
         notes = []
