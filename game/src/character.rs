@@ -458,6 +458,12 @@ fn kick_clip(kind: Kick, turn: f32) -> Clip {
         Kick::Pass | Kick::ShortPass => Clip::Pass,
         Kick::Lob | Kick::ShortLob => Clip::Chip,
         Kick::PushBall | Kick::DribblePushBall => Clip::Dribble,
+        // Flicks and volleys borrow the nearest clip: the chip's scoop, the dribble's touch, the
+        // pass and the strike.
+        Kick::LobbedPushBall | Kick::DribbleLobbedPushBall | Kick::VolleyLobbedPushBall => Clip::Chip,
+        Kick::VolleyPushBall => Clip::Dribble,
+        Kick::VolleyPass => Clip::Pass,
+        Kick::VolleyShot => Clip::Strike,
     }
 }
 
@@ -657,7 +663,8 @@ impl Mixer {
         }
 
         // A fake shot: the swing over the ball, held as you rise to act again.
-        if let Some((t, lock)) = p.fake {
+        if let Some(fake) = p.fake {
+            let (t, lock) = (fake.t, fake.act);
             let key = self.instance(Move::Fake, t);
             let meta = m.get(Clip::Strike);
             let (windup, contact) = (meta.windup.unwrap_or(0.0), meta.contact.unwrap_or(0.0));
@@ -1235,7 +1242,7 @@ mod tests {
     }
 
     fn kick(kind: Kick) -> KickState {
-        KickState { kind, elapsed: 0.0, held: 0.0, pre: 0.0, released: false, aim: Vec2::ZERO, eye: Vec3::ZERO, entry: Vec3::ZERO, from_dribble: false, sprint: false, steer: Vec3::ZERO }
+        KickState { kind, elapsed: 0.0, held: 0.0, pre: 0.0, released: false, aim: Vec2::ZERO, eye: Vec3::ZERO, entry: Vec3::ZERO, from_dribble: false, sprint: false, steer: Vec3::ZERO, heading: Heading::Forward, volley: None, slide: 0.0 }
     }
 
     #[test]
