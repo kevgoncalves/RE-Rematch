@@ -1541,7 +1541,7 @@ pub fn charge(kind: Kick, held: f32) -> f32 {
 pub fn contact_time(k: &KickState) -> f32 {
     match k.kind {
         Kick::Shot if shot_speed(k) < SHOT_HIGH_POWER_SPEED => SHOT_LOW_POWER_CONTACT - TAP_NETWORK_MARGIN,
-        Kick::Pass | Kick::Lob => k.kind.buildup() - TAP_NETWORK_MARGIN,
+        Kick::Pass | Kick::Lob => PASS_CONTACT - TAP_NETWORK_MARGIN,
         _ => k.kind.buildup(),
     }
 }

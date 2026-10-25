@@ -269,8 +269,12 @@ pub const PASS_BUILDUP: f32 = 24.0 / 60.0;
 pub const LOB_BUILDUP: f32 = 24.0 / 60.0;
 /// A tapped kick leaves this much before its animation's contact frame: the game takes its
 /// network margins (0.12 + 0.03 s) off the build-up (mechanics.md §4), and Kev finds taps slower
-/// than the game's without them. A tapped pass or lob leaves at 15f, a tapped shot at 11f.
+/// than the game's without them. A tapped shot leaves at 11f.
 pub const TAP_NETWORK_MARGIN: f32 = 0.15;
+/// A pass or lob's contact frame: the game's is its 24f build-up, but Kev finds tapped passes and
+/// lobs slower off the foot than in the game, so they strike as soon as a low-power shot (20f, so a
+/// tap leaves at 11f). Their force still counts the full build-up. TUNE.
+pub const PASS_CONTACT: f32 = 20.0 / 60.0;
 /// A shot, pass or lob draws the ball to the kicking foot by its contact (m ahead, m to that
 /// foot's side), no faster than KICK_BALL_PULL against you, so the foot meets it (the carry left it
 /// up to 0.8 m ahead and the leg kicked air).
