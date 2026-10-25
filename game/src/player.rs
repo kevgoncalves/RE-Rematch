@@ -61,8 +61,10 @@ pub struct Player {
     pub push_sprinted: bool,
     /// Your magnet is off this long after an extra-effort touch on the ball or its end.
     pub magnet_off: f32,
-    /// A fake shot: how long since it, and how long until you can act again.
-    pub fake: Option<(f32, f32)>,
+    /// A fake shot in progress, and the time since your last one with this ball (a second within
+    /// FAKE_REPEAT costs more).
+    pub fake: Option<FakeState>,
+    pub since_fake: f32,
     /// How long extra effort has been on (0 when off), and an extra-effort tap's carry left.
     pub ee_on: f32,
     pub ee_carry: f32,
@@ -74,8 +76,9 @@ pub struct Player {
     pub freeze: f32,
     /// Seconds riding on the ball in extra effort, before it is tapped on.
     pub effort_ride: f32,
-    /// The control's action frame.
+    /// The control's action frame, and your speed as it began (it keeps it: CONTROL_SPEED_KEEP).
     pub receive_act: f32,
+    pub receive_entry: f32,
     /// A turning control's new way.
     pub receive_way: Option<Vec3>,
     /// Running with the ball: its travel from one touch to the next.
@@ -244,6 +247,142 @@ impl DribbleState {
     }
 }
 
+/// What a fake shot does, by the keys held at its press (kick-slides-and-fakes.md §1.2).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum FakeKind {
+    /// On ahead with the ball (the forward keys; any moving fake when tired).
+    Forward,
+    /// The roulette out to the side: a quarter turn and away that way (`FakeState::turn` says which).
+    Side,
+    /// The half turn back.
+    Back,
+    /// No keys: a step on and a stop over the ball.
+    Stop,
+    /// Standing (FAKE_STANDING_SPEED or slower): the swing over the ball, whatever the keys, no travel.
+    Standing,
+}
+
+/// A fake shot in progress: the leg swings over the ball, then the move its keys picked, on your
+/// speed at the press.
+#[derive(Clone, Copy, Debug)]
+pub struct FakeState {
+    pub t: f32,
+    /// From here you can act again: kicks and dribbles, and the stick takes over.
+    pub act: f32,
+    /// Its end, left alone.
+    pub len: f32,
+    pub kind: FakeKind,
+    /// Out of stamina for it: the tired fake, heavier and later to act.
+    pub tired: bool,
+    /// The turn it makes (radians, + left): a quarter turn out to the side, a half turn back.
+    pub turn: f32,
+    /// The way you were going and facing at the press.
+    dir: Vec3,
+    face: f32,
+    /// Its speed: the curve at (t + offset) / span, times `scale` (your speed at the press, or 1 for
+    /// the steps that ignore it).
+    speeds: &'static [(f32, f32)],
+    scale: f32,
+    span: f32,
+    offset: f32,
+}
+
+impl FakeState {
+    /// How much of its turn it has made (radians, + left).
+    pub fn turned(&self) -> f32 {
+        let (a, b) = FAKE_TURN;
+        let u = ((self.t - a) / (b - a)).clamp(0.0, 1.0);
+        self.turn * u * u * (3.0 - 2.0 * u)
+    }
+
+    /// The way it carries you now, the yaw you face and its speed.
+    pub fn motion(&self) -> (Vec3, f32, f32) {
+        let turned = self.turned();
+        let speed = curve(self.speeds, (self.t + self.offset) / self.span) * self.scale;
+        (forward(yaw_of(self.dir) + turned), self.face + turned, speed)
+    }
+}
+
+/// A moving fake by the keys at its press, and its turn (radians, + left). The fake picker's sectors
+/// run from the camera's forward with A at 90 deg and D at 270 (Kev's recordings: the D fake went
+/// right), each edge counted up to 180 deg but not past it (InputAngleAnimationPicker): within 45
+/// deg of ahead, forward; the right side and S+D, the roulette out to the right; A, S+A and S, the
+/// half turn back (FAKE_LEFT_ROULETTE: A and S+A the roulette out to the left); no keys, the stop.
+fn fake_by_keys(input: Vec2) -> (FakeKind, f32) {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    if input.length() < MOVE_DIRECTION_DEAD_ZONE {
+        return (FakeKind::Stop, 0.0);
+    }
+    // To the tenth of a degree, so keyboard diagonals sit exactly on the edges.
+    let ccw = ((-input.x).atan2(input.y).to_degrees().rem_euclid(360.0) * 10.0).round() / 10.0;
+    let mut rest = ccw;
+    let mut sector = 4;
+    for (i, range) in [45.0, 90.0, 90.0, 90.0].into_iter().enumerate() {
+        if rest < range || (ccw <= 180.0 && rest == range) {
+            sector = i;
+            break;
+        }
+        rest -= range;
+    }
+    match sector {
+        1 if FAKE_LEFT_ROULETTE => (FakeKind::Side, FRAC_PI_2),
+        1 | 2 => (FakeKind::Back, PI),
+        3 => (FakeKind::Side, -FRAC_PI_2),
+        _ => (FakeKind::Forward, 0.0),
+    }
+}
+
+/// The fake shot pressed during the shot `k`'s charge, with the movement keys `input`: which one,
+/// what it costs and how it moves you (kick-slides-and-fakes.md §1).
+fn start_fake(p: &mut Player, k: &KickState, input: Vec2) -> FakeState {
+    let flat = Vec3::new(p.vel.x, 0.0, p.vel.z).clamp_length_max(KICK_ENTRY_CAP);
+    let speed = flat.length();
+    let cost = FAKE_SHOT_COST[(p.since_fake < FAKE_REPEAT) as usize];
+    let tired = p.exhausted || p.stamina < cost;
+    if !tired {
+        p.stamina -= cost;
+        p.regen_wait = p.regen_wait.max(FAKE_REGEN_DELAY);
+    }
+    p.since_fake = 0.0;
+    // The shot's way against your body picks the set: straight on, to the side, or back.
+    let off = angle_diff(k.aim.x.to_radians(), p.facing);
+    let family = match off.abs().to_degrees() {
+        a if a <= 30.0 => 0,
+        a if a <= 150.0 => 1,
+        _ => 2,
+    };
+    let (kind, turn) = match () {
+        _ if speed <= FAKE_STANDING_SPEED => (FakeKind::Standing, 0.0),
+        _ if tired => (FakeKind::Forward, 0.0),
+        _ => fake_by_keys(input),
+    };
+    // The half turn back goes round to the right on a straight shot, else round the shot's side.
+    let turn = if kind == FakeKind::Back && (family == 0 || off < 0.0) { -turn } else { turn };
+    let (len, act) = match kind {
+        FakeKind::Standing => (FAKE_STANDING_LENGTH, FAKE_ACT[if tired { 4 } else { 2 }]),
+        _ if tired => (FAKE_TIRED_LENGTH[family], FAKE_ACT[3]),
+        FakeKind::Stop => (FAKE_LENGTH[3][family], FAKE_ACT[1]),
+        FakeKind::Forward => (FAKE_LENGTH[0][family], FAKE_ACT[0]),
+        FakeKind::Side => (FAKE_LENGTH[1][family], FAKE_ACT[0]),
+        FakeKind::Back => (FAKE_LENGTH[2][family], FAKE_ACT[0]),
+    };
+    let sprint = p.sprinting && speed >= FAKE_SPRINT_MIN;
+    let slow = speed <= FAKE_SLOW_MAX;
+    let span = len + FAKE_ANIM_OFFSET;
+    let (speeds, scale, span, offset): (&'static [(f32, f32)], f32, f32, f32) = match kind {
+        FakeKind::Standing => (&[(0.0, 0.0)], 0.0, 1.0, 0.0),
+        _ if tired => (&FAKE_TIRED_SPEED, 1.0, 1.0, 0.0),
+        FakeKind::Stop => (&FAKE_STOP_STEP, 1.0, 1.0, 0.0),
+        FakeKind::Back if sprint => (&FAKE_BACK_SPEED_SPRINT, speed, span, FAKE_ANIM_OFFSET),
+        FakeKind::Back if slow => (&FAKE_BACK_SPEED_SLOW, speed, span, FAKE_ANIM_OFFSET),
+        FakeKind::Back => (&FAKE_BACK_SPEED, speed, span, FAKE_ANIM_OFFSET),
+        _ if sprint => (&FAKE_SPEED_SPRINT, speed, span, FAKE_ANIM_OFFSET),
+        _ if slow => (&FAKE_SPEED_SLOW, speed, span, FAKE_ANIM_OFFSET),
+        _ => (&FAKE_SPEED, speed, span, FAKE_ANIM_OFFSET),
+    };
+    FakeState { t: 0.0, act, len, kind, tired, turn, dir: flat.normalize_or(forward(p.facing)), face: p.facing, speeds, scale, span, offset }
+}
+
 /// A big change of direction: brake along `from`, then re-accelerate along `to`.
 #[derive(Clone, Copy)]
 pub struct Turn {
@@ -357,6 +496,8 @@ pub struct Run {
     length: f32,
     /// From here, steering within RUN_TURN_LIMIT hands control back.
     free_at: f32,
+    /// The curve runs over this long, then holds its last value (None: the whole run).
+    ramp: Option<f32>,
     dir: Vec3,
     speeds: &'static [(f32, f32)],
     /// A push ball's chase follows your live sprint: its walk, sprint and tired tables.
@@ -401,6 +542,8 @@ pub struct KickState {
     pub heading: Heading,
     /// A volley's meeting with the ball (none for kicks of the ball at your feet).
     pub volley: Option<Volley>,
+    /// How far a shot's slide is through its wind-up curve, 0 to 1 at the touch.
+    pub slide: f32,
 }
 
 /// The part of the body a volley meets the ball with, from the ball's height (the volley pickers).
@@ -522,6 +665,7 @@ impl Default for Player {
             ee_cut: 0.0,
             magnet_off: 0.0,
             fake: None,
+            since_fake: f32::INFINITY,
             ee_on: 0.0,
             ee_carry: 0.0,
             ee_cut_right: false,
@@ -529,6 +673,7 @@ impl Default for Player {
             freeze: 0.0,
             effort_ride: 0.0,
             receive_act: 16.0 / 60.0,
+            receive_entry: 0.0,
             receive_way: None,
             carry: None,
         }
@@ -792,7 +937,7 @@ pub fn player_move(
     // From a control's effect on the ball a dribble goes at once (Kev: no wait for the ball to
     // settle); the ball joins it as it does.
     let dribble_press = actions.pending(Action::PushBall) || actions.pending(Action::Dash);
-    if dribble_press && (p.has_ball || p.receiving.is_some()) && p.locked && p.kick.is_none() && p.fake.is_none() {
+    if dribble_press && (p.has_ball || p.receiving.is_some()) && p.locked && p.kick.is_none() && p.fake.is_none_or(|f| f.t >= f.act) {
         // The feint needs lock move held all through dribble 1 (Kev: let go and lock again, and the
         // next press is dribble 1 again, not the feint).
         let feint = !p.exhausted && p.dribble_lock && p.dribble.is_some_and(|d| !d.feint && !d.exhausted && d.t >= DRIBBLE_WINDOW_OPENS && d.t < d.length() - FEINT_WINDOW_CUT);
@@ -818,8 +963,9 @@ pub fn player_move(
             let dir = camera_relative(dir, rig.yaw);
             let facing = if heading == Heading::Forward { yaw_of(dir) } else { rig.yaw.to_radians() };
             p.dribble = Some(DribbleState { t: 0.0, feint, exhausted: p.exhausted, heading, dir, facing, cut, turn });
-            // A new move takes over from a kick's drag (or any other scripted run).
+            // A new move takes over from a kick's drag (or any other scripted run, or a fake).
             p.run = None;
+            p.fake = None;
             p.dribble_lock = true;
             actions.consume(Action::PushBall);
             actions.consume(Action::Dash);
@@ -897,8 +1043,14 @@ pub fn player_move(
     if p.kick.is_some_and(|k| !k.kind.is_push()) {
         top *= WINDUP_SPEED_SCALE;
     }
-    if p.fake.is_some() {
-        top *= FAKE_SHOT_SPEED;
+    // A control keeps the speed you came in with until you can act (CONTROL_SPEED_KEEP), above your
+    // top with the ball, so a kick queued in it starts with it. The ippy's swing has its own.
+    let control_keep = match (p.receiving, p.receive_way) {
+        (Some(t), None) => Some(p.receive_entry.min(CONTROL_SPEED_CAP) * curve(&CONTROL_SPEED_KEEP, t / CONTROL_SPEED_TIME)),
+        _ => None,
+    };
+    if let Some(keep) = control_keep {
+        top = top.max(keep);
     }
 
     // Dash (mechanics.md §8): only without the ball, from lock move. While the first dash's cooldown
@@ -959,7 +1111,7 @@ pub fn player_move(
             let u = ((r.t - start) / (end - start)).clamp(0.0, 1.0);
             p.facing = from + by * u * u * (3.0 - 2.0 * u);
         }
-        p.vel = r.dir * curve(speeds, (r.t / r.length).min(1.0)) * r.scale;
+        p.vel = r.dir * curve(speeds, (r.t / r.ramp.unwrap_or(r.length)).min(1.0)) * r.scale;
         // Once free, steering within the turn limit leaves the chase at once; with no stick or a
         // sharper turn it runs on to the blend-out (responsiveness.md §5).
         let off = if wish == Vec3::ZERO { f32::INFINITY } else { r.dir.angle_between(wish).to_degrees() };
@@ -976,6 +1128,16 @@ pub fn player_move(
                 hand_back(p, dir_now, walking, top);
             }
         }
+    } else if let Some(f) = p.fake {
+        // A fake shot: the move its keys picked, on your speed at the press (FakeState). From when you
+        // can act, the stick or lock move takes over; left alone it runs to its end.
+        let (way, face, speed) = f.motion();
+        p.vel = way * speed;
+        p.facing = face;
+        if f.t >= f.act && (wish != Vec3::ZERO || p.locked) {
+            p.fake = None;
+            soft_hand_back(p, dir_now);
+        }
     } else if let Some((k, v)) = p.kick.and_then(|k| Some((k, k.volley?))) {
         // A volley: run to where the body meets the ball as it gets there, turning to the volley's way
         // by the touch (the game's padding run and motion warping).
@@ -986,8 +1148,8 @@ pub fn player_move(
         p.vel = (to / left).clamp_length_max(cap);
     } else if let Some(drag) = p.kick.and_then(|k| pass_drag(&k)) {
         // A pass or lob carries you on at your speed at the press, that way (players confirm: a pass
-        // out of a dribble carries you like a shot). No steering or turning till the touch: Rematch
-        // won't, and turning mid-kick faked its angle (Kev).
+        // out of a dribble carries you like a shot); a slow one plants you. No steering or turning
+        // till the touch: Rematch won't, and turning mid-kick faked its angle (Kev).
         p.vel = drag;
     } else if let Some(mut d) = p.dribble.filter(|d| d.moving()) {
         d.t += dt;
@@ -999,18 +1161,8 @@ pub fn player_move(
             soft_hand_back(p, dir_now);
         }
     } else if let Some(k) = p.kick.filter(|k| k.kind == Kick::Shot) {
-        // A shot keeps your run-up, sliding on that way at a shrinking share of your speed.
-        let end = if Vec3::new(k.entry.x, 0.0, k.entry.z).length() > BALL_SPRINT_SPEED {
-            // Faster than you can run with the ball (an extra-effort tap's carry): all of it.
-            1.0
-        } else if k.from_dribble {
-            SHOT_SLIDE_FROM_DRIBBLE
-        } else if p.sprinting && k.entry.length() >= 4.0 {
-            SHOT_SLIDE_SPRINT
-        } else {
-            SHOT_SLIDE
-        };
-        p.vel = k.entry * (1.0 + (end - 1.0) * (k.elapsed / SHOT_BUILDUP).min(1.0));
+        // A shot keeps your run-up, sliding on that way and slowing over its wind-up to the touch.
+        p.vel = shot_slide(&k, k.slide);
     } else if let Some(mut d) = p.dash {
         d.t += dt;
         // Turn as a dribble would. Dashing onto the ball controls it and carries it on in front,
@@ -1036,6 +1188,7 @@ pub fn player_move(
         p.facing += diff.clamp(-max_turn, max_turn);
         let (top, accel, by_angle): (f32, f32, &[(f32, f32)]) =
             if p.has_ball { (LOCK_BALL_SPEED, LOCK_BALL_ACCEL, &LOCK_BALL_SPEED_BY_ANGLE) } else { (LOCK_SPEED, LOCK_ACCEL, &LOCK_SPEED_BY_ANGLE) };
+        let top = control_keep.map_or(top, |keep| top.max(keep));
         let target = if wish == Vec3::ZERO {
             Vec3::ZERO
         } else {
@@ -1342,6 +1495,7 @@ pub fn ball_control(
     let in_reach = b.no_control <= 0.0 && p.magnet_off <= 0.0 && !hands_off && in_control_zone(rel, vel, speed, p.locked, starting || p.turn.is_some());
     if in_reach {
         p.receiving = Some(0.0);
+        p.receive_entry = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
         b.spin = Vec3::ZERO;
         p.receive_act = CONTROL_ACT_BY_HEIGHT.iter().find(|(h, _)| btf.translation.y < *h).map_or(22.0 / 60.0, |(_, act)| *act);
         // A control ends a push ball's chase, and a dash almost at once (mechanics.md: 8% in); you
@@ -1405,6 +1559,15 @@ fn carry_ball(p: &mut Player, root: Vec3, ball: Vec3, now: f32, dt: f32) -> Vec3
         p.carry = None;
         // The ball goes with you first, then eases to the spot, so it keeps up on the move (Kev: on
         // the roulette's run it trailed behind).
+        let ball = ball + Vec3::new(p.vel.x, 0.0, p.vel.z) * dt;
+        return ball.lerp(Vec3::new(spot.x, BALL_RADIUS, spot.z), 1.0 - (-dt / FEINT_BALL_EASE).exp());
+    }
+    // A fake keeps the ball at your feet, out the way it takes you (the sole rolls it round on the
+    // turns).
+    if let Some(f) = p.fake {
+        let (way, ..) = f.motion();
+        let spot = root + way * DRIBBLE_OFFSET;
+        p.carry = None;
         let ball = ball + Vec3::new(p.vel.x, 0.0, p.vel.z) * dt;
         return ball.lerp(Vec3::new(spot.x, BALL_RADIUS, spot.z), 1.0 - (-dt / FEINT_BALL_EASE).exp());
     }
@@ -1527,17 +1690,26 @@ pub fn kicking(
     let p = &mut **player;
 
     // A pass press early in a shot's charge is a fake shot (Rematch binds both to the same button):
-    // the leg swings low over the ball and you crouch over it, no kicks until you can act again.
-    if let Some((t, lock)) = p.fake {
-        p.fake = (t + dt < lock).then_some((t + dt, lock));
-        return;
+    // the leg swings over the ball, then the move the keys pick (player_move runs it). No kicks until
+    // you can act again; a kick then ends it.
+    p.since_fake = if p.has_ball { p.since_fake + dt } else { f32::INFINITY };
+    if let Some(f) = p.fake.as_mut() {
+        f.t += dt;
+        if f.t >= f.len {
+            p.fake = None;
+        } else if f.t < f.act {
+            return;
+        }
     }
-    if p.charging_shot() && p.kick.is_some_and(|k| k.elapsed <= FAKE_SHOT_WINDOW) && actions.just_pressed(Action::FakeShot) {
-        let moving = Vec3::new(p.vel.x, 0.0, p.vel.z).length() > 1.0;
-        p.fake = Some((0.0, FAKE_SHOT_LOCK[2 * p.exhausted as usize + moving as usize]));
+    if p.charging_shot()
+        && let Some(k) = p.kick.filter(|k| k.elapsed <= FAKE_SHOT_WINDOW)
+        && actions.just_pressed(Action::FakeShot)
+    {
+        p.fake = Some(start_fake(p, &k, axes.movement));
         p.kick = None;
-        p.stamina = (p.stamina - FAKE_SHOT_COST).max(0.0);
-        p.regen_wait = REGEN_DELAY;
+        p.run = None;
+        p.turn = None;
+        p.pivot = 0.0;
         return;
     }
 
@@ -1610,6 +1782,7 @@ pub fn kicking(
             }
             p.push_buffered = false;
             p.flick_buffered = false;
+            p.fake = None;
             let released = kind.charge_action().is_none();
             let steer = if axes.movement.length() < PUSH_BALL_DEAD_ZONE {
                 Vec3::ZERO
@@ -1619,7 +1792,7 @@ pub fn kicking(
             p.run = None;
             let way = if steer == Vec3::ZERO { forward(p.facing) } else { steer };
             let heading = if kind == Kick::LobbedPushBall { Heading::of(forward(p.facing).angle_between(way).to_degrees(), 45.0, 135.0) } else { Heading::Forward };
-            let k = KickState { kind, elapsed: 0.0, held: pre, pre, released, aim: Vec2::new(rig.yaw, rig.pitch), eye: camera.translation, entry: p.vel, from_dribble, steer, sprint: p.sprinting, heading, volley: None };
+            let k = KickState { kind, elapsed: 0.0, held: pre, pre, released, aim: Vec2::new(rig.yaw, rig.pitch), eye: camera.translation, entry: p.vel, from_dribble, steer, sprint: p.sprinting, heading, volley: None, slide: 0.0 };
             if kind.is_flick() {
                 p.run = Some(flick_windup(p, &k, way));
             }
@@ -1679,6 +1852,7 @@ pub fn kicking(
                 sprint: p.sprinting,
                 heading: Heading::Forward,
                 volley: Some(volley),
+                slide: 0.0,
             });
         }
     }
@@ -1718,6 +1892,12 @@ pub fn kicking(
 
     let Some(k) = &mut p.kick else { return };
     k.elapsed += dt;
+    // A shot's slide runs its curve to the touch: a charge's to its power wind-up, a released one's
+    // to its strike, never back.
+    if k.kind == Kick::Shot {
+        let strike = if k.released { contact_time(k).max((k.held - k.pre).max(0.0) + KICK_STRIKE_MIN) } else { SHOT_BUILDUP };
+        k.slide += (1.0 - k.slide) * (dt / (strike - (k.elapsed - dt)).max(dt)).min(1.0);
+    }
     // Extra effort's auto tap goes where the stick points at its touch, not at the press: you press
     // extra effort and the new way together, often a frame or two apart.
     if k.kind == Kick::PushBall && p.extra_active && axes.movement.length() >= PUSH_BALL_DEAD_ZONE {
@@ -1912,14 +2092,18 @@ pub fn kicking(
     ball.no_control = no_control;
     ball.freeze = k.kind.freeze_frames(speed) / 60.0;
     p.freeze = ball.freeze;
+    // After the touch a shot lunges on: from the touch's speed up to SHOT_AFTER_TOUCH_SPEED's end by
+    // the move interrupt (45f from the press), whatever the stick until then, then on a little longer
+    // unless you steer. A pass or lob slides you on at its speed whatever the stick until PASS_SLIDE,
+    // then to its animation's end unless you steer.
     if k.kind == Kick::Shot {
-        let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
-        p.run = Some(Run { t: 0.0, length: SHOT_AFTER_TOUCH, free_at: KICK_TURN_FREE, hold: false, dir: Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or_zero(), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: speed, exit: 180.0, soft: true, face: None });
+        let touch = shot_slide(&k, 1.0);
+        p.vel = touch;
+        let ramp = (SHOT_MOVE_INTERRUPT - k.elapsed).max(SHOT_AFTER_TOUCH_MIN);
+        p.run = Some(Run { t: 0.0, ramp: Some(ramp), length: ramp + SHOT_AFTER_TOUCH_HOLD, free_at: ramp, hold: true, dir: touch.normalize_or_zero(), speeds: &SHOT_AFTER_TOUCH_SPEED, tables: None, scale: touch.length(), exit: 180.0, soft: true, face: None });
     }
-    // After the touch a shot's drag lets the stick held its own way go at once, any other way from
-    // KICK_TURN_FREE; a pass or lob's slides you on whatever the stick until PASS_SLIDE.
-    if let Some(drag) = pass_drag(&k) {
-        p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: PASS_SLIDE, hold: true, dir: Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or(drag.normalize()), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: drag.length(), exit: 180.0, soft: true, face: None });
+    if let Some(drag) = pass_drag(&k).filter(|d| *d != Vec3::ZERO) {
+        p.run = Some(Run { t: 0.0, ramp: None, length: PASS_AFTER_TOUCH, free_at: PASS_SLIDE, hold: true, dir: Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or(drag.normalize()), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: drag.length(), exit: 180.0, soft: true, face: None });
     }
     if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall | Kick::VolleyPushBall) {
         p.own_push = 0.0;
@@ -1933,7 +2117,7 @@ pub fn kicking(
     {
         let act = if k.kind == Kick::VolleyShot { VOLLEY_SHOT_ACT } else { VOLLEY_PASS_ACT }[v.part as usize];
         let flat_vel = Vec3::new(p.vel.x, 0.0, p.vel.z);
-        p.run = Some(Run { t: 0.0, hold: false, length: act, free_at: act, dir: flat_vel.normalize_or_zero(), speeds: &VOLLEY_RECOVERY, tables: None, scale: flat_vel.length(), exit: 180.0, soft: true, face: None });
+        p.run = Some(Run { t: 0.0, ramp: None, hold: false, length: act, free_at: act, dir: flat_vel.normalize_or_zero(), speeds: &VOLLEY_RECOVERY, tables: None, scale: flat_vel.length(), exit: 180.0, soft: true, face: None });
     }
     // After a volley push you run after the ball (its redirect), sprint and extra effort only until
     // 12f after the touch.
@@ -1942,7 +2126,7 @@ pub fn kicking(
         p.regen_wait = PUSH_BALL_REGEN_DELAY;
         let by = angle_diff(yaw, p.facing);
         let tables = VOLLEY_PUSH_RUN;
-        p.run = Some(Run { t: 0.0, hold: false, length: VOLLEY_PUSH_AFTER, free_at: VOLLEY_PUSH_FREE, dir: flat, speeds: tables[0], tables: Some(tables), scale: 1.0, exit: RUN_TURN_LIMIT, soft: false, face: Some((p.facing, by, 0.0, 8.0 / 60.0)) });
+        p.run = Some(Run { t: 0.0, ramp: None, hold: false, length: VOLLEY_PUSH_AFTER, free_at: VOLLEY_PUSH_FREE, dir: flat, speeds: tables[0], tables: Some(tables), scale: 1.0, exit: RUN_TURN_LIMIT, soft: false, face: Some((p.facing, by, 0.0, 8.0 / 60.0)) });
     }
     // After a push ball you chase it on the move's own speed (extra effort keeps its running).
     if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) && !p.extra_active {
@@ -1966,7 +2150,7 @@ pub fn kicking(
         };
         let speeds = tables[state];
         // The chase runs to the animation's blend-out, or ends earlier on a stick exit.
-        p.run = Some(Run { t: 0.0, length: length - BLEND_OUT - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, hold: false, dir: flat, speeds, tables: Some(tables), scale: 1.0, exit: RUN_TURN_LIMIT, soft: false, face });
+        p.run = Some(Run { t: 0.0, ramp: None, length: length - BLEND_OUT - PUSH_BALL_WINDUP, free_at: PUSH_BALL_FREE - PUSH_BALL_WINDUP, hold: false, dir: flat, speeds, tables: Some(tables), scale: 1.0, exit: RUN_TURN_LIMIT, soft: false, face });
     }
     // After a flick: on at your speed flicking ahead, to a stop sideways or back; the body turns
     // along the ball's way over the redirect window.
@@ -1986,7 +2170,7 @@ pub fn kicking(
         // The volley flick's redirect runs on its own speeds; the others scale your own.
         let speed = if k.volley.is_some() { 1.0 } else { Vec3::new(p.vel.x, 0.0, p.vel.z).length() };
         let free_at = if k.volley.is_some() { VOLLEY_FLICK_AFTER } else { (FLICK_FREE - contact_time(&k)).max(0.0) };
-        p.run = Some(Run { t: 0.0, hold: false, length: length.max(free_at), free_at, dir: flat, speeds, tables: None, scale: speed, exit: RUN_TURN_LIMIT, soft: false, face: Some((p.facing, by, 0.0, FLICK_REDIRECT)) });
+        p.run = Some(Run { t: 0.0, ramp: None, hold: false, length: length.max(free_at), free_at, dir: flat, speeds, tables: None, scale: speed, exit: RUN_TURN_LIMIT, soft: false, face: Some((p.facing, by, 0.0, FLICK_REDIRECT)) });
     }
 }
 
@@ -2002,15 +2186,29 @@ fn flick_windup(p: &Player, k: &KickState, way: Vec3) -> Run {
         _ if speed < FLICK_STEP_BELOW => (if speed > 0.5 { flat.normalize() } else { way }, &FLICK_TURNED_STEP, 1.0),
         _ => (flat.normalize(), &FLICK_TURNED_BRAKE, speed),
     };
-    Run { t: 0.0, hold: false, length: contact_time(k), free_at: f32::INFINITY, dir, speeds, tables: None, scale, exit: 0.0, soft: false, face: None }
+    Run { t: 0.0, ramp: None, hold: false, length: contact_time(k), free_at: f32::INFINITY, dir, speeds, tables: None, scale, exit: 0.0, soft: false, face: None }
 }
 
-/// A pass or lob's drag: your velocity at the press, or out of a dribble your run speed with the
-/// ball that way; none standing still (PASS_DRAG_MIN_SPEED).
+/// A shot's slide `u` of the way through its wind-up (1 at the touch): your velocity at the press,
+/// capped at KICK_ENTRY_CAP, times SHOT_WINDUP (out of a dribble SHOT_WINDUP_DRIBBLE, sprinting at
+/// SHOT_SLIDE_SPRINT_MIN or more SHOT_WINDUP_SPRINT).
+fn shot_slide(k: &KickState, u: f32) -> Vec3 {
+    let entry = Vec3::new(k.entry.x, 0.0, k.entry.z).clamp_length_max(KICK_ENTRY_CAP);
+    let windup: &[(f32, f32)] = if k.from_dribble {
+        &SHOT_WINDUP_DRIBBLE
+    } else if k.sprint && entry.length() >= SHOT_SLIDE_SPRINT_MIN {
+        &SHOT_WINDUP_SPRINT
+    } else {
+        &SHOT_WINDUP
+    };
+    entry * curve(windup, u)
+}
+
+/// A pass or lob's drag: your velocity at the press (a dribble's, a control's or a dash's included),
+/// capped at KICK_ENTRY_CAP; at PASS_SLIDE_MIN_ENTRY or slower none, the standing pass planting you.
 fn pass_drag(k: &KickState) -> Option<Vec3> {
-    let entry = Vec3::new(k.entry.x, 0.0, k.entry.z);
-    (k.kind.is_pass() && k.volley.is_none() && entry.length() > PASS_DRAG_MIN_SPEED)
-.then(|| if k.from_dribble { entry.normalize() * BALL_RUN_SPEED } else { entry })
+    let entry = Vec3::new(k.entry.x, 0.0, k.entry.z).clamp_length_max(KICK_ENTRY_CAP);
+    (k.kind.is_pass() && k.volley.is_none()).then_some(if entry.length() > PASS_SLIDE_MIN_ENTRY { entry } else { Vec3::ZERO })
 }
 
 /// The extra effort auto tap's force multiplier: weaker when starting it turns you hard (from
@@ -2294,7 +2492,7 @@ mod tests {
         // A jumping head push lofts it: 9 m/s at 40 deg.
         let mut app = kick_app(false, Vec3::new(0.0, 2.6, -0.3), Vec3::ZERO);
         let volley = Volley { at: Vec3::new(0.0, 2.6, -0.3), t: 1.0 / 60.0, part: Part::JumpHead, left: false, face: 0.0, jump: 0.8 };
-        let k = KickState { kind: Kick::VolleyPushBall, elapsed: 0.0, held: 0.0, pre: 0.0, released: true, aim: Vec2::ZERO, eye: Vec3::ZERO, entry: Vec3::ZERO, from_dribble: false, steer: Vec3::ZERO, sprint: false, heading: Heading::Forward, volley: Some(volley) };
+        let k = KickState { kind: Kick::VolleyPushBall, elapsed: 0.0, held: 0.0, pre: 0.0, released: true, aim: Vec2::ZERO, eye: Vec3::ZERO, entry: Vec3::ZERO, from_dribble: false, steer: Vec3::ZERO, sprint: false, heading: Heading::Forward, volley: Some(volley), slide: 0.0 };
         app.world_mut().query::<&mut Player>().single_mut(app.world_mut()).unwrap().kick = Some(k);
         frames_to_touch(&mut app, &[]);
         let b = ball(&mut app);
@@ -2458,6 +2656,154 @@ mod tests {
         frames(&mut app, &[Action::Shoot], 28, 1.0 / 60.0);
         frames(&mut app, &[Action::Shoot, Action::FakeShot], 1, 1.0 / 60.0);
         assert_eq!(state(&mut app), (Some(Kick::Shot), false));
+    }
+
+    #[test]
+    fn the_keys_at_a_fake_pick_its_move() {
+        use std::f32::consts::{FRAC_PI_2, PI};
+        let d = Vec2::ONE.normalize();
+        let kind = |input: Vec2| fake_by_keys(input).0;
+        // Ahead within 45 deg, W+A and W+D included: on forward.
+        assert_eq!(kind(Vec2::Y), FakeKind::Forward);
+        assert_eq!(kind(Vec2::new(-d.x, d.y)), FakeKind::Forward, "W+A");
+        assert_eq!(kind(d), FakeKind::Forward, "W+D");
+        // The right side and S+D: the roulette out to the right.
+        assert_eq!(fake_by_keys(Vec2::X), (FakeKind::Side, -FRAC_PI_2));
+        assert_eq!(fake_by_keys(Vec2::new(d.x, -d.y)), (FakeKind::Side, -FRAC_PI_2), "S+D");
+        // A, S+A and S: the half turn back (the data; FAKE_LEFT_ROULETTE swaps A and S+A).
+        if !FAKE_LEFT_ROULETTE {
+            assert_eq!(fake_by_keys(Vec2::NEG_X), (FakeKind::Back, PI));
+            assert_eq!(kind(-d), FakeKind::Back, "S+A");
+        }
+        assert_eq!(kind(Vec2::NEG_Y), FakeKind::Back);
+        assert_eq!(kind(Vec2::ZERO), FakeKind::Stop);
+    }
+
+    /// A player running at `speed` m/s straight ahead (-z), charging a shot aimed that way.
+    fn faking_player(speed: f32, sprinting: bool) -> (Player, KickState) {
+        let p = Player { has_ball: true, vel: Vec3::NEG_Z * speed, sprinting, ..default() };
+        let k = KickState { kind: Kick::Shot, elapsed: 0.2, held: 0.2, pre: 0.0, released: false, aim: Vec2::ZERO, eye: Vec3::ZERO, entry: p.vel, from_dribble: false, steer: Vec3::ZERO, sprint: sprinting, heading: Heading::Forward, volley: None, slide: 0.0 };
+        (p, k)
+    }
+
+    /// Where a fake takes you by `until` s (from the press), and its speed then.
+    fn fake_path(f: FakeState, until: f32) -> (Vec3, f32) {
+        let (mut f, mut at) = (f, Vec3::ZERO);
+        while f.t < until {
+            let (way, _, speed) = f.motion();
+            at += way * speed / 60.0;
+            f.t += 1.0 / 60.0;
+        }
+        (at, f.motion().2)
+    }
+
+    #[test]
+    fn a_moving_fake_keeps_your_speed_along_its_way() {
+        // Running with the ball, D: the roulette turns you right and runs you on that way at your
+        // speed, about 2.2 m out by the time you can act (34f).
+        let (mut p, k) = faking_player(4.5, false);
+        let f = start_fake(&mut p, &k, Vec2::X);
+        assert_eq!((f.kind, f.act), (FakeKind::Side, 34.0 / 60.0));
+        let (at, speed) = fake_path(f, f.act);
+        assert!((1.8..2.6).contains(&at.x) && at.z < 0.0, "right roulette {at}");
+        assert!((speed - 4.5).abs() < 0.05, "speed {speed}");
+        let turned = FakeState { t: FAKE_TURN.1, ..f };
+        assert!((angle_diff(turned.motion().1, p.facing) + std::f32::consts::FRAC_PI_2).abs() < 0.01, "faces right");
+        // S: the half turn back ends up coming back the way you came.
+        let (mut p, k) = faking_player(4.5, false);
+        let f = start_fake(&mut p, &k, Vec2::NEG_Y);
+        let (at, _) = fake_path(f, f.len);
+        assert!(at.z > 0.0, "back {at}");
+        // Sprinting it rises to x1.25 by its end; slow it bursts to x2 early.
+        let (mut p, k) = faking_player(6.0, true);
+        let f = start_fake(&mut p, &k, Vec2::Y);
+        assert!((fake_path(f, f.len).1 - 6.0 * 1.25).abs() < 0.2);
+        let (mut p, k) = faking_player(2.0, false);
+        let f = start_fake(&mut p, &k, Vec2::Y);
+        let peak = (0..30).map(|i| fake_path(f, i as f32 / 60.0).1).fold(0.0, f32::max);
+        assert!(peak > 3.5, "slow burst {peak}");
+        // No keys: a step and a stop; standing: no travel, free in 20f.
+        let (mut p, k) = faking_player(4.5, false);
+        let f = start_fake(&mut p, &k, Vec2::ZERO);
+        let (at, speed) = fake_path(f, 0.5);
+        assert!(f.kind == FakeKind::Stop && at.length() < 1.0 && speed == 0.0, "stop {at} {speed}");
+        let (mut p, k) = faking_player(1.0, false);
+        let f = start_fake(&mut p, &k, Vec2::X);
+        assert!(f.kind == FakeKind::Standing && f.act == 20.0 / 60.0 && fake_path(f, 0.5).0.length() < 1e-3);
+    }
+
+    #[test]
+    fn a_second_fake_with_the_ball_costs_more_and_a_tired_one_is_free() {
+        let (mut p, k) = faking_player(4.5, false);
+        start_fake(&mut p, &k, Vec2::Y);
+        assert!((p.stamina - (MAX_STAMINA - 1.5)).abs() < 1e-4);
+        p.since_fake = 2.0;
+        start_fake(&mut p, &k, Vec2::Y);
+        assert!((p.stamina - (MAX_STAMINA - 5.5)).abs() < 1e-4, "within 3 s: 4.0");
+        p.since_fake = 3.5;
+        start_fake(&mut p, &k, Vec2::Y);
+        assert!((p.stamina - (MAX_STAMINA - 7.0)).abs() < 1e-4, "after 3 s: 1.5 again");
+        // Can't pay: the tired fake, forward whatever the keys, free, can act at 50f.
+        p.stamina = 1.0;
+        let f = start_fake(&mut p, &k, Vec2::X);
+        assert!(f.tired && f.kind == FakeKind::Forward && f.act == 50.0 / 60.0 && p.stamina == 1.0);
+    }
+
+    #[test]
+    fn passes_keep_the_speed_they_start_with_and_slow_ones_plant_you() {
+        let (_, k) = faking_player(6.6, false);
+        let pass = |entry: Vec3, from_dribble: bool| pass_drag(&KickState { kind: Kick::Pass, entry, from_dribble, ..k });
+        assert_eq!(pass(Vec3::NEG_Z * 6.6, true), Some(Vec3::NEG_Z * 6.6), "a dribble's own speed");
+        assert_eq!(pass(Vec3::NEG_Z * 12.0, false), Some(Vec3::NEG_Z * KICK_ENTRY_CAP), "capped");
+        assert_eq!(pass(Vec3::NEG_Z * 1.8, false), Some(Vec3::ZERO), "the standing pass");
+        assert_eq!(pass_drag(&KickState { kind: Kick::Shot, ..k }), None);
+    }
+
+    /// An app with player_move then kicking, the player running ahead at `speed` with the ball.
+    fn run_kick_app(speed: f32) -> App {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Bindings>().init_resource::<Time>().add_systems(Update, (player_move, kicking).chain());
+        app.world_mut().spawn((Player { has_ball: true, vel: Vec3::NEG_Z * speed, ..default() }, Transform::from_xyz(0.0, 0.9, 0.0)));
+        app.world_mut().spawn((Transform::from_xyz(0.0, BALL_RADIUS, -0.4), Ball { held: true, ..default() }));
+        app.world_mut().spawn((Camera3d::default(), Transform::from_xyz(0.0, 2.0, 4.0)));
+        app.world_mut().spawn(CameraRig::default());
+        app
+    }
+
+    #[test]
+    fn a_shot_slows_to_its_touch_then_lunges_on() {
+        let mut app = run_kick_app(4.5);
+        let mut speeds = Vec::new();
+        frames(&mut app, &[Action::Shoot], 1, 1.0 / 60.0);
+        let entry = player(&mut app).kick.map(|k| k.entry.length()).unwrap();
+        for _ in 0..50 {
+            frames(&mut app, &[], 1, 1.0 / 60.0);
+            let p = player(&mut app);
+            speeds.push((p.kick.is_some(), p.freeze > 0.0, p.vel.length()));
+        }
+        // At the touch: x0.7 of the run-up; by the move interrupt (45f) about twice that.
+        let touch = speeds.iter().position(|s| !s.0).unwrap();
+        let at_touch = speeds[touch].2;
+        assert!((at_touch / entry - 0.7).abs() < 0.02, "touch {at_touch} of {entry}");
+        let late = speeds[47].2;
+        assert!((late / at_touch - 2.0).abs() < 0.15, "after {late}");
+    }
+
+    #[test]
+    fn a_control_keeps_your_run_for_the_kick_queued_in_it() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+        app.world_mut().resource_mut::<Axes>().movement = Vec2::Y;
+        let id = app.world_mut().spawn((Transform::default(), Player { has_ball: true, vel: Vec3::NEG_Z * 8.4, receiving: Some(0.0), receive_entry: 8.4, ..default() })).id();
+        app.world_mut().spawn(CameraRig::default());
+        for i in 0..14 {
+            app.world_mut().get_mut::<Player>(id).unwrap().receiving = Some(i as f32 / 60.0);
+            frames(&mut app, &[], 1, 1.0 / 60.0);
+        }
+        // Coming in from a sprint without the ball: capped at 8 m/s, x0.9 by the action frame, far
+        // above the 4.5 m/s you run with the ball.
+        let speed = app.world().get::<Player>(id).unwrap().vel.length();
+        assert!((speed - 8.0 * curve(&CONTROL_SPEED_KEEP, 13.0 / 60.0)).abs() < 0.3, "{speed}");
     }
 
     #[test]

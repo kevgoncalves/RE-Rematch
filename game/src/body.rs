@@ -15,7 +15,7 @@ use std::sync::LazyLock;
 use bevy::prelude::*;
 
 use crate::fx::TrailPoint;
-use crate::player::{FeintTurn, Heading, Kick, KickState, Part, Player, charge, contact_time, dribble_contact, roulette_turn, turn_out_angle, yaw_of};
+use crate::player::{FakeKind, FeintTurn, Heading, Kick, KickState, Part, Player, charge, contact_time, dribble_contact, roulette_turn, turn_out_angle, yaw_of};
 use crate::tuning::*;
 
 // Rematch's player (notes/animation.md §1), metres. The root entity is the capsule's centre.
@@ -2448,9 +2448,12 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         let w = push_touch * push_touch * (3.0 - 2.0 * push_touch) * 1.2;
         pose = pose.plus(&Pose(clips.control.0.map(|a| a * w)));
     }
-    // A fake shot: the kicking leg swings low over the ball, then you drop into a deep, wide crouch
-    // over it with the arms out low, rising as you can act again (Kev's practice recording).
-    if let Some((t, lock)) = p.fake {
+    // A fake shot: the kicking leg swings low over the ball, then by the fake: on into the run
+    // (forward), the roulette or the half turn back (the move layer below, from the swing), or down
+    // into a deep, wide crouch over the ball with the arms out low, rising as you can act again (the
+    // stop and the standing fake; Kev's practice recording). The tired one swings slower and runs on.
+    if let Some(f) = p.fake {
+        let t = f.t;
         let swing = clips.stand.with(&[
             (SPINE_J, [22.0, 0.0, -4.0]),
             (THIGH_L, [28.0, 0.0, -8.0]),
@@ -2477,8 +2480,13 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             (FORE_R, [20.0, 0.0, 0.0]),
         ]);
         let into = ((t - FAKE_SHOT_SWING) / 0.12).clamp(0.0, 1.0);
-        let key = swing.lerp(&crouch, into * into * (3.0 - 2.0 * into));
-        let w = (t / 0.05).min(1.0) * ((lock - t) / 0.12).clamp(0.0, 1.0);
+        let (key, out_at) = match f.kind {
+            _ if f.tired && f.kind != FakeKind::Standing => (swing, FAKE_SHOT_SWING + 0.3),
+            FakeKind::Forward => (swing, FAKE_SHOT_SWING + 0.12),
+            FakeKind::Side | FakeKind::Back => (swing, FAKE_SHOT_SWING + 0.1),
+            FakeKind::Stop | FakeKind::Standing => (swing.lerp(&crouch, into * into * (3.0 - 2.0 * into)), f.act + 0.25),
+        };
+        let w = (t / 0.05).min(1.0) * ((out_at - t) / 0.12).clamp(0.0, 1.0);
         pose = pose.lerp(&key, w * w * (3.0 - 2.0 * w));
     }
 
@@ -2554,6 +2562,24 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             FeintTurn::TurnOut(side) => anim.spin = -side * turn_out_angle(d.t),
             FeintTurn::None => {}
         }
+    } else if let Some(f) = p.fake.filter(|f| matches!(f.kind, FakeKind::Side | FakeKind::Back) && f.t >= FAKE_SHOT_SWING) {
+        // A fake's roulette or half turn back, from its swing: the sole takes the ball round as you
+        // turn. The roulette is the dribble's (authored turning left), with a whole turn of the body
+        // on top of the quarter turn out; the half turn back is the drag back's (the right foot).
+        let t = f.t - FAKE_SHOT_SWING;
+        started = t < anim.move_t || anim.move_w <= 0.0;
+        if started {
+            anim.move_mirror = if f.kind == FakeKind::Side { f.turn < 0.0 } else { f.turn > 0.0 };
+        }
+        anim.move_t = t;
+        moving = Some(if f.kind == FakeKind::Side {
+            let (from, to) = FAKE_ROULETTE_SPIN;
+            let u = ((f.t - from) / (to - from)).clamp(0.0, 1.0);
+            anim.spin = f.turn.signum() * 360.0 * u * u * (3.0 - 2.0 * u);
+            (clips.roulette.0.sample(u), 0.05)
+        } else {
+            (clips.dribble_back.0.sample((t / 0.4).min(1.0)), 0.05)
+        });
     } else if let Some(d) = p.dash {
         started = d.t < anim.move_t || anim.move_w <= 0.0;
         if started {
@@ -2630,7 +2656,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
 
     // The roulette's and turn-out's turn is on the whole body, added after the joint speed limit (a
     // full turn ends where it began); cut short, it turns back the short way over 0.1 s.
-    if !p.dribble.is_some_and(|d| d.moving() && d.turn != FeintTurn::None) {
+    if !p.dribble.is_some_and(|d| d.moving() && d.turn != FeintTurn::None) && !p.fake.is_some_and(|f| f.kind == FakeKind::Side) {
         anim.spin = (anim.spin + 180.0).rem_euclid(360.0) - 180.0;
         anim.spin -= anim.spin * (dt / 0.1).min(1.0);
     }
