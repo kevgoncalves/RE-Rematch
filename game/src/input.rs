@@ -92,8 +92,9 @@ impl Action {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum Device {
+    #[default]
     Keyboard,
     Gamepad,
 }
@@ -110,6 +111,10 @@ pub struct Bindings {
     /// Rematch's field of view option (degrees); the per-state FOVs shift with it.
     #[serde(default = "default_fov")]
     pub fov: f32,
+    /// Rematch's "lock shoot on controller": a gamepad shot locks the camera and its aim at the
+    /// press, as on keyboard and mouse (notes/camera-lock.md). Off by default.
+    #[serde(default)]
+    pub camera_lock: bool,
 }
 
 fn one() -> f32 {
@@ -197,6 +202,7 @@ impl Default for Bindings {
             pass_aim: PassAim::default(),
             magnus_sensitivity: one(),
             fov: default_fov(),
+            camera_lock: false,
         }
     }
 }
@@ -253,6 +259,12 @@ impl Bindings {
             Device::Gamepad => &mut self.gamepad,
         }
     }
+
+    /// Shots lock the camera and their aim at the press: always on keyboard and mouse, and on a
+    /// gamepad with the camera lock option.
+    pub fn shot_camera_lock(&self, device: Device) -> bool {
+        device == Device::Keyboard || self.camera_lock
+    }
 }
 
 /// This frame's action state, after chord resolution.
@@ -269,6 +281,8 @@ pub struct Actions {
     fresh: HashSet<Action>,
     /// Presses not used yet (see `pending`).
     pending: HashSet<Action>,
+    /// The device used last: a key, click or mouse move, or a pad's button or stick.
+    pub device: Device,
 }
 
 impl Actions {
@@ -328,7 +342,7 @@ impl Axes {
     }
 }
 
-/// Set while the controls menu is open or a binding is being captured: gameplay ignores input.
+/// Set while the menu is open (a binding capture included): gameplay ignores input.
 #[derive(Resource, Default)]
 pub struct InputBlocked(pub bool);
 
@@ -430,6 +444,15 @@ pub fn read_input(
     actions.raw_prev = raw_now;
     actions.prev = std::mem::replace(&mut actions.now, now);
     actions.update_pending();
+
+    // The last device used picks the camera lock rule. Small stick drift and mouse jitter don't count.
+    let pad_used = pads.iter().any(|g| g.get_just_pressed().next().is_some() || g.left_stick().length() > 0.3 || g.right_stick().length() > 0.3);
+    let keyboard_used = keys.get_just_pressed().next().is_some() || mouse.get_just_pressed().next().is_some() || motion.delta.length() > 2.0;
+    if pad_used {
+        actions.device = Device::Gamepad;
+    } else if keyboard_used {
+        actions.device = Device::Keyboard;
+    }
 
     // Analog: keyboard directions plus the left stick; mouse plus the right stick for the camera.
     let key_axis = |pos: Action, neg: Action| actions.pressed(pos) as i32 as f32 - actions.pressed(neg) as i32 as f32;
@@ -533,8 +556,17 @@ mod tests {
 
     #[test]
     fn bindings_survive_save_format() {
-        let b = Bindings::default();
+        let b = Bindings { camera_lock: true, ..Bindings::default() };
         let text = ron::ser::to_string_pretty(&b, default()).unwrap();
         assert!(ron::from_str::<Bindings>(&text).unwrap() == b);
+    }
+
+    #[test]
+    fn camera_lock_is_a_gamepad_option() {
+        let off = Bindings::default();
+        let on = Bindings { camera_lock: true, ..Bindings::default() };
+        // Keyboard and mouse always lock; the option only frees or locks the gamepad.
+        assert!(off.shot_camera_lock(Device::Keyboard) && on.shot_camera_lock(Device::Keyboard));
+        assert!(!off.shot_camera_lock(Device::Gamepad) && on.shot_camera_lock(Device::Gamepad));
     }
 }
