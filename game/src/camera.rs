@@ -386,6 +386,39 @@ fn side_ratio(p: &Player, yaw_deg: f32, facing: bool) -> f32 {
     right.dot(dir)
 }
 
+/// The match camera's look (rendering only; the camera needs `hdr`): a filmic tonemapper at the
+/// arena's exposure, a soft bloom that only the bright effects and lights reach, a mild grade, a
+/// thin haze that sets the stands back, and multisampled edges.
+pub fn look() -> impl Bundle {
+    use bevy::core_pipeline::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
+    use bevy::core_pipeline::tonemapping::Tonemapping;
+    use bevy::render::camera::Exposure;
+    use bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection};
+    (
+        Tonemapping::TonyMcMapface,
+        Exposure { ev100: crate::arena::EXPOSURE_EV100 },
+        Bloom {
+            intensity: 0.18,
+            low_frequency_boost: 0.5,
+            prefilter: BloomPrefilter { threshold: 1.0, threshold_softness: 0.5 },
+            composite_mode: BloomCompositeMode::Additive,
+            ..Bloom::NATURAL
+        },
+        ColorGrading {
+            global: ColorGradingGlobal { post_saturation: 1.08, ..default() },
+            shadows: ColorGradingSection { contrast: 1.05, ..default() },
+            midtones: ColorGradingSection { contrast: 1.04, ..default() },
+            highlights: ColorGradingSection { saturation: 0.95, ..default() },
+        },
+        DistanceFog {
+            color: Color::srgb(0.32, 0.3, 0.55),
+            falloff: FogFalloff::Exponential { density: 0.0022 },
+            ..default()
+        },
+        Msaa::Sample4,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
