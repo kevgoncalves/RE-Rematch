@@ -1,4 +1,5 @@
-// The pitch: stylised turf mown in rings round the centre spot, hand-painted colour noise, a
+// The pitch: stylised turf mown in straight stripes across it (parallel to the goal lines), their
+// edges broken into short sideways strands like brush strokes, hand-painted colour noise, a
 // slight sheen, and the painted markings drawn as distance fields (crisp at any distance, no
 // z-fighting). Everything is in world metres; the sizes come from arena.rs.
 #import bevy_pbr::{
@@ -7,7 +8,7 @@
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
 }
 
-// x, y: half width and half length; z: line half width; w: mowing ring width
+// x, y: half width and half length; z: line half width; w: mowing period (a light and a dark stripe)
 @group(2) @binding(100) var<uniform> pitch_size: vec4<f32>;
 // x, y: keeper area half width and depth; z: centre circle radius; w: centre spot radius
 @group(2) @binding(101) var<uniform> pitch_keeper: vec4<f32>;
@@ -76,21 +77,28 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let dy = dpdy(p);
     let foot = max(length(dx), length(dy));
 
-    // Mowing: concentric rings round the centre spot, each `w` wide, with hand-drawn wobbly edges.
+    // Mowing: straight stripes across the pitch, a light and a dark one every `w` metres along it.
+    // Each edge is broken into strands a metre or two long, staggered from edge to edge.
     let r = length(p);
     let w = pitch_size.w;
-    let wobble = (fbm(p * 0.45) - 0.5) * 0.3 + (noise(p * 2.3) - 0.5) * 0.08;
-    let t = r / w + wobble;
-    let tw = (abs(dot(p, dx)) + abs(dot(p, dy))) / max(r, 1e-3) / w;
+    // Each half period holds one edge; its strands are 1.0-1.8 m dashes, each set a little off the
+    // last with a quick step between, staggered from edge to edge. A step never crosses an edge.
+    let edge = floor(p.y / w * 2.0);
+    let sx = p.x / mix(1.0, 1.8, hash(vec2(edge, 3.7))) + hash(vec2(edge, 7.1)) * 5.0;
+    let dash = floor(sx);
+    let step = mix(hash(vec2(dash, edge)), hash(vec2(dash + 1.0, edge)), smoothstep(0.8, 1.0, fract(sx)));
+    let wobble = (step - 0.5) * 0.3 + (noise(vec2(p.x * 3.0, p.y * 4.0 / w)) - 0.5) * 0.06;
+    let t = p.y / w + wobble;
+    let tw = (abs(dx.y) + abs(dy.y)) / w;
     let stripe = bands(t, tw, 0.5);
 
     var grass = mix(turf_dark.rgb, turf_light.rgb, stripe);
-    // Hand-painted variation: broad patches drifting in hue, brush streaks along the rings, and
+    // Hand-painted variation: broad patches drifting in hue, brush streaks along the stripes, and
     // a fine grain that fades out before it can shimmer.
     let blotch = fbm(p * 0.045 + 3.1);
     grass *= mix(vec3(0.93, 0.97, 1.04), vec3(1.06, 1.03, 0.9), blotch);
     grass *= 0.94 + 0.12 * fbm(p * 0.22);
-    let streak = noise(vec2(r * 2.0, (p.x - p.y) * 0.15)) - 0.5;
+    let streak = noise(vec2(p.x * 0.5, p.y * 9.0)) - 0.5;
     let grain = noise(p * 9.0) - 0.5;
     let near = 1.0 - smoothstep(0.03, 0.25, foot);
     grass *= 1.0 + streak * 0.10 * (1.0 - smoothstep(0.2, 1.0, foot)) + grain * 0.10 * near;

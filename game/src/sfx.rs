@@ -516,7 +516,7 @@ fn listen(
 }
 
 /// Every sample's takes, loaded at startup; and whether to play them at all (not in a headless test
-/// run, nor without an audio output).
+/// run unless RE_SOUND is set, nor without an audio output).
 #[derive(Resource)]
 struct Bank {
     samples: HashMap<Sample, Vec<Handle<AudioSource>>>,
@@ -525,7 +525,7 @@ struct Bank {
 
 fn load_bank(mut commands: Commands, server: Res<AssetServer>) {
     let samples = Sample::ALL.into_iter().map(|s| (s, (0..Sample::TAKES).map(|take| server.load(s.path(take))).collect())).collect();
-    commands.insert_resource(Bank { samples, mute: std::env::var_os("RE_SCREENSHOT").is_some() });
+    commands.insert_resource(Bank { samples, mute: std::env::var_os("RE_SCREENSHOT").is_some() && std::env::var_os("RE_SOUND").is_none() });
 }
 
 /// A sound being played, and the frames it has waited, loaded, to start.

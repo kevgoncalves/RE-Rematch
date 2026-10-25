@@ -24,7 +24,8 @@ const PENALTY_SPOT: f32 = 11.5;
 const PENALTY_ARC: f32 = 9.15;
 /// Mowing: concentric rings round the centre spot, each this wide (measured off Rematch frames:
 /// a light and a dark ring every metre or so).
-const STRIPE: f32 = 0.55;
+/// The mowing period: a light and a dark stripe (Rematch's are about half a metre each).
+const STRIPE: f32 = 1.1;
 // Turf and paint albedo (sRGB): Rematch's bright, slightly yellow green.
 const TURF_LIGHT: Color = Color::srgb(0.42, 0.58, 0.24);
 const TURF_DARK: Color = Color::srgb(0.3, 0.48, 0.25);
@@ -393,13 +394,15 @@ fn spawn_stadium(commands: &mut Commands, meshes: &mut Assets<Mesh>, materials: 
     let mut boxes = Build::default();
     let mut roof = Build::default();
 
-    // The concourse floor between the cage and the stands.
+    // The concourse floor between the cage and the stands, a little below the turf: the goals' floors
+    // reach out over it and would flicker against it at the same height.
     for side in 0..4 {
         let o0 = 0.0;
         let o1 = LOWER_TIER.0;
         let (a0, b0) = ring_edge(side, o0);
         let (a1, b1) = ring_edge(side, o1);
-        solid.quad([on(a0, 0.0), on(b0, 0.0), on(b1, 0.0), on(a1, 0.0)], [Vec2::ZERO; 4], Color::srgb(0.6, 0.6, 0.7), Vec3::Y);
+        let y = -0.03;
+        solid.quad([on(a0, y), on(b0, y), on(b1, y), on(a1, y)], [Vec2::ZERO; 4], Color::srgb(0.6, 0.6, 0.7), Vec3::Y);
     }
     // Ribbon strips in ribbon_texture: v 0..0.5 the flags, 0.5..1 the sweep.
     for (tier, ribbon_v) in [(LOWER_TIER, 0.5), (UPPER_TIER, 0.0)] {

@@ -63,12 +63,23 @@ fn main() {
                 .set(WindowPlugin { primary_window: None, exit_condition: ExitCondition::DontExit, close_when_requested: false })
                 .set(log)
                 .disable::<WinitPlugin>(),
-            ScheduleRunnerPlugin::run_loop(std::time::Duration::from_secs_f64(1.0 / 60.0)),
+            // RE_HZ=144 ticks at another rate (for checking a faster screen's frame budget).
+            ScheduleRunnerPlugin::run_loop(std::time::Duration::from_secs_f64(1.0 / std::env::var("RE_HZ").ok().and_then(|h| h.parse().ok()).unwrap_or(60.0))),
         ));
         // Every frame advances exactly 1/60 s, so scripted runs repeat frame for frame.
         app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(std::time::Duration::from_secs_f64(1.0 / 60.0)));
     } else {
         app.add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(Window { title: "RE Rematch (prototype)".into(), ..default() }), ..default() }).set(log));
+        // In the background the game drops to 30 fps, so a forgotten window doesn't take the GPU
+        // from the one being played.
+        app.insert_resource(bevy::winit::WinitSettings {
+            focused_mode: bevy::winit::UpdateMode::Continuous,
+            unfocused_mode: bevy::winit::UpdateMode::reactive_low_power(std::time::Duration::from_secs_f64(1.0 / 30.0)),
+        });
+    }
+    // RE_PERF_GPU times every render pass on the GPU, logged each second.
+    if std::env::var_os("RE_PERF_GPU").is_some() {
+        app.add_plugins((bevy::render::diagnostic::RenderDiagnosticsPlugin, bevy::diagnostic::LogDiagnosticsPlugin::default()));
     }
     app
         .add_plugins((UiMaterialPlugin::<reticle::ReticleMaterial>::default(), UiMaterialPlugin::<gauges::GaugeMaterial>::default(), MaterialPlugin::<pass_line::PassLineMaterial>::default()))
@@ -82,6 +93,9 @@ fn main() {
         .init_resource::<fx::Cheats>()
         .init_resource::<fx::FxState>()
         .add_event::<GoalScored>()
+        .add_systems(First, |mut start: ResMut<FrameStart>| start.0 = Some(std::time::Instant::now()))
+        .add_systems(Last, frame_probe)
+        .init_resource::<FrameStart>()
         .add_systems(Startup, (arena::spawn_arena, setup, menu::spawn_menu, reticle::spawn_reticle, gauges::spawn_gauges, pass_line::spawn_pass_line, fx::spawn_fx))
         .add_systems(
             Update,
@@ -110,6 +124,37 @@ fn main() {
                 .chain(),
         )
         .run();
+}
+
+/// When this frame's game update began, for RE_PERF.
+#[derive(Resource, Default)]
+struct FrameStart(Option<std::time::Instant>);
+
+/// RE_PERF=20: logs every frame that takes over that many ms of wall time (how much of it the game
+/// update took, and the game time then) and, on exit, the frame-time spread. Headless or windowed.
+fn frame_probe(time: Res<Time>, start: Res<FrameStart>, mut last: Local<Option<std::time::Instant>>, mut frames: Local<Vec<f32>>, mut exit: EventReader<AppExit>) {
+    if std::env::var_os("RE_PERF").is_none() {
+        return;
+    }
+    let now = std::time::Instant::now();
+    if let Some(was) = last.replace(now) {
+        let ms = (now - was).as_secs_f32() * 1000.0;
+        // The first second is loading and pipeline compiles.
+        if time.elapsed_secs() > 1.0 {
+            if ms > std::env::var("RE_PERF").ok().and_then(|v| v.parse().ok()).unwrap_or(20.0) {
+                let update = start.0.map_or(0.0, |s| (now - s).as_secs_f32() * 1000.0);
+                eprintln!("PERF spike {ms:6.1} ms (update {update:5.1}) at t={:.2}", time.elapsed_secs());
+            }
+            frames.push(ms);
+        }
+    }
+    if exit.read().next().is_some() && !frames.is_empty() {
+        let mut v = frames.clone();
+        v.sort_by(f32::total_cmp);
+        let at = |q: f32| v[((v.len() - 1) as f32 * q) as usize];
+        eprintln!("PERF mean {:.2} ms", v.iter().sum::<f32>() / v.len() as f32);
+        eprintln!("PERF {} frames  p50 {:.1}  p95 {:.1}  p99 {:.1}  max {:.1} ms  over 20 ms: {}", v.len(), at(0.5), at(0.95), at(0.99), at(1.0), v.iter().filter(|&&m| m > 20.0).count());
+    }
 }
 
 /// For checking volleys in a scripted (headless) run: `RE_BALL=t:x,y,z:vx,vy,vz` throws the ball
@@ -197,7 +242,9 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials
         ))
         .id();
     if headless() {
-        let size = Extent3d { width: 1280, height: 720, depth_or_array_layers: 1 };
+        // RE_SIZE=1920x1080 renders at another size (for timing the GPU at a real screen's).
+        let (width, height) = std::env::var("RE_SIZE").ok().and_then(|v| v.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))).unwrap_or((1280, 720));
+        let size = Extent3d { width, height, depth_or_array_layers: 1 };
         let mut image = Image::new_fill(size, TextureDimension::D2, &[0, 0, 0, 255], TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default());
         image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT;
         let handle = images.add(image);
@@ -249,6 +296,29 @@ fn update_board(score: Res<Score>, time: Res<Time>, mut texts: Query<(&Board, &m
     }
 }
 
+/// The frame rate and the slowest frame over the last second, for the debug info: a drop shows as
+/// a worst frame well over the screen's frame (6.9 ms at 144 Hz).
+#[derive(Default)]
+struct FrameStats {
+    t: f32,
+    n: u32,
+    max: f32,
+    fps: f32,
+    worst: f32,
+}
+
+impl FrameStats {
+    fn add(&mut self, dt: f32) {
+        self.t += dt;
+        self.n += 1;
+        self.max = self.max.max(dt);
+        if self.t >= 1.0 {
+            (self.fps, self.worst) = (self.n as f32 / self.t, self.max);
+            (self.t, self.n, self.max) = (0.0, 0, 0.0);
+        }
+    }
+}
+
 /// After a goal: count it, put the ball back on the centre spot and the player in their half.
 fn on_goal(
     mut goals: EventReader<GoalScored>,
@@ -276,6 +346,8 @@ fn update_hud(
     ball: Single<&Ball>,
     axes: Res<Axes>,
     cheats: Res<fx::Cheats>,
+    real: Res<Time<Real>>,
+    mut frames: Local<FrameStats>,
 ) {
     let (hud, visibility) = &mut *hud;
     let shown = cheats.on(fx::Cheat::DebugInfo);
@@ -283,6 +355,7 @@ fn update_hud(
     if !shown {
         return;
     }
+    frames.add(real.delta_secs());
     let p = *player;
     let charge = match p.kick {
         Some(k) if !k.released => {
@@ -302,7 +375,7 @@ fn update_hud(
     };
     let dribble = p.dribble.map_or("-".into(), |d| format!("{:?}{} {:.2}s", d.heading, if d.feint { " feint" } else { "" }, d.t));
     let text = format!(
-        "Stamina {:4.1}/10{}   Extra effort {:3.0}%{}\nSpeed {:4.1} m/s{}{}\nCharge {}\nDribble {}   drag {}   pivot {:.2}\nControl {}   magnet off {:.2}   ball no-control {:.2}\nBall {:4.1} m/s{}\n\nEsc Menu   F1 Settings",
+        "Stamina {:4.1}/10{}   Extra effort {:3.0}%{}\nSpeed {:4.1} m/s{}{}\nCharge {}\nDribble {}   drag {}   pivot {:.2}\nControl {}   magnet off {:.2}   ball no-control {:.2}\nBall {:4.1} m/s{}\n{:.0} fps   worst frame {:.1} ms\n\nEsc Menu   F1 Settings",
         p.stamina,
         if p.exhausted { " EXHAUSTED" } else { "" },
         p.extra_effort * 100.0,
@@ -326,6 +399,8 @@ fn update_hud(
         ball.no_control,
         ball.vel.length(),
         if ball.freeze > 0.0 { "  frozen" } else { "" },
+        frames.fps,
+        frames.worst * 1000.0,
     );
     // Set only when it changes: a changed text is laid out again.
     if hud.0 != text {
