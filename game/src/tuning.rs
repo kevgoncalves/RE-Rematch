@@ -190,15 +190,20 @@ pub const LOCK_SPEED_BY_ANGLE: [(f32, f32); 3] = [(0.0, 1.0), (90.0, 1.0), (180.
 pub const LOCK_BALL_SPEED_BY_ANGLE: [(f32, f32); 4] = [(0.0, 1.0), (90.0, 0.95), (135.0, 0.88), (180.0, 0.88)];
 // Dash (mechanics.md §8): speed (m/s) over the seconds since the press. The game's curves are in
 // seconds: their keys fall on the dash's events (blend-in 6f, after-dash 14f, second dash free 42f).
-/// When you're free (the dash animation's blend-out), by sector: forward, side, back.
-pub const DASH_FREE: [f32; 3] = [32.0 / 60.0, 23.0 / 60.0, 32.0 / 60.0];
-pub const SECOND_DASH_FREE: [f32; 3] = [42.0 / 60.0, 24.0 / 60.0, 29.0 / 60.0];
-/// Keeping the stick within 15 deg of the dash's way leaves it early from these frames.
-pub const DASH_EXIT_FROM: f32 = 14.4 / 60.0;
+/// When you're free (the dash animation's blend-out), by sector: forward, side, back. Kev's
+/// practice recording has you back in the lock stance 0.40-0.50 s after a side dash's press.
+pub const DASH_FREE: [f32; 3] = [32.0 / 60.0, 27.0 / 60.0, 32.0 / 60.0];
+pub const SECOND_DASH_FREE: [f32; 3] = [42.0 / 60.0, 27.0 / 60.0, 29.0 / 60.0];
+/// Keeping the stick within 15 deg of the dash's way leaves it early from these frames (after the
+/// burst, which now comes later).
+pub const DASH_EXIT_FROM: f32 = 20.0 / 60.0;
 pub const SECOND_DASH_EXIT_FROM: f32 = 25.2 / 60.0;
 pub const DASH_EXIT_ANGLE: f32 = 15.0;
-pub const DASH_SPEED: [(f32, f32); 6] = [(0.0, 6.0), (0.1, 8.5), (0.233, 8.5), (0.331, 6.5), (0.5, 4.5), (1.0, 4.5)];
-pub const SECOND_DASH_SPEED: [(f32, f32); 5] = [(0.0, 6.0), (0.1, 7.2), (0.3, 7.2), (0.7, 2.0), (1.0, 2.0)];
+/// In Kev's practice recording the dash doesn't burst at the press: you gather for about 0.1 s, the
+/// lunge shows from +100-160 ms, is widest at +180-330 ms, and covers about 2.3 m by the time you
+/// are back in the stance. Both dashes run that shape, the second a little weaker.
+pub const DASH_SPEED: [(f32, f32); 6] = [(0.0, 2.5), (0.1, 3.0), (0.18, 7.5), (0.3, 7.5), (0.45, 3.0), (1.0, 3.0)];
+pub const SECOND_DASH_SPEED: [(f32, f32); 6] = [(0.0, 4.0), (0.1, 4.0), (0.2, 7.0), (0.3, 7.0), (0.5, 2.0), (1.0, 2.0)];
 pub const DASH_COOLDOWN: f32 = 0.8;
 pub const DASH_COST: f32 = 0.75;
 /// The second dash can cut into the first from here, while the first one's cooldown runs.

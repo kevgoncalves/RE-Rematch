@@ -1796,6 +1796,36 @@ mod tests {
     }
 
     #[test]
+    fn side_dash_gathers_then_lunges_about_2_3_m() {
+        let mut app = App::new();
+        app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
+        let dash = DashState { t: 0.0, second: false, dir: Vec3::X, facing: 0.0, heading: Heading::Side };
+        app.world_mut().spawn((Transform::default(), Player { dash: Some(dash), locked: true, ..default() }));
+        app.world_mut().spawn(CameraRig::default());
+        let dt = 1.0 / 60.0;
+        let (mut t, mut x, mut fastest) = (0.0, 0.0, (0.0, 0.0));
+        let mut gathered = 0.0;
+        while app.world_mut().query::<&Player>().single(app.world()).unwrap().dash.is_some() {
+            frames(&mut app, &[Action::Lock], 1, dt);
+            let v = app.world_mut().query::<&Player>().single(app.world()).unwrap().vel.x;
+            t += dt;
+            x += v * dt;
+            if t <= 0.1 + 1e-4 {
+                gathered = x;
+            }
+            if v > fastest.1 {
+                fastest = (t, v);
+            }
+        }
+        // Kev's practice recording: barely moving for the first 0.1 s, fastest at +180-330 ms,
+        // about 2.3 m to the side by the time you are back in the stance (0.40-0.50 s).
+        assert!(gathered < 0.35, "{gathered} m in the gather");
+        assert!((0.17..0.31).contains(&fastest.0), "fastest at {} s", fastest.0);
+        assert!((0.4..0.5).contains(&t), "free at {t} s");
+        assert!((2.1..2.6).contains(&x), "{x} m");
+    }
+
+    #[test]
     fn extra_effort_gauge_runs_as_in_kevs_recording() {
         let mut app = App::new();
         app.init_resource::<Actions>().init_resource::<Axes>().init_resource::<Time>().add_systems(Update, player_move);
