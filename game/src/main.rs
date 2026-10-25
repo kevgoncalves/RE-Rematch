@@ -71,8 +71,7 @@ fn main() {
     }
     app
         .add_plugins((UiMaterialPlugin::<reticle::ReticleMaterial>::default(), UiMaterialPlugin::<gauges::GaugeMaterial>::default(), MaterialPlugin::<pass_line::PassLineMaterial>::default()))
-        .add_plugins(sfx::SfxPlugin)
-        .insert_resource(ClearColor(Color::srgb(0.56, 0.68, 0.8)))
+        .add_plugins((sfx::SfxPlugin, arena::ArenaPlugin))
         .init_resource::<Score>()
         .insert_resource(Bindings::load())
         .init_resource::<Actions>()
