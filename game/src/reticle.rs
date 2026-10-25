@@ -2,6 +2,7 @@
 //! - a reticle of two short arcs, white with a soft dark outline. Charging a shot closes them
 //!   into a faint circle that fills solid from the bottom with the shot's force, and shows a
 //!   Magnus point that follows the curve input. Lock move closes them too, at full opacity.
+//!
 //! Rematch has no charge bar for passes; the pass line (pass_line.rs) shows their strength.
 
 use bevy::prelude::*;
@@ -23,7 +24,6 @@ const AIM_OUT: f32 = 0.3;
 const FORCE_IN: f32 = 0.083;
 const FORCE_OUT: f32 = 0.2;
 const DEFENSE: f32 = 0.214;
-
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Default)]
 pub struct ReticleMaterial {
@@ -75,7 +75,6 @@ pub fn spawn_reticle(mut commands: Commands, mut materials: ResMut<Assets<Reticl
         Node { top: Val::Percent(CROSSHAIR_SCREEN_Y * 100.0), ..centered(RETICLE_PX) },
         MaterialNode(materials.add(ReticleMaterial { shape: Vec4::new(IDLE_OPENING, 1.0, 0.0, 0.0), ..default() })),
     ));
-
 }
 
 /// Charge as a 0..1 share of the kick's own force range, for the reticle and the line colour.
@@ -133,10 +132,13 @@ pub fn update_reticle(
     node.width = Val::Px(size);
     node.height = Val::Px(size);
     node.margin = UiRect { left: Val::Px(-size / 2.0), top: Val::Px(-size / 2.0), ..default() };
-    if let Some(m) = materials.get_mut(&handle.0) {
-        let (aim, closed) = (ease(anim.aim), ease(anim.aim.max(anim.defense)));
-        m.shape = Vec4::new(IDLE_OPENING.lerp(1.0, closed), 1.0.lerp(AIM_ARC_OPACITY, aim), anim.force, ease(anim.force_shown));
-        m.magnus = Vec4::new(anim.curve.x, anim.curve.y, aim, 0.0);
+    let (aim, closed) = (ease(anim.aim), ease(anim.aim.max(anim.defense)));
+    let shape = Vec4::new(IDLE_OPENING.lerp(1.0, closed), 1.0.lerp(AIM_ARC_OPACITY, aim), anim.force, ease(anim.force_shown));
+    let magnus = Vec4::new(anim.curve.x, anim.curve.y, aim, 0.0);
+    // Written only when it changes: each write re-uploads the material.
+    if materials.get(&handle.0).is_some_and(|m| (m.shape, m.magnus) != (shape, magnus))
+        && let Some(m) = materials.get_mut(&handle.0)
+    {
+        (m.shape, m.magnus) = (shape, magnus);
     }
-
 }

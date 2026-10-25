@@ -155,7 +155,6 @@ pub struct Marker {
     chain: bool,
 }
 
-
 /// The volley diamond on the ball (GC_VolleyPredict).
 #[derive(Component)]
 pub struct VolleyDiamond;
@@ -185,8 +184,7 @@ pub fn volley_target(p: &Player, root: &Transform, pos: Vec3, ball: &Ball) -> Op
     // The side margin: a smooth rise from 0 at 1.2 m behind to 5 m at 3 m ahead.
     let margin = |f: f32| {
         let u = ((f + 1.2) / 4.2).clamp(0.0, 1.0);
-        let (h00, h10, h01) = (2.0 * u.powi(3) - 3.0 * u * u + 1.0, u.powi(3) - 2.0 * u * u + u, -2.0 * u.powi(3) + 3.0 * u * u);
-        let _ = h00;
+        let (h10, h01) = (u.powi(3) - 2.0 * u * u + u, -2.0 * u.powi(3) + 3.0 * u * u);
         h10 * 4.2 * 2.512 + h01 * 5.0
     };
     let (mut at, mut ball) = (pos, ball.clone());
@@ -278,11 +276,11 @@ pub struct FxState {
 /// The marker's ring, about 80 cm across (SM_Bounce_Circle, 75 x 86 cm).
 const MARKER_RADII: (f32, f32) = (0.36, 0.43);
 
-/// A flat ring (in the local XZ plane), filled to `fill` of the way round.
 /// The marker's colours: the game's effect hue row starts blue and slides to cyan (its sheen).
 const MARKER_BLUE: Vec3 = Vec3::new(0.0, 0.25, 0.84);
 const MARKER_CYAN: Vec3 = Vec3::new(0.0, 0.68, 0.74);
 
+/// The marker's ring, flat in the local XZ plane.
 fn ring() -> Mesh {
     let n = 48;
     let (inner, outer) = MARKER_RADII;
@@ -442,6 +440,7 @@ pub fn trails(
             Effect::ExtraEffort => player.extra_active,
             Effect::Kick => state.kick_trail,
         };
+        let was_empty = trail.points.is_empty();
         for point in &mut trail.points {
             point.1 += dt;
         }
@@ -454,6 +453,10 @@ pub fn trails(
             if let Some(at) = at {
                 trail.points.push((at, 0.0));
             }
+        }
+        // An idle trail's mesh is already empty: rebuilding it would only re-upload it.
+        if was_empty && trail.points.is_empty() {
+            continue;
         }
         if let Some(mesh) = meshes.get_mut(&trail.mesh) {
             *mesh = ribbon(&trail.points, eye, width, life, colour);
@@ -478,10 +481,7 @@ pub fn kick_marker(
     let kicked = last_kick.is_some_and(|k| !matches!(k, Kick::PushBall | Kick::DribblePushBall)) && player.kick.is_none() && !b.held;
     *last_kick = player.kick.map(|k| k.kind);
     let arrived = m.chain && m.left > 0.0 && m.left <= time.delta_secs();
-    let spot = if kicked {
-        m.left = 0.0;
-        marker_for(btf.translation, b)
-    } else if arrived {
+    let spot = if kicked || arrived {
         m.left = 0.0;
         marker_for(btf.translation, b)
     } else {
@@ -508,7 +508,12 @@ pub struct LegMaterials(pub [Handle<StandardMaterial>; 2]);
 /// slow pulse; it eases in and out over 0.15 s.
 pub fn effort_legs(time: Res<Time>, player: Single<&Player>, legs: Res<LegMaterials>, mut materials: ResMut<Assets<StandardMaterial>>, mut glow: Local<f32>) {
     let target = if player.extra_active { 1.0 } else { 0.0 };
+    let before = *glow;
     *glow += (target - *glow).clamp(-time.delta_secs() / 0.15, time.delta_secs() / 0.15);
+    // Unlit, the legs keep their black emissive: writing it again would only re-upload them.
+    if before == 0.0 && *glow == 0.0 {
+        return;
+    }
     let pulse = 0.8 + 0.2 * (time.elapsed_secs() * 12.0).sin();
     let c = Vec3::new(0.0, 1.0, 0.8) * *glow * pulse * 1.5;
     for handle in &legs.0 {

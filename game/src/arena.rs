@@ -180,9 +180,9 @@ pub fn spawn_arena(
                 Transform::from_translation((a + b) / 2.0).with_rotation(Quat::from_rotation_arc(Vec3::Y, (b - a).normalize())),
             ));
         };
-        bar(&mut commands, &mut *meshes, at(-gx, GOAL_DEPTH, 0.05), at(gx, GOAL_DEPTH, 0.05));
+        bar(&mut commands, &mut meshes, at(-gx, GOAL_DEPTH, 0.05), at(gx, GOAL_DEPTH, 0.05));
         for side in [-1.0f32, 1.0] {
-            bar(&mut commands, &mut *meshes, at(side * gx, 0.0, 0.05), at(side * gx, GOAL_DEPTH, 0.05));
+            bar(&mut commands, &mut meshes, at(side * gx, 0.0, 0.05), at(side * gx, GOAL_DEPTH, 0.05));
         }
     }
 

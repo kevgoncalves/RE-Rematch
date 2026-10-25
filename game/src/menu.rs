@@ -80,7 +80,7 @@ impl Setting {
     }
 
     /// Slider position 0..1 to a value on the option's steps.
-    fn from_ratio(self, ratio: f32) -> f32 {
+    fn at_ratio(self, ratio: f32) -> f32 {
         let (lo, hi) = self.range();
         let v = lo + ratio.clamp(0.0, 1.0) * (hi - lo);
         ((v / self.step()).round() * self.step()).clamp(lo, hi)
@@ -215,17 +215,16 @@ pub fn menu_clicks(
         if *interaction != Interaction::Pressed {
             continue;
         }
-        if let MenuButton::Cheat(cheat) = button {
-            cheats.toggle(*cheat);
-            continue;
-        }
         // Presets swap the buttons but keep the pass aiming choice.
         let aim = bindings.pass_aim;
         match button {
             MenuButton::Defaults => *bindings = Bindings { pass_aim: aim, ..Bindings::default() },
             MenuButton::ModifierPreset => *bindings = Bindings { pass_aim: aim, ..Bindings::rematch_modifier_preset() },
             MenuButton::PassAim => bindings.pass_aim = aim.next(),
-            MenuButton::Cheat(_) => {}
+            MenuButton::Cheat(cheat) => {
+                cheats.toggle(*cheat);
+                continue;
+            }
         }
         bindings.save();
     }
@@ -245,7 +244,7 @@ pub fn drag_sliders(
         if *interaction == Interaction::Pressed
             && let Some(pos) = cursor.normalized
         {
-            let v = setting.from_ratio(pos.x);
+            let v = setting.at_ratio(pos.x);
             if v != setting.value(&bindings) {
                 setting.set(&mut bindings, v);
             }
@@ -345,10 +344,10 @@ pub fn refresh_labels(
             }),
         };
         bg.0 = if capturing { BUTTON_ACTIVE } else { BUTTON };
-        if let Some(mut text) = children.first().and_then(|c| texts.get_mut(*c).ok()) {
-            if text.0 != label {
-                text.0 = label;
-            }
+        if let Some(mut text) = children.first().and_then(|c| texts.get_mut(*c).ok())
+            && text.0 != label
+        {
+            text.0 = label;
         }
     }
     for (button, children, mut bg) in &mut menu_buttons {

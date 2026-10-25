@@ -88,10 +88,12 @@ pub fn update_gauges(
         };
         node.width = Val::Px(width * s);
         node.height = Val::Px(GAUGE_H * s);
-        if let Some(m) = materials.get_mut(&handle.0) {
-            m.gauge = Vec4::new(fill, 0.0, marker, 0.0);
-            m.left = left.to_linear();
-            m.right = right.to_linear();
+        // Written only when it changes: each write re-uploads the material.
+        let look = (Vec4::new(fill, 0.0, marker, 0.0), left.to_linear(), right.to_linear());
+        if materials.get(&handle.0).is_some_and(|m| (m.gauge, m.left, m.right) != look)
+            && let Some(m) = materials.get_mut(&handle.0)
+        {
+            (m.gauge, m.left, m.right) = look;
         }
     }
 }

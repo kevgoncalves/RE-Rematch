@@ -183,11 +183,12 @@ fn collide(pos: &mut Vec3, vel: &mut Vec3) -> Option<Vec3> {
 fn hit_segment(pos: &mut Vec3, vel: &mut Vec3, (a, b): (Vec3, Vec3)) -> Option<Vec3> {
     let ab = b - a;
     let t = ((*pos - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
-    let offset = *pos - (a + ab * t);
+    let closest = a + ab * t;
+    let offset = *pos - closest;
     let min = BALL_RADIUS + POST_RADIUS;
     if offset.length_squared() < min * min {
         let normal = offset.normalize_or(Vec3::Y);
-        *pos = a + ab * t + normal * min;
+        *pos = closest + normal * min;
         bounce(vel, normal, (POST_BOUNCE, POST_BOUNCE));
         return Some(normal);
     }
@@ -278,5 +279,4 @@ mod tests {
         assert_eq!(run(&mut pos, &mut ball, 0.5), None);
         assert!(ball.vel.z < 0.0, "the end wall sends it back");
     }
-
 }

@@ -168,7 +168,6 @@ pub const TURN_RATE_RUN: f32 = 400.0; // degrees per second
 pub const TURN_RATE_BALL_RUN: f32 = 180.0; // with-ball speed table's max angular speed (pi rad/s)
 pub const TURN_RATE_SPRINT: f32 = 180.0;
 pub const TURN_RATE_BALL_SPRINT: f32 = 90.0;
-/// Out of lock move the body turns to face where you're going this fast, without changing your heading (TUNE).
 /// Past 90 deg behind your heading, the body turns this much faster (deg/s).
 pub const BODY_CATCH_UP: f32 = 60.0;
 pub const LOCK_SPEED: f32 = 5.25;
@@ -236,7 +235,6 @@ pub const PUSH_BALL_DEAD_ZONE: f32 = 0.1;
 pub const CHORD_WINDOW: f32 = 0.1;
 pub const DRIBBLE_COST: f32 = 0.5;
 pub const DRIBBLE_REGEN_DELAY: f32 = 0.9;
-/// How fast a fast cut turns you (and the ball) to its direction, degrees per second.
 /// Dribbles and dashes turn the body to their way linearly over these (BP_RedirectCardinalsToForward
 /// 12f; the dash's redirection 9f).
 pub const DRIBBLE_TURN_TIME: f32 = 12.0 / 60.0;
