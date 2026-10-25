@@ -213,8 +213,11 @@ pub const DRIBBLE_WINDOW_OPENS: f32 = 12.0 / 60.0;
 /// window closes this long before the dribble's end, and a press after it is a new dribble 1.
 pub const FEINT_WINDOW_CUT: f32 = 0.2;
 /// With lock move let go during a dribble 1, the next press is a new dribble 1 from this far into
-/// it (Kev: 0.2 s was too quick back to back, 0.55 s too slow). TUNE.
-pub const DRIBBLE_REPEAT: f32 = 0.35;
+/// it (Kev: 0.2 s was too quick back to back, 0.55 s too slow, 0.35 s still a little quick). TUNE.
+pub const DRIBBLE_REPEAT: f32 = 0.45;
+/// With lock move held, a press this long before a dribble 1's end is a new dribble 1 (between the
+/// feint window's close and this, a press does nothing; Kev: chaining was a little quick). TUNE.
+pub const DRIBBLE_CHAIN_LATE: f32 = 0.1;
 pub const DRIBBLE_FORWARD: [(f32, f32); 4] = [(0.0, 4.0), (0.2, 6.8), (0.5, 4.0), (1.0, 4.0)];
 pub const DRIBBLE_SIDE: [(f32, f32); 5] = [(0.0, 4.0), (0.1, 6.5), (0.15, 6.5), (0.35, 3.4), (1.0, 3.4)];
 pub const DRIBBLE_BACK: [(f32, f32); 5] = [(0.0, 3.0), (0.1, 5.8), (0.2, 5.8), (0.45, 3.0), (1.0, 3.0)];
