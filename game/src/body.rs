@@ -1108,26 +1108,43 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         (SHIN_R, [72.0, 0.0, 0.0]),
         (FOOT_R, [-14.0, 0.0, -4.0]),
     ]);
-    // Dashes, timed on their clips (front and back 50f, side 41f; the second dash 60/42/43f): a
-    // short gather, the big push-off around 6-15f where the speed peaks (after the 0.1 s blend-in),
-    // then the strides out. The side dash is authored to the right.
+    // Dashes, timed on their clips (front and back 50f, side 41f; the second dash 60/42/43f). In
+    // Kev's practice recording a dash gathers in the stance for about 0.1 s, bursts out from
+    // +100-160 ms, is at its widest at +180-330 ms, and is back in a wide, low stance by +400-500
+    // ms: the keys follow DASH_SPEED. The side dash is authored to the right.
+    // Where every dash settles: the lock stance, wider and lower, arms out.
+    let settle = stance.with(&[
+        (SPINE_J, [16.0, 0.0, 0.0]),
+        (THIGH_L, [22.0, 0.0, -18.0]),
+        (SHIN_L, [46.0, 0.0, 0.0]),
+        (FOOT_L, [-24.0, 0.0, 18.0]),
+        (THIGH_R, [22.0, 0.0, 18.0]),
+        (SHIN_R, [46.0, 0.0, 0.0]),
+        (FOOT_R, [-24.0, 0.0, -18.0]),
+        (UPPER_L, [20.0, 0.0, -34.0]),
+        (FORE_L, [35.0, 0.0, 0.0]),
+        (UPPER_R, [20.0, 0.0, 34.0]),
+        (FORE_R, [35.0, 0.0, 0.0]),
+    ]);
+    let front_gather = stance.with(&[
+        (SPINE_J, [22.0, 0.0, 0.0]),
+        (NECK_J, [-14.0, 0.0, 0.0]),
+        (THIGH_L, [26.0, 0.0, -6.0]),
+        (SHIN_L, [60.0, 0.0, 0.0]),
+        (FOOT_L, [-34.0, 0.0, 6.0]),
+        (THIGH_R, [20.0, 0.0, 6.0]),
+        (SHIN_R, [55.0, 0.0, 0.0]),
+        (FOOT_R, [-35.0, 0.0, -6.0]),
+        (UPPER_L, [-25.0, 0.0, -20.0]),
+        (FORE_L, [60.0, 0.0, 0.0]),
+        (UPPER_R, [20.0, 0.0, 20.0]),
+        (FORE_R, [60.0, 0.0, 0.0]),
+    ]);
     let dash_front = OneShot(vec![
-        (0.0, stance.with(&[
-            (SPINE_J, [22.0, 0.0, 0.0]),
-            (NECK_J, [-14.0, 0.0, 0.0]),
-            (THIGH_L, [26.0, 0.0, -6.0]),
-            (SHIN_L, [60.0, 0.0, 0.0]),
-            (FOOT_L, [-34.0, 0.0, 6.0]),
-            (THIGH_R, [20.0, 0.0, 6.0]),
-            (SHIN_R, [55.0, 0.0, 0.0]),
-            (FOOT_R, [-35.0, 0.0, -6.0]),
-            (UPPER_L, [-25.0, 0.0, -20.0]),
-            (FORE_L, [60.0, 0.0, 0.0]),
-            (UPPER_R, [20.0, 0.0, 20.0]),
-            (FORE_R, [60.0, 0.0, 0.0]),
-        ])),
+        (0.0, front_gather),
+        (0.12, front_gather),
         // The burst: low and driving, the left knee up, the right leg straight out behind.
-        (0.15, stand.with(&[
+        (0.26, stand.with(&[
             (PELVIS, [0.0, -10.0, 0.0]),
             (SPINE_J, [38.0, 0.0, 0.0]),
             (CHEST_J, [6.0, 10.0, 0.0]),
@@ -1144,7 +1161,7 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
             (FORE_R, [90.0, 0.0, 0.0]),
         ])),
         // The long lunge: the left foot lands well out in front, the right trails far back.
-        (0.35, stand.with(&[
+        (0.42, stand.with(&[
             (PELVIS, [0.0, -6.0, 0.0]),
             (SPINE_J, [30.0, 0.0, 0.0]),
             (CHEST_J, [4.0, 6.0, 0.0]),
@@ -1170,59 +1187,87 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
             (SHIN_R, [50.0, 0.0, 0.0]),
             (FOOT_R, [-40.0, 0.0, -6.0]),
         ])),
-        (1.0, stance),
+        (0.8, settle),
+        (1.0, settle),
+    ]);
+    // The side dash in the recording is a low, wide side lunge: the right foot steps far out with
+    // the knee deeply bent, the left leg pushes off and stays straight out to the other side, the
+    // hips drop, the torso stays upright and the arms open wide.
+    let side_gather = stance.with(&[
+        (SPINE_J, [16.0, 0.0, 0.0]),
+        (THIGH_L, [24.0, 0.0, -10.0]),
+        (SHIN_L, [56.0, 0.0, 0.0]),
+        (FOOT_L, [-32.0, 0.0, 10.0]),
+        (THIGH_R, [18.0, 0.0, 10.0]),
+        (SHIN_R, [44.0, 0.0, 0.0]),
+        (FOOT_R, [-26.0, 0.0, -10.0]),
+    ]);
+    // The lead thigh is swung out to the side (yawed) so its knee bends over the foot.
+    let side_lunge = stance.with(&[
+        (SPINE_J, [8.0, 0.0, 8.0]),
+        (CHEST_J, [2.0, 0.0, 2.0]),
+        (NECK_J, [-8.0, 0.0, -10.0]),
+        (THIGH_L, [2.0, 0.0, -36.0]),
+        (SHIN_L, [3.0, 0.0, 0.0]),
+        (FOOT_L, [-1.0, 0.0, 36.0]),
+        (THIGH_R, [55.0, -90.0, 0.0]),
+        (SHIN_R, [60.0, 0.0, 0.0]),
+        (FOOT_R, [-5.0, 70.0, 0.0]),
+        (UPPER_L, [10.0, 0.0, -70.0]),
+        (FORE_L, [20.0, 0.0, 0.0]),
+        (UPPER_R, [10.0, 0.0, 62.0]),
+        (FORE_R, [25.0, 0.0, 0.0]),
     ]);
     let dash_side = OneShot(vec![
-        (0.0, stance.with(&[
-            (PELVIS, [0.0, 0.0, -6.0]),
-            (SPINE_J, [18.0, 0.0, -8.0]),
-            (THIGH_L, [24.0, 0.0, -14.0]),
-            (SHIN_L, [60.0, 0.0, 0.0]),
-            (FOOT_L, [-36.0, 0.0, 14.0]),
-            (THIGH_R, [16.0, 0.0, 14.0]),
-            (SHIN_R, [40.0, 0.0, 0.0]),
-            (FOOT_R, [-24.0, 0.0, -14.0]),
-        ])),
-        (0.2, stance.with(&[
-            (PELVIS, [0.0, 0.0, 12.0]),
-            (SPINE_J, [16.0, 0.0, 16.0]),
-            (CHEST_J, [4.0, 0.0, 6.0]),
-            (NECK_J, [-12.0, 0.0, -16.0]),
-            (THIGH_L, [10.0, 0.0, -28.0]),
-            (SHIN_L, [15.0, 0.0, 0.0]),
-            (FOOT_L, [20.0, 0.0, 28.0]),
-            (THIGH_R, [20.0, 0.0, 48.0]),
-            (SHIN_R, [30.0, 0.0, 0.0]),
-            (FOOT_R, [-10.0, 0.0, -48.0]),
-            (UPPER_L, [20.0, 0.0, -65.0]),
-            (FORE_L, [40.0, 0.0, 0.0]),
-            (UPPER_R, [0.0, 0.0, 70.0]),
+        (0.0, side_gather),
+        (0.14, side_gather),
+        // The push-off: the left leg drives, the right steps out.
+        (0.21, stance.with(&[
+            (PELVIS, [0.0, 0.0, 4.0]),
+            (SPINE_J, [10.0, 0.0, 6.0]),
+            (THIGH_L, [8.0, 0.0, -24.0]),
+            (SHIN_L, [14.0, 0.0, 0.0]),
+            (FOOT_L, [14.0, 0.0, 24.0]),
+            (THIGH_R, [40.0, -60.0, 0.0]),
+            (SHIN_R, [55.0, 0.0, 0.0]),
+            (FOOT_R, [-10.0, 50.0, 0.0]),
+            (UPPER_L, [10.0, 0.0, -55.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [10.0, 0.0, 50.0]),
             (FORE_R, [30.0, 0.0, 0.0]),
         ])),
-        (0.42, stance.with(&[
-            (PELVIS, [0.0, 0.0, 6.0]),
-            (SPINE_J, [18.0, 0.0, 6.0]),
-            (THIGH_L, [16.0, 0.0, 20.0]),
-            (SHIN_L, [50.0, 0.0, 0.0]),
-            (FOOT_L, [-30.0, 0.0, -20.0]),
-            (THIGH_R, [20.0, 0.0, 24.0]),
-            (SHIN_R, [55.0, 0.0, 0.0]),
-            (FOOT_R, [-34.0, 0.0, -24.0]),
+        (0.3, side_lunge),
+        (0.46, side_lunge.with(&[(THIGH_L, [2.0, 0.0, -34.0]), (SHIN_L, [4.0, 0.0, 0.0]), (FOOT_L, [-2.0, 0.0, 34.0]), (THIGH_R, [50.0, -90.0, 0.0]), (SHIN_R, [52.0, 0.0, 0.0])])),
+        // The left leg comes in under you.
+        (0.62, stance.with(&[
+            (SPINE_J, [14.0, 0.0, 4.0]),
+            (THIGH_L, [18.0, 0.0, -20.0]),
+            (SHIN_L, [42.0, 0.0, 0.0]),
+            (FOOT_L, [-24.0, 0.0, 20.0]),
+            (THIGH_R, [30.0, -40.0, 0.0]),
+            (SHIN_R, [48.0, 0.0, 0.0]),
+            (FOOT_R, [-20.0, 30.0, 0.0]),
+            (UPPER_L, [15.0, 0.0, -45.0]),
+            (FORE_L, [30.0, 0.0, 0.0]),
+            (UPPER_R, [15.0, 0.0, 45.0]),
+            (FORE_R, [30.0, 0.0, 0.0]),
         ])),
-        (0.6, stance),
-        (1.0, stance),
+        (0.75, settle),
+        (1.0, settle),
+    ]);
+    let back_gather = stance.with(&[
+        (SPINE_J, [20.0, 0.0, 0.0]),
+        (THIGH_L, [26.0, 0.0, -8.0]),
+        (SHIN_L, [60.0, 0.0, 0.0]),
+        (FOOT_L, [-34.0, 0.0, 8.0]),
+        (THIGH_R, [26.0, 0.0, 8.0]),
+        (SHIN_R, [60.0, 0.0, 0.0]),
+        (FOOT_R, [-34.0, 0.0, -8.0]),
     ]);
     let dash_back = OneShot(vec![
-        (0.0, stance.with(&[
-            (SPINE_J, [20.0, 0.0, 0.0]),
-            (THIGH_L, [26.0, 0.0, -8.0]),
-            (SHIN_L, [60.0, 0.0, 0.0]),
-            (FOOT_L, [-34.0, 0.0, 8.0]),
-            (THIGH_R, [26.0, 0.0, 8.0]),
-            (SHIN_R, [60.0, 0.0, 0.0]),
-            (FOOT_R, [-34.0, 0.0, -8.0]),
-        ])),
-        (0.18, stance.with(&[
+        (0.0, back_gather),
+        (0.12, back_gather),
+        (0.27, stance.with(&[
             (SPINE_J, [22.0, 0.0, 0.0]),
             (NECK_J, [-14.0, 0.0, 0.0]),
             (THIGH_L, [-14.0, 0.0, -8.0]),
@@ -1236,7 +1281,7 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
             (UPPER_R, [45.0, 0.0, 30.0]),
             (FORE_R, [50.0, 0.0, 0.0]),
         ])),
-        (0.4, stance.with(&[
+        (0.46, stance.with(&[
             (THIGH_L, [20.0, 0.0, -8.0]),
             (SHIN_L, [55.0, 0.0, 0.0]),
             (FOOT_L, [-35.0, 0.0, 8.0]),
@@ -1244,8 +1289,8 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
             (SHIN_R, [40.0, 0.0, 0.0]),
             (FOOT_R, [-20.0, 0.0, -8.0]),
         ])),
-        (0.64, stance),
-        (1.0, stance),
+        (0.66, settle),
+        (1.0, settle),
     ]);
     Clips {
         stand,
@@ -1902,7 +1947,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             anim.move_mirror = !p.ee_cut_right;
         }
         anim.move_t = t;
-        moving = Some((clips.dash_side.sample(0.1 + 0.35 * t / EE_CUT_TIME), 0.04));
+        moving = Some((clips.dash_side.sample(0.17 + 0.33 * t / EE_CUT_TIME), 0.04));
     } else {
         anim.move_t = f32::INFINITY;
     }
