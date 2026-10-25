@@ -487,9 +487,48 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         (FORE_R, [95.0, 0.0, 0.0]),
     ]);
     let sprint = Clip::cycle(sprint_contact, sprint_stance, SPRINT_SPEED, 0.6, 0.015);
-    // Extra effort: the sprint driven harder. Tired: the run's shape at a sprint, arms low, head down.
-    let harder = Pose::default().with(&[(SPINE_J, [6.0, 0.0, 0.0]), (NECK_J, [-4.0, 0.0, 0.0]), (UPPER_L, [-8.0, 0.0, 0.0]), (UPPER_R, [8.0, 0.0, 0.0])]);
-    let extra = Clip::cycle(sprint_contact.plus(&harder), sprint_stance.plus(&harder.mirror()), EXTRA_EFFORT_SPEED, 0.54, 0.02);
+    // Extra effort in Kev's practice recording: the trunk leans 35-45 deg forward, the strides are
+    // long and bounding with the back leg pushed out straight, the head stays up and the arms pump
+    // hard. The pelvis pitches forward and the thighs are set against it, so the legs keep their
+    // swing; the lean is the pelvis, spine and chest together (40 deg).
+    let ee_lean = 14.0;
+    let ee_contact = stand.with(&[
+        (PELVIS, [ee_lean, -12.0, 0.0]),
+        (SPINE_J, [20.0, 0.0, 0.0]),
+        (CHEST_J, [6.0, 14.0, 0.0]),
+        (NECK_J, [-30.0, -5.0, 0.0]),
+        (HEAD_J, [-6.0, 0.0, 0.0]),
+        (THIGH_L, [42.0 + ee_lean, 0.0, -2.0]),
+        (SHIN_L, [24.0, 0.0, 0.0]),
+        (FOOT_L, [12.0, 0.0, 0.0]),
+        (THIGH_R, [-38.0 + ee_lean, 0.0, 2.0]),
+        (SHIN_R, [70.0, 0.0, 0.0]),
+        (FOOT_R, [-80.0, 0.0, 0.0]),
+        (UPPER_L, [-65.0, 0.0, -12.0]),
+        (FORE_L, [85.0, 0.0, 0.0]),
+        (UPPER_R, [70.0, 0.0, 12.0]),
+        (FORE_R, [100.0, 0.0, 0.0]),
+    ]);
+    // The drive: the support leg pushed out straight behind, the other knee driven high.
+    let ee_drive = stand.with(&[
+        (PELVIS, [ee_lean, 0.0, -2.0]),
+        (SPINE_J, [20.0, 0.0, 0.0]),
+        (CHEST_J, [6.0, 0.0, 0.0]),
+        (NECK_J, [-30.0, 0.0, 0.0]),
+        (HEAD_J, [-6.0, 0.0, 0.0]),
+        (THIGH_L, [-24.0 + ee_lean, 0.0, -2.0]),
+        (SHIN_L, [10.0, 0.0, 0.0]),
+        (FOOT_L, [-5.0, 0.0, 0.0]),
+        (THIGH_R, [58.0 + ee_lean, 0.0, 2.0]),
+        (SHIN_R, [110.0, 0.0, 0.0]),
+        (FOOT_R, [-40.0, 0.0, 0.0]),
+        (UPPER_L, [-15.0, 0.0, -12.0]),
+        (FORE_L, [90.0, 0.0, 0.0]),
+        (UPPER_R, [20.0, 0.0, 12.0]),
+        (FORE_R, [95.0, 0.0, 0.0]),
+    ]);
+    let extra = Clip::cycle(ee_contact, ee_drive, EXTRA_EFFORT_SPEED, 0.6, 0.05);
+    // Tired: the run's shape at a sprint, arms low, head down.
     let tired = Pose::default().with(&[(SPINE_J, [5.0, 0.0, 0.0]), (NECK_J, [8.0, 0.0, 0.0]), (HEAD_J, [6.0, 0.0, 0.0]), (FORE_L, [-30.0, 0.0, 0.0]), (FORE_R, [-30.0, 0.0, 0.0])]);
     let exhausted = Clip::cycle(run_contact.plus(&tired), run_stance.plus(&tired), SPRINT_SPEED * 0.8, 0.66, 0.0);
 
