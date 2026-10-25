@@ -15,3 +15,8 @@ tools/rmx/files.txt
 # Rust build output
 target/
 game/keybinds.ron
+
+# Mixamo's character and clips are Kev's own download (royalty-free in the game, not to hand out
+# on their own): tools/mixamo_to_glb.py turns art/mixamo/raw into game/assets/characters.
+art/mixamo/
+game/assets/characters/

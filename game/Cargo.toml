@@ -7,6 +7,7 @@ edition = "2024"
 bevy = { version = "0.16", features = ["serialize"] }
 ron = "0.10"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 # Bevy is unplayably slow unoptimised; optimise dependencies, keep our crate fast to rebuild.
 [profile.dev]
