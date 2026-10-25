@@ -232,6 +232,8 @@ struct Clips {
     shot_side: [Pose; 3],
     shot_back: [Pose; 3],
     heel: [Pose; 3],
+    /// Landing out of a kick (the right foot), after its follow-through.
+    land: Pose,
     start: OneShot,
     stop: OneShot,
     turn: OneShot,
@@ -756,6 +758,26 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         ]),
     ];
 
+    // Landing out of a kick (Kev's clips): the kicking foot comes down well ahead in a long
+    // stride, the other leg trailing heel up, the body still leaning on with the arms out, so the
+    // kick carries you forward into your next step.
+    let land = stand.with(&[
+        (PELVIS, [0.0, 10.0, 0.0]),
+        (SPINE_J, [18.0, 0.0, 0.0]),
+        (CHEST_J, [4.0, -6.0, 0.0]),
+        (NECK_J, [-10.0, 0.0, 0.0]),
+        (THIGH_R, [38.0, 0.0, -4.0]),
+        (SHIN_R, [20.0, 0.0, 0.0]),
+        (FOOT_R, [-10.0, 0.0, 0.0]),
+        (THIGH_L, [-28.0, 0.0, 4.0]),
+        (SHIN_L, [55.0, 0.0, 0.0]),
+        (FOOT_L, [20.0, 0.0, 0.0]),
+        (UPPER_L, [40.0, 0.0, -55.0]),
+        (FORE_L, [30.0, 0.0, 0.0]),
+        (UPPER_R, [-30.0, 0.0, 40.0]),
+        (FORE_R, [30.0, 0.0, 0.0]),
+    ]);
+
     // Controlling the ball: lean over it, the right foot reaches out to cushion it.
     let control = Pose::default().with(&[
         (SPINE_J, [6.0, 0.0, 0.0]),
@@ -1230,6 +1252,7 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         shot_side,
         shot_back,
         heel,
+        land,
         start,
         stop,
         turn,
@@ -1290,8 +1313,8 @@ fn play_rate(speed: f32, clip: &Clip, corner: f32) -> f32 {
     if clip.speed <= 0.0 { 1.0 } else { (speed / clip.speed).clamp(0.7, 1.5) * corner }
 }
 
-/// How long a kick's leg takes to come down after its follow-through.
-const KICK_SETTLE: f32 = 0.25;
+/// How long a kick's leg takes to come down into its landing stride after the follow-through.
+const KICK_SETTLE: f32 = 0.15;
 
 fn follow_time(kind: Kick) -> f32 {
     match kind {
@@ -1661,7 +1684,7 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
     let run_out = speed > 1.5 && !p.kick_sliding();
     if let Some((t, kind)) = anim.follow.as_mut() {
         *t += dt;
-        let end = if run_out { 0.25 * follow_time(*kind) } else { follow_time(*kind) };
+        let end = if run_out { 0.25 * follow_time(*kind) + KICK_SETTLE } else { follow_time(*kind) };
         if *t > end && !p.kick_sliding() {
             anim.follow = None;
         }
@@ -1723,8 +1746,9 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
         };
         Some((key, k.kind, turn))
     } else {
-        // After the touch the leg swings on through (easing out), then comes down in front, the
-        // body rising out of it, and you glide on the standing foot while the kick slides you.
+        // After the touch the leg swings on through (easing out), then lands ahead in a long
+        // stride that carries you on (held while the kick slides you); running on, the run picks
+        // up from that stride.
         anim.follow.filter(|(_, kind)| !push(*kind)).map(|(t, kind)| {
             let ([_, hit, through], _) = keys(kind, anim.kick_turn);
             // The leg drives through to the top of its follow-through fast (about 0.1 s after a
@@ -1734,8 +1758,10 @@ pub fn animate_body(time: Res<Time>, player: Single<(&Player, &Transform)>, mut 
             let a = 1.0 - (1.0 - a) * (1.0 - a);
             let b = ((t - swing) / KICK_SETTLE).clamp(0.0, 1.0);
             let b = b * b * (3.0 - 2.0 * b);
-            let settled = clips.stand.lerp(&through, 0.35);
-            (hit.lerp(&through, a).lerp(&settled, b), kind, 0.7 + 0.15 * a)
+            // A shot across or back to the right is the left foot's: it lands on the left.
+            let left_foot = kind == Kick::Shot && anim.kick_turn < -30.0;
+            let land = if left_foot { clips.land.mirror() } else { clips.land };
+            (hit.lerp(&through, a).lerp(&land, b), kind, 0.7 + 0.15 * a)
         })
     };
     // A push ball: the right foot reaches through the ball by its touch (8f) and back, the legs
