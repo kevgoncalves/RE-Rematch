@@ -654,6 +654,58 @@ pub const DRIBBLE_FLICK_WINDUP: f32 = 16.0 / 60.0;
 pub const DRIBBLE_FLICK_RUN: [&[(f32, f32)]; 3] = [&[(0.0, 5.0), (0.15, 6.5), (1.0, 6.5)], &[(0.0, 5.0), (0.1, 6.0), (1.0, 6.0)], &[(0.0, 3.5), (0.1, 4.5), (1.0, 4.5)]];
 pub const DRIBBLE_FLICK_AFTER: (f32, &[(f32, f32)]) = (20.0 / 60.0, &[(0.0, 1.0), (1.0, 1.0)]);
 
+// Volleys (§0): first-time kicks on a loose ball you don't own. Pressed while the volley diamond
+// shows (fx::volley_target), the kick meets the ball where that query found it, when the ball gets
+// there (0.33-0.6 s on): you run there meanwhile, and no control takes the ball first.
+/// Above this the meeting point is an air candidate: the push volleys become their jumping forms.
+pub const VOLLEY_GROUND_MAX: f32 = 2.1;
+/// At the touch the ball must still be this close to where it was to be met (m), or the volley
+/// misses (something else touched it). TUNE.
+pub const VOLLEY_REACH: f32 = 1.0;
+/// The approach runs at whatever speed gets you there in time, at most the query's limit (9.2 m/s,
+/// 11 in extra effort).
+pub const VOLLEY_APPROACH_SPEED: (f32, f32) = (9.2, 11.0);
+/// Where the ball meets you at the touch, by body part (foot, thigh, stomach, chest, head, jumping
+/// chest, jumping head): (m ahead of your root, m out to the ball's side). TUNE.
+pub const VOLLEY_CONTACT: [(f32, f32); 7] = [(0.45, 0.15), (0.35, 0.12), (0.3, 0.0), (0.28, 0.0), (0.22, 0.0), (0.3, 0.0), (0.25, 0.0)];
+/// The body sets itself for the touch this long before it (the run cycle plays until then). TUNE.
+pub const VOLLEY_SET: f32 = 0.15;
+/// Jumping touches leave the ground from 16f before the touch to 22f after (the clips' fly windows
+/// around their touch), high enough for the chest (1.35 m) or the head (1.75 m) to meet the ball:
+/// 0.15 to 0.8 m. TUNE.
+pub const VOLLEY_AIR: (f32, f32) = (16.0 / 60.0, 22.0 / 60.0);
+pub const VOLLEY_JUMP_REACH: (f32, f32) = (1.35, 1.75);
+pub const VOLLEY_JUMP_LIMITS: (f32, f32) = (0.15, 0.8);
+
+// The volley push ball (§3, GA_VolleyPushBall).
+/// The body part by the ball's height (m): foot under 0.3, thigh under 0.7, stomach under 1.2, chest
+/// under 1.65, head up to 2.1 (BP_VolleyPushBallMontagePicker).
+pub const VOLLEY_PUSH_HEIGHTS: [f32; 4] = [0.30, 0.70, 1.20, 1.65];
+/// Flat at 11.25 m/s, weaker off a higher ball (1 -> 0.8 by 3 m, read at the height less 0.15 m), x1.4
+/// sprinting at the touch, x0.9 pushed 45 deg or more off your facing; and never more than 30 deg off
+/// your facing (BP_VolleyPushBallAbilityData and its BP_VolleyFastTap_* modifiers).
+pub const VOLLEY_PUSH_SPEED: f32 = 11.25;
+pub const VOLLEY_PUSH_BY_HEIGHT: [(f32, f32); 2] = [(0.0, 1.0), (3.0, 0.8)];
+pub const VOLLEY_PUSH_SPRINT: f32 = 1.4;
+pub const VOLLEY_PUSH_TURNED: (f32, f32) = (45.0, 0.9);
+pub const VOLLEY_PUSH_CLAMP: f32 = 30.0;
+/// It rolls a little short (friction x1.6) and dips (the game's Magnus -1000, our spin.y +1000).
+pub const VOLLEY_PUSH_FRICTION: f32 = BASE_FRICTION * 1.6;
+pub const VOLLEY_PUSH_SPIN: f32 = 1000.0;
+/// Above 2.1 m, the jumping head push: 9 m/s at 40 deg, x0.7 to the sides (45-135 deg off your
+/// facing), x0.65 back, default friction and no forced spin (BP_VolleyAerialPushBallAbilityData).
+pub const AERIAL_PUSH: (f32, f32) = (9.0, 40.0);
+/// The jumping push takes the ball with the chest up to here, with the head higher (m). TUNE: the
+/// data has both clips but its picker wasn't read.
+pub const VOLLEY_AERIAL_CHEST_MAX: f32 = 2.4;
+pub const AERIAL_BY_WAY: [f32; 3] = [1.0, 0.7, 0.65];
+/// After the touch you run after it at 5.5 m/s (8.5 sprinting, 5 tired: the redirect and dash
+/// data); the stick takes you back from 12f after the touch (only sprint and extra effort are
+/// allowed then), the run ends at 26f (the push-ball layer).
+pub const VOLLEY_PUSH_RUN: [&[(f32, f32)]; 3] = [&[(0.0, 5.5), (1.0, 5.5)], &[(0.0, 8.5), (1.0, 8.5)], &[(0.0, 5.0), (1.0, 5.0)]];
+pub const VOLLEY_PUSH_FREE: f32 = 12.0 / 60.0;
+pub const VOLLEY_PUSH_AFTER: f32 = 26.0 / 60.0;
+
 // Freeplay ball call
 pub const FEED_DISTANCE: f32 = 15.0; // TUNE
 pub const FEED_SPEED: f32 = 16.0; // TUNE

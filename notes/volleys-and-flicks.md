@@ -919,6 +919,29 @@ is one; anything else is a guess marked TUNE in `tuning.rs`.
   at your speed for 20f.
 - **Which one in free move:** the spec rule stands (inside a dribble, this one; else §11.1).
 
+### 11.3 The volley base, and the volley push ball (`Kick::VolleyPushBall`)
+- **One target for all:** `fx::volley_target` (the diamond's query) now returns the best point, not
+  the first: the one whose needed speed is closest to your own pace, preferring 0.4-0.6 s. That stands
+  in for the picker's speed-difference and delay weights, whose exact scoring wasn't read
+  [inferred]. The diamond only asks whether there is one, so it is unchanged.
+- **Start:** with no ball, no kick, no control and no fake shot, a pending press (push ball) with a
+  target starts the volley. The kick carries a `Volley`: the point, its time, the body part, the
+  ball's side, the way to face and the jump.
+- **Approach:** until the touch you run to where the body part meets the ball (`Volley::root`) at
+  whatever speed gets you there (at most 9.2 m/s, 11 in extra effort), turning to the volley's way by
+  the touch. No control takes the ball meanwhile.
+- **Touch:** at the target's time, if the ball is still within 1 m of the point (else it misses).
+  The green confirm follows the ball to the touch and fades there over 0.35 s.
+- **Volley push ball:** §3 exactly: 11.25 m/s flat, x(1 → 0.8 by 3 m), x1.4 sprinting at the touch,
+  x0.9 pushed 45° or more off your facing, clamped to 30° of it; friction x1.6, spin.y +1000,
+  no-control 0.5 s, cost 0.375. You then run after it at 5.5 m/s (8.5 sprinting), the stick back
+  from 12f after the touch.
+- **Above 2.1 m:** the jumping push, 9 m/s at 40° (x0.7 sideways, x0.65 back). Chest up to 2.4 m,
+  head higher: a guess, as the data's picker for it wasn't read (TUNE).
+- **Guesses (TUNE):** where each body part meets the ball (`VOLLEY_CONTACT`); the body sets itself
+  0.15 s before the touch; a jump leaves the ground 16f before to 22f after the touch, as high as the
+  chest (1.35 m) or head (1.75 m) needs, 0.15-0.8 m; the touch poses are ours.
+
 ## Sources
 **Extracted game files** (`RE Rematch (main)/tools/rmx/out` and `out_bp`):
 - **Abilities:** `GA_VolleyBaseShoot`, `GA_VolleyShoot`, `GA_VolleyTap` (+ `_LowPower`),

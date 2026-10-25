@@ -393,6 +393,60 @@ pub struct KickState {
     /// A flick's way against your facing at the press: ahead, to the side or back (its wind-up,
     /// clip and run). Ahead for every other kick.
     pub heading: Heading,
+    /// A volley's meeting with the ball (none for kicks of the ball at your feet).
+    pub volley: Option<Volley>,
+}
+
+/// The part of the body a volley meets the ball with, from the ball's height (the volley pickers).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Part {
+    Foot,
+    Thigh,
+    /// The stomach.
+    Pelvis,
+    Chest,
+    Head,
+    JumpChest,
+    JumpHead,
+}
+
+/// Where and when a volley meets the ball, fixed at the press.
+#[derive(Clone, Copy, Debug)]
+pub struct Volley {
+    /// The meeting point (the ball's centre), and when the ball gets there, from the press.
+    pub at: Vec3,
+    pub t: f32,
+    pub part: Part,
+    /// The ball meets you on your left: the left foot, the mirrored touch.
+    pub left: bool,
+    /// The way the body turns to by the touch (yaw, radians).
+    pub face: f32,
+    /// How high a jumping touch leaves the ground (m); 0 on the ground.
+    pub jump: f32,
+}
+
+impl Volley {
+    /// Where your root must be at the touch for the body part to meet the ball, facing `facing`.
+    pub fn root(&self, facing: f32) -> Vec3 {
+        let (ahead, side) = VOLLEY_CONTACT[self.part as usize];
+        let fwd = forward(facing);
+        let right = fwd.cross(Vec3::Y);
+        let at = self.at - fwd * ahead - right * if self.left { -side } else { side };
+        Vec3::new(at.x, 0.0, at.z)
+    }
+}
+
+/// A volley's body part for the ball's height `h` (m).
+fn volley_part(kind: Kick, h: f32) -> Part {
+    let parts = [Part::Foot, Part::Thigh, Part::Pelvis, Part::Chest];
+    match kind {
+        // Above 2.1 m the jumping push: the chest up to 2.4 m (a guess: the data's picker for it
+        // wasn't read; TUNE), the head higher.
+        Kick::VolleyPushBall if h > VOLLEY_AERIAL_CHEST_MAX => Part::JumpHead,
+        Kick::VolleyPushBall if h > VOLLEY_GROUND_MAX => Part::JumpChest,
+
+        _ => VOLLEY_PUSH_HEIGHTS.iter().zip(parts).find(|(top, _)| h < **top).map_or(Part::Head, |(_, part)| part),
+    }
 }
 
 impl Default for Player {
@@ -460,6 +514,9 @@ pub enum Kick {
     LobbedPushBall,
     /// The rainbow flick from inside a dribble.
     DribbleLobbedPushBall,
+    /// A first-time push of a loose ball: a soft touch on ahead, with the foot, thigh, stomach,
+    /// chest or head (a jumping head push above 2.1 m).
+    VolleyPushBall,
 }
 
 impl Kick {
@@ -470,7 +527,12 @@ impl Kick {
 
     /// The push-ball family: no hitstop, no kick marker, a push touch's effect.
     pub fn is_push(self) -> bool {
-        matches!(self, Kick::PushBall | Kick::DribblePushBall) || self.is_flick()
+        matches!(self, Kick::PushBall | Kick::DribblePushBall | Kick::VolleyPushBall) || self.is_flick()
+    }
+
+    /// First-time kicks of a loose ball.
+    pub fn is_volley(self) -> bool {
+        matches!(self, Kick::VolleyPushBall)
     }
 
     /// The held action for kicks you charge; instant kicks have none.
@@ -493,6 +555,10 @@ impl Kick {
             Kick::PushBall | Kick::DribblePushBall => PUSH_BALL_WINDUP,
             Kick::LobbedPushBall => FLICK_WINDUP_AHEAD,
             Kick::DribbleLobbedPushBall => DRIBBLE_FLICK_WINDUP,
+            // A volley's touch comes when the ball arrives (contact_time); nothing to charge, but
+            // the gauge (charge) still reads against a push ball's wind-up.
+            Kick::VolleyPushBall => PUSH_BALL_WINDUP,
+
         }
     }
 
@@ -503,7 +569,7 @@ impl Kick {
             Kick::Shot if speed >= SHOT_HIGH_POWER_SPEED => 5.0,
             Kick::Shot | Kick::Pass | Kick::Lob => 3.0,
             Kick::ShortPass | Kick::ShortLob => 2.0,
-            Kick::PushBall | Kick::DribblePushBall | Kick::LobbedPushBall | Kick::DribbleLobbedPushBall => 0.0,
+            Kick::PushBall | Kick::DribblePushBall | Kick::LobbedPushBall | Kick::DribbleLobbedPushBall | Kick::VolleyPushBall => 0.0,
         }
     }
 
@@ -852,6 +918,14 @@ pub fn player_move(
                 hand_back(p, dir_now, walking, top);
             }
         }
+    } else if let Some((k, v)) = p.kick.and_then(|k| Some((k, k.volley?))) {
+        // A volley: run to where the body meets the ball as it gets there, turning to the volley's way
+        // by the touch (the game's padding run and motion warping).
+        let left = (v.t - k.elapsed).max(dt);
+        p.facing += angle_diff(v.face, p.facing) * (dt / left).min(1.0);
+        let to = v.root(p.facing) - Vec3::new(tf.translation.x, 0.0, tf.translation.z);
+        let cap = if p.extra_active { VOLLEY_APPROACH_SPEED.1 } else { VOLLEY_APPROACH_SPEED.0 };
+        p.vel = (to / left).clamp_length_max(cap);
     } else if let Some(drag) = p.kick.and_then(|k| pass_drag(&k)) {
         // A pass or lob carries you on at your speed at the press, that way (players confirm: a pass
         // out of a dribble carries you like a shot). No steering or turning till the touch: Rematch
@@ -1113,6 +1187,10 @@ pub fn ball_control(
         return;
     }
     p.carry = None;
+    // A volley on its way owns the ball's arrival: no control takes it first.
+    if p.kick.is_some_and(|k| k.volley.is_some()) {
+        return;
+    }
     let flat = Vec2::new(btf.translation.x - ptf.translation.x, btf.translation.z - ptf.translation.z);
     // Into your own frame: x forward, y up (from the pitch), z right.
     let fwd = forward(p.facing);
@@ -1374,6 +1452,7 @@ fn effort_touch(ball_vel: Vec3, dir: Vec3, ridden: f32) -> EffortTouch {
 
 pub fn kicking(
     mut player: Single<&mut Player>,
+    root: Option<Single<&Transform, (With<Player>, Without<Ball>, Without<Camera3d>)>>,
     mut ball: Single<&mut Ball>,
     ball_tf: Single<&Transform, With<Ball>>,
     camera: Single<&Transform, (With<Camera3d>, Without<Ball>)>,
@@ -1479,11 +1558,58 @@ pub fn kicking(
             p.run = None;
             let way = if steer == Vec3::ZERO { forward(p.facing) } else { steer };
             let heading = if kind == Kick::LobbedPushBall { Heading::of(forward(p.facing).angle_between(way).to_degrees(), 45.0, 135.0) } else { Heading::Forward };
-            let k = KickState { kind, elapsed: 0.0, held: pre, pre, released, aim: Vec2::new(rig.yaw, rig.pitch), eye: camera.translation, entry: p.vel, from_dribble, steer, sprint: p.sprinting, heading };
+            let k = KickState { kind, elapsed: 0.0, held: pre, pre, released, aim: Vec2::new(rig.yaw, rig.pitch), eye: camera.translation, entry: p.vel, from_dribble, steer, sprint: p.sprinting, heading, volley: None };
             if kind.is_flick() {
                 p.run = Some(flick_windup(p, &k, way));
             }
             p.kick = Some(k);
+        }
+    }
+    // Volleys: with no ball, a press while the volley diamond shows meets the loose ball first time,
+    // where and when that query found it (the volley abilities' own target).
+    if !p.has_ball
+        && p.kick.is_none()
+        && p.receiving.is_none()
+        && p.fake.is_none()
+        && let Some(root) = root.map(|r| *r.into_inner())
+    {
+        let volleys = [(Action::PushBall, Kick::VolleyPushBall)];
+        if let Some((action, kind)) = volleys.into_iter().find(|(a, _)| actions.pending(*a))
+            && let Some(spot) = crate::fx::volley_target(p, &root, ball_tf.translation, &ball)
+        {
+            actions.consume(action);
+            let steer = if axes.movement.length() < PUSH_BALL_DEAD_ZONE { Vec3::ZERO } else { camera_relative(axes.movement.normalize(), rig.yaw).normalize() };
+            // Push volleys turn you to the push by the touch.
+            let face = if steer == Vec3::ZERO { p.facing } else { yaw_of(steer) };
+            let part = volley_part(kind, spot.at.y);
+            let jump = match part {
+                Part::JumpChest => spot.at.y - VOLLEY_JUMP_REACH.0,
+                Part::JumpHead => spot.at.y - VOLLEY_JUMP_REACH.1,
+                _ => 0.0,
+            };
+            let jump = if jump == 0.0 { 0.0 } else { jump.clamp(VOLLEY_JUMP_LIMITS.0, VOLLEY_JUMP_LIMITS.1) };
+            let left = (spot.at - root.translation).dot(forward(face).cross(Vec3::Y)) < 0.0;
+            let volley = Volley { at: spot.at, t: spot.t, part, left, face, jump };
+            p.run = None;
+            p.turn = None;
+            p.pivot = 0.0;
+            p.dribble = None;
+            axes.reset_curve();
+            p.kick = Some(KickState {
+                kind,
+                elapsed: 0.0,
+                held: 0.0,
+                pre: 0.0,
+                released: kind.charge_action().is_none(),
+                aim: Vec2::new(rig.yaw, rig.pitch),
+                eye: camera.translation,
+                entry: p.vel,
+                from_dribble: false,
+                steer,
+                sprint: p.sprinting,
+                heading: Heading::Forward,
+                volley: Some(volley),
+            });
         }
     }
     if p.receiving.is_none() {
@@ -1546,7 +1672,9 @@ pub fn kicking(
         return;
     }
     let k = p.kick.take().expect("checked above");
-    if !p.has_ball {
+    // A volley meets the loose ball if it is still where it was found (nothing else touched it).
+    let met = k.volley.is_some_and(|v| !ball.held && ball_tf.translation.distance(v.at) < VOLLEY_REACH);
+    if !p.has_ball && !met {
         return;
     }
 
@@ -1616,11 +1744,28 @@ pub fn kicking(
             let (sprint_factor, sprint_angle) = if k.sprint && !p.exhausted { DRIBBLE_FLICK_SPRINT } else { (1.0, 0.0) };
             (speed * sprint_factor, angle + sprint_angle, FLICK_FRICTION, FLICK_NO_CONTROL)
         }
+        // A flat push on, weaker off a higher ball; above 2.1 m the jumping head push lofts it.
+        Kick::VolleyPushBall if ball_tf.translation.y > VOLLEY_GROUND_MAX => {
+            let way = AERIAL_BY_WAY[Heading::of(push_angle, 45.0, 135.0) as usize];
+            (AERIAL_PUSH.0 * way, AERIAL_PUSH.1, BASE_FRICTION, PUSH_BALL_NO_CONTROL)
+        }
+        Kick::VolleyPushBall => {
+            let turned = if push_angle >= VOLLEY_PUSH_TURNED.0 { VOLLEY_PUSH_TURNED.1 } else { 1.0 };
+            let sprinting = if p.sprinting { VOLLEY_PUSH_SPRINT } else { 1.0 };
+            let height = curve(&VOLLEY_PUSH_BY_HEIGHT, ball_tf.translation.y - 0.15);
+            (VOLLEY_PUSH_SPEED * height * sprinting * turned, 0.0, VOLLEY_PUSH_FRICTION, PUSH_BALL_NO_CONTROL)
+        }
     };
     let yaw = match k.kind {
         // The extra effort auto tap goes the way your body faces, not your input.
         Kick::PushBall if p.extra_active => p.facing,
         Kick::PushBall | Kick::DribblePushBall | Kick::LobbedPushBall | Kick::DribbleLobbedPushBall => yaw_of(push_dir),
+        // Never more than 30 deg off your facing (the ground push only).
+        Kick::VolleyPushBall if ball_tf.translation.y <= VOLLEY_GROUND_MAX => {
+            let max = VOLLEY_PUSH_CLAMP.to_radians();
+            p.facing + angle_diff(yaw_of(push_dir), p.facing).clamp(-max, max)
+        }
+        Kick::VolleyPushBall => yaw_of(push_dir),
         // Toward the crosshair's point on the walls (`aim` above), turned a little against the
         // curve so the ball bends back toward it.
         Kick::Shot => crosshair_yaw(eye, aim.x, ball_tf.translation) + (side * AIM_NUDGE).to_radians(),
@@ -1645,6 +1790,7 @@ pub fn kicking(
                 Kick::Lob => LOB_FORCED_SPIN,
                 Kick::ShortLob => SHORT_LOB_FORCED_SPIN,
                 Kick::LobbedPushBall | Kick::DribbleLobbedPushBall => FLICK_SPIN,
+                Kick::VolleyPushBall if ball_tf.translation.y <= VOLLEY_GROUND_MAX => VOLLEY_PUSH_SPIN,
                 _ => 0.0,
             }
     };
@@ -1664,10 +1810,19 @@ pub fn kicking(
     if let Some(drag) = pass_drag(&k) {
         p.run = Some(Run { t: 0.0, length: PASS_AFTER_TOUCH, free_at: 0.0, dir: Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or(drag.normalize()), speeds: &[(0.0, 1.0), (1.0, 1.0)], tables: None, scale: drag.length(), exit: 180.0, soft: true, face: None });
     }
-    if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) {
+    if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall | Kick::VolleyPushBall) {
         p.own_push = 0.0;
         p.push_way = flat;
         p.push_sprinted = k.sprint;
+    }
+    // After a volley push you run after the ball (its redirect), sprint and extra effort only until
+    // 12f after the touch.
+    if k.kind == Kick::VolleyPushBall {
+        p.stamina = (p.stamina - PUSH_BALL_COST).max(0.0);
+        p.regen_wait = PUSH_BALL_REGEN_DELAY;
+        let by = angle_diff(yaw, p.facing);
+        let tables = VOLLEY_PUSH_RUN;
+        p.run = Some(Run { t: 0.0, length: VOLLEY_PUSH_AFTER, free_at: VOLLEY_PUSH_FREE, dir: flat, speeds: tables[0], tables: Some(tables), scale: 1.0, exit: RUN_TURN_LIMIT, soft: false, face: Some((p.facing, by, 0.0, 8.0 / 60.0)) });
     }
     // After a push ball you chase it on the move's own speed (extra effort keeps its running).
     if matches!(k.kind, Kick::PushBall | Kick::DribblePushBall) && !p.extra_active {
@@ -1763,6 +1918,8 @@ pub fn contact_time(k: &KickState) -> f32 {
         Kick::Shot if shot_speed(k) < SHOT_HIGH_POWER_SPEED => SHOT_LOW_POWER_CONTACT - TAP_NETWORK_MARGIN,
         Kick::Pass | Kick::Lob => PASS_CONTACT - TAP_NETWORK_MARGIN,
         Kick::LobbedPushBall if k.heading != Heading::Forward => FLICK_WINDUP_TURNED,
+        _ if k.volley.is_some() => k.volley.map_or(0.0, |v| v.t),
+
         _ => k.kind.buildup(),
     }
 }
@@ -1942,6 +2099,75 @@ mod tests {
         let b = ball(&mut app);
         let elevation = b.vel.y.atan2(Vec2::new(b.vel.x, b.vel.z).length()).to_degrees();
         assert!((b.vel.length() - 13.75).abs() < 0.01 && (elevation - 60.0).abs() < 0.1, "{} at {elevation}", b.vel);
+    }
+
+    /// The game's frame in order: move, kick, control, the ball's flight; the player at the origin
+    /// facing -z, the ball loose at `at` flying `vel`.
+    fn volley_app(at: Vec3, vel: Vec3) -> App {
+        let mut app = App::new();
+        app.init_resource::<Actions>()
+            .init_resource::<Axes>()
+            .init_resource::<Bindings>()
+            .init_resource::<Time>()
+            .add_event::<crate::ball::GoalScored>()
+            .add_systems(Update, (player_move, kicking, ball_control, crate::ball::ball_physics).chain());
+        app.world_mut().spawn((Player::default(), Transform::from_xyz(0.0, 0.9, 0.0)));
+        app.world_mut().spawn((Transform::from_translation(at), Ball { vel, friction: PASS_FRICTION, ..default() }));
+        app.world_mut().spawn((Camera3d::default(), Transform::from_xyz(0.0, 2.0, 4.0)));
+        app.world_mut().spawn(CameraRig::default());
+        app
+    }
+
+    fn ball_at(app: &mut App) -> Vec3 {
+        app.world_mut().query_filtered::<&Transform, With<Ball>>().single(app.world()).unwrap().translation
+    }
+
+    #[test]
+    fn a_volley_push_meets_the_loose_ball_first_time() {
+        // A ball rolled at you from 6 m: the push button meets it with the foot, and nothing
+        // controls it first.
+        let mut app = volley_app(Vec3::new(0.0, BALL_RADIUS, -6.0), Vec3::new(0.0, 0.0, 9.0));
+        frames(&mut app, &[Action::PushBall], 1, 1.0 / 60.0);
+        let k = player(&mut app).kick.expect("a volley push starts");
+        let v = k.volley.expect("aimed at the ball");
+        assert!(k.kind == Kick::VolleyPushBall && v.part == Part::Foot && (0.33..=0.6).contains(&v.t), "{v:?}");
+        // Timing: the touch when the ball gets to the meeting point; you ran to meet it there.
+        let n = 1 + frames_to_touch(&mut app, &[]);
+        assert!((n as f32 / 60.0 - v.t).abs() <= 1.5 / 60.0, "touch at {n}f, meeting at {}", v.t);
+        let p = player(&mut app);
+        assert!(!p.has_ball && p.receiving.is_none());
+        // The ball: pushed flat back the way you face at 11.25 m/s (a frame of its roll since),
+        // rolling short with a dip.
+        let b = ball(&mut app);
+        assert!((10.6..=VOLLEY_PUSH_SPEED).contains(&b.vel.length()) && b.vel.y.abs() < 1e-3 && b.vel.z < 0.0, "{}", b.vel);
+        assert!(b.friction == VOLLEY_PUSH_FRICTION && (0.95 * VOLLEY_PUSH_SPIN..=VOLLEY_PUSH_SPIN).contains(&b.spin.y) && b.no_control > PUSH_BALL_NO_CONTROL - 0.02);
+        assert!((player(&mut app).stamina - (MAX_STAMINA - PUSH_BALL_COST)).abs() < 1e-4);
+        // Met in front of you, where the foot reaches: you stepped up to it.
+        let at = ball_at(&mut app);
+        let root = app.world_mut().query_filtered::<&Transform, With<Player>>().single(app.world()).unwrap().translation;
+        let rel = Vec3::new(at.x - root.x, 0.0, at.z - root.z);
+        assert!(root.z < -0.5 && (0.3..0.9).contains(&-rel.z), "met at {at}, you at {root}");
+
+        // Its gauge reads as an empty one, never NaN (the body sizes the touch by it).
+        assert_eq!(charge(Kick::VolleyPushBall, 0.0), 0.0);
+        // The body part by the ball's height; above 2.1 m the jumping push.
+
+        assert_eq!(volley_part(Kick::VolleyPushBall, 0.5), Part::Thigh);
+        assert_eq!(volley_part(Kick::VolleyPushBall, 1.0), Part::Pelvis);
+        assert_eq!(volley_part(Kick::VolleyPushBall, 1.4), Part::Chest);
+        assert_eq!(volley_part(Kick::VolleyPushBall, 1.9), Part::Head);
+        assert_eq!(volley_part(Kick::VolleyPushBall, 2.3), Part::JumpChest);
+        assert_eq!(volley_part(Kick::VolleyPushBall, 2.6), Part::JumpHead);
+
+        // A jumping head push lofts it: 9 m/s at 40 deg.
+        let mut app = kick_app(false, Vec3::new(0.0, 2.6, -0.3), Vec3::ZERO);
+        let volley = Volley { at: Vec3::new(0.0, 2.6, -0.3), t: 1.0 / 60.0, part: Part::JumpHead, left: false, face: 0.0, jump: 0.8 };
+        let k = KickState { kind: Kick::VolleyPushBall, elapsed: 0.0, held: 0.0, pre: 0.0, released: true, aim: Vec2::ZERO, eye: Vec3::ZERO, entry: Vec3::ZERO, from_dribble: false, steer: Vec3::ZERO, sprint: false, heading: Heading::Forward, volley: Some(volley) };
+        app.world_mut().query::<&mut Player>().single_mut(app.world_mut()).unwrap().kick = Some(k);
+        frames_to_touch(&mut app, &[]);
+        let b = ball(&mut app);
+        let elevation = b.vel.y.atan2(Vec2::new(b.vel.x, b.vel.z).length()).to_degrees();
+        assert!((b.vel.length() - 9.0).abs() < 0.01 && (elevation - 40.0).abs() < 0.1, "{} at {elevation}", b.vel);
     }
 
     #[test]
