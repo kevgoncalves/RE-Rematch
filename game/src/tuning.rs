@@ -188,6 +188,11 @@ pub const STANCE_MIN_TIME: f32 = 0.15;
 /// Angle between facing and movement (degrees) to speed multiplier.
 pub const LOCK_SPEED_BY_ANGLE: [(f32, f32); 3] = [(0.0, 1.0), (90.0, 1.0), (180.0, 0.9)];
 pub const LOCK_BALL_SPEED_BY_ANGLE: [(f32, f32); 4] = [(0.0, 1.0), (90.0, 0.95), (135.0, 0.88), (180.0, 0.88)];
+/// Lock move's footwork at full speed, from Kev's practice recording (V1 360-375 s): side shuffles
+/// (one step out and one in), and steps going forward and back, per second.
+pub const LOCK_SIDE_SHUFFLES: f32 = 2.4;
+pub const LOCK_FORWARD_STEPS: f32 = 4.4;
+pub const LOCK_BACK_STEPS: f32 = 6.0;
 // Dash (mechanics.md §8): speed (m/s) over the seconds since the press. The game's curves are in
 // seconds: their keys fall on the dash's events (blend-in 6f, after-dash 14f, second dash free 42f).
 /// When you're free (the dash animation's blend-out), by sector: forward, side, back.

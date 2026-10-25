@@ -533,22 +533,24 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
     ]);
     let low = |p: Pose| Pose(std::array::from_fn(|j| if j >= UPPER_L { lock.0[j] } else { p.0[j] }));
     // Forward and back are a little more upright than the stance, on short steps a hip-width apart.
+    // Each cycle is two steps, at the recorded rate at full lock speed (back is 0.9 of it).
     let lock_forward = Clip::cycle(
         low(lock.with(&[(THIGH_L, [38.0, 0.0, -12.0]), (SHIN_L, [44.0, 0.0, 0.0]), (FOOT_L, [-4.0, 0.0, 12.0]), (THIGH_R, [-2.0, 0.0, 12.0]), (SHIN_R, [84.0, 0.0, 0.0]), (FOOT_R, [-62.0, 0.0, -12.0])])),
         low(lock.with(&[(THIGH_L, [18.0, 0.0, -12.0]), (SHIN_L, [54.0, 0.0, 0.0]), (FOOT_L, [-36.0, 0.0, 12.0]), (THIGH_R, [36.0, 0.0, 12.0]), (SHIN_R, [104.0, 0.0, 0.0]), (FOOT_R, [-56.0, 0.0, -12.0])])),
-        4.5,
-        0.62,
+        LOCK_SPEED,
+        2.0 / LOCK_FORWARD_STEPS,
         0.0,
     );
     let lock_back = Clip::cycle(
         low(lock.with(&[(THIGH_L, [0.0, 0.0, -14.0]), (SHIN_L, [54.0, 0.0, 0.0]), (FOOT_L, [-44.0, 0.0, 14.0]), (THIGH_R, [32.0, 0.0, 14.0]), (SHIN_R, [58.0, 0.0, 0.0]), (FOOT_R, [-26.0, 0.0, -14.0])])),
         low(lock.with(&[(THIGH_L, [20.0, 0.0, -14.0]), (SHIN_L, [50.0, 0.0, 0.0]), (FOOT_L, [-30.0, 0.0, 14.0]), (THIGH_R, [10.0, 0.0, 14.0]), (SHIN_R, [94.0, 0.0, 0.0]), (FOOT_R, [-58.0, 0.0, -14.0])])),
-        4.0,
-        0.58,
+        LOCK_SPEED * LOCK_SPEED_BY_ANGLE[2].1,
+        2.0 / LOCK_BACK_STEPS,
         0.0,
     );
     // Strafing right (the game's side cycle runs 44f; Kev found four scissor steps in it too
-    // busy): one stride per cycle, a step-together shuffle. The right foot lifts and reaches out with
+    // busy): one stride per cycle, a step-together shuffle, 2.4 a second at full speed as in Kev's
+    // recording (the feet glide a little, as there). The right foot lifts and reaches out with
     // the weight on the left, lands wide (about 1 m), the left lifts and comes in, and you land again
     // about 0.4 m apart: never feet together, never crossing. The narrower the feet, the deeper the
     // knees, so the hips stay level.
@@ -586,7 +588,7 @@ static CLIPS: LazyLock<Clips> = LazyLock::new(|| {
         (SHIN_R, [81.0, 0.0, 0.0]),
         (FOOT_R, [-41.0, 0.0, -9.0]),
     ]);
-    let lock_right = Clip { keys: [reach, wide, gather, narrow], speed: 4.0, duration: 44.0 / 60.0, flight: 0.015 };
+    let lock_right = Clip { keys: [reach, wide, gather, narrow], speed: LOCK_SPEED, duration: 1.0 / LOCK_SIDE_SHUFFLES, flight: 0.015 };
 
     // A shot (the right foot): the leg cocks far back with the hips turned away and the left arm
     // thrown out; the hips whip round through the ball with the body over it; the leg swings on up
@@ -2062,6 +2064,19 @@ mod tests {
         assert_eq!(play_rate(1.0, run, 1.0), 0.7);
         assert_eq!(play_rate(20.0, run, 1.0), 1.5);
         assert!((play_rate(RUN_SPEED, run, 1.15) - 1.15).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lock_move_steps_at_the_recorded_rhythm() {
+        // Cycles a second at full lock speed: a shuffle each, or two steps each going ahead or back.
+        let per_second = |c: Cycle, speed: f32| {
+            let clip = CLIPS.get(c);
+            play_rate(speed, clip, 1.0) / clip.duration
+        };
+        assert!((per_second(Cycle::LockRight, LOCK_SPEED) - LOCK_SIDE_SHUFFLES).abs() < 0.01);
+        assert!((per_second(Cycle::LockLeft, LOCK_SPEED) - LOCK_SIDE_SHUFFLES).abs() < 0.01);
+        assert!((2.0 * per_second(Cycle::LockForward, LOCK_SPEED) - LOCK_FORWARD_STEPS).abs() < 0.01);
+        assert!((2.0 * per_second(Cycle::LockBack, LOCK_SPEED * LOCK_SPEED_BY_ANGLE[2].1) - LOCK_BACK_STEPS).abs() < 0.01);
     }
 
     #[test]
